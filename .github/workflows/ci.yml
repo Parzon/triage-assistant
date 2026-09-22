@@ -77,6 +77,11 @@ jobs:
           if docker run --rm --entrypoint sh triage-assistant-api:ci -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then
             echo "::error::dev tooling found in the production image"; exit 1
           fi
+      - name: Production image imports every module (no dev-only dependency leaks)
+        # Tests run with dev dependencies installed, so an import that only
+        # resolves through a test tool passes CI and crashes production.
+        run: docker run --rm --entrypoint python triage-assistant-api:ci -c "import app.main, app.triage, app.llm, app.routes.chat"
+
 
   web-build:
     runs-on: ubuntu-24.04
@@ -92,8 +97,29 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
       - name: Build production web image and validate its nginx config
         run: |
           docker build --target production -t triage-assistant-web:ci .
           docker run --rm --entrypoint nginx triage-assistant-web:ci -t
+
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The production-shaped stack exactly as `make prod-up` runs it
+      # (nginx, gunicorn, read-only containers), with the mock LLM.
+      - run: cp .env.example .env
+      - run: make prod-up
+      - name: Browser tests through nginx
+        run: make e2e
+      - name: Stack logs
+        if: failure()
+        run: docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml logs --no-color --tail=200
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report
+          if-no-files-found: ignore

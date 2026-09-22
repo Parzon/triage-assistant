@@ -1,6 +1,6 @@
 # ADR-0001: Standard shape for AI-idea-to-production projects
 
-**Status:** accepted
+**Status:** accepted — streaming wire format superseded by ADR-0007
 **Date:** 2026-09-22
 
 ## Context

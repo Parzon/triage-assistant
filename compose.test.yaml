@@ -7,9 +7,17 @@ services:
   api:
     environment:
       APP_ENV: test
-      # Small limits so the rate-limit tests are fast.
+      # Small limits and short timeouts keep the failure-mode tests fast.
       ALERTS_RATE_LIMIT: "5"
-      CHAT_RATE_LIMIT: "3"
+      CHAT_RATE_LIMIT: "30"
+      LLM_READ_TIMEOUT_S: "1"
+      LLM_MAX_RETRIES: "0"
+      SSE_HEARTBEAT_S: "0.2"
+      MOCK_LLM_ADMIN_URL: http://mock-llm:8020/_admin
+    depends_on:
+      # Test-only: the chat tests drive the mock's failure modes.
+      mock-llm:
+        condition: service_healthy
 
   db:
     # Durability off: a test database that loses data on a crash is fine,

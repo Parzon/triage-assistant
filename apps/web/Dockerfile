@@ -8,6 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 
 # ---- dev: Vite dev server; compose bind-mounts the source over /app -------
 FROM deps AS dev
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 COPY . .
 EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

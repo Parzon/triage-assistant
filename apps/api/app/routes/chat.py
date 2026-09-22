@@ -1,14 +1,16 @@
-"""Streaming chat. The generator is a placeholder until the LLM seam
-lands (issue #11); the transport - SSE over a POST - is final."""
+"""Streaming chat over SSE (POST, so the question travels in a JSON body -
+the browser's EventSource can only GET)."""
 
-import asyncio
-from collections.abc import AsyncIterator
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
-
+from app.config import Settings
+from app.logs import request_id_var
+from app.models import Alert
 from app.ratelimit import rate_limit
 from app.schemas import ChatRequest
+from app.sse import SSEResponse
+from app.triage import answer_events, build_messages
 
 router = APIRouter(tags=["chat"])
 
@@ -20,15 +22,22 @@ SSE_HEADERS = {
 }
 
 
-async def token_stream(message: str) -> AsyncIterator[str]:
-    for word in f"Echo: {message}".split():
-        yield f"data: {word}\n\n"
-        await asyncio.sleep(0.15)
-    yield "data: [DONE]\n\n"
-
-
 @router.post("/chat/stream", dependencies=[Depends(rate_limit("chat", "chat_rate_limit"))])
-async def chat_stream(payload: ChatRequest) -> StreamingResponse:
-    return StreamingResponse(
-        token_stream(payload.message), media_type="text/event-stream", headers=SSE_HEADERS
+async def chat_stream(payload: ChatRequest, request: Request) -> SSEResponse:
+    state = request.app.state
+    settings: Settings = state.settings
+    # Context is loaded before the response starts: a database failure is
+    # still a clean JSON 503, and no connection is held while the model
+    # streams for tens of seconds.
+    async with state.sessionmaker() as session:
+        recent = select(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
+        alerts = list(await session.scalars(recent.limit(settings.chat_context_alerts)))
+    events = answer_events(
+        state.llm,
+        build_messages(payload.message, alerts),
+        request_id=request_id_var.get(),
+        alerts_in_context=len(alerts),
+        stream_timeout_s=settings.llm_stream_timeout_s,
+        heartbeat_s=settings.sse_heartbeat_s,
     )
+    return SSEResponse(events, headers=SSE_HEADERS)

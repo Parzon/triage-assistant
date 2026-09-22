@@ -43,6 +43,27 @@ class Settings(BaseSettings):
     alerts_rate_limit: int = Field(60, ge=1)
     chat_rate_limit: int = Field(10, ge=1)
 
+    # --- LLM: any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, LiteLLM,
+    # vLLM, Ollama, tools/mock-llm). The SDK's own defaults are a 600s read
+    # timeout and 2 retries - never rely on them for an interactive request.
+    llm_base_url: str
+    llm_api_key: SecretStr
+    llm_model: str
+    llm_connect_timeout_s: float = Field(5.0, gt=0)
+    # Longest silence tolerated between two streamed chunks (time to first
+    # token included). Not the total: that is llm_stream_timeout_s.
+    llm_read_timeout_s: float = Field(60.0, gt=0)
+    llm_stream_timeout_s: float = Field(120.0, gt=0)
+    # Retries happen before the first token only; each one is added latency
+    # the user watches, so keep it low for chat.
+    llm_max_retries: int = Field(1, ge=0)
+    llm_max_output_tokens: int = Field(800, ge=1)
+    chat_context_alerts: int = Field(20, ge=0)
+    # SSE comment sent when nothing else has been for this long, so proxies
+    # and load balancers (idle timeouts of ~60s) keep the stream open while
+    # the model is still thinking.
+    sse_heartbeat_s: float = Field(15.0, gt=0)
+
     @field_validator("database_url")
     @classmethod
     def _postgres_url(cls, value: SecretStr) -> SecretStr:
