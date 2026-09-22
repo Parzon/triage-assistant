@@ -17,9 +17,17 @@ services:
     build:
       context: ./apps/api
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The app role, through PgBouncer. Plain postgresql:// - the app picks
+      # the async driver itself.
+      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+      # nginx and the Vite dev proxy serve the api under /api.
+      ROOT_PATH: /api
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_healthy
       redis:
@@ -31,6 +39,22 @@ services:
       start_period: 10s
       retries: 3
     restart: unless-stopped
+    logging: *logging
+
+  # One-shot: applies migrations, then exits 0. `up` re-runs it every time
+  # (a no-op when the schema is current); the api waits for it to succeed.
+  migrate:
+    build:
+      context: ./apps/api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The schema owner, directly to Postgres (not through PgBouncer).
+      MIGRATIONS_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
     logging: *logging
 
   web:
@@ -45,13 +69,23 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}
       POOL_MODE: transaction
+      # Postgres stores passwords as SCRAM. With the image's default (md5)
+      # PgBouncer cannot answer the server's SCRAM challenge: every real
+      # query fails with "server login failed: wrong password type".
+      AUTH_TYPE: scram-sha-256
+      # Real server connections per database/user pair, and how many
+      # clients (app connections) may queue for them.
+      DEFAULT_POOL_SIZE: 20
+      MAX_CLIENT_CONN: 500
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      # PgBouncer speaks the Postgres wire protocol, so pg_isready works on it.
+      # Speaks the Postgres protocol, so pg_isready works - but note it does
+      # not authenticate; /ready on the api is the check that proves the
+      # whole path (auth included).
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432"]
       interval: 5s
       timeout: 3s
@@ -65,11 +99,15 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
     # Docker's default 64MB /dev/shm is too small for parallel queries
     # ("could not resize shared memory segment").
     shm_size: 256mb
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Runs once, on an empty volume only.
+      - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # $$ defers expansion to the container's shell (its own env), not compose.
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]

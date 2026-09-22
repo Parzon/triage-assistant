@@ -1,0 +1,17 @@
+# Test overlay, used by `make test` (locally and in CI, same command):
+#   docker compose -p triage-assistant-test \
+#     -f compose.yaml -f compose.override.yaml -f compose.test.yaml run --rm api pytest
+# A separate project name means separate containers, network and volumes:
+# tests never see dev data, and `make test` deletes everything afterwards.
+services:
+  api:
+    environment:
+      APP_ENV: test
+      # Small limits so the rate-limit tests are fast.
+      ALERTS_RATE_LIMIT: "5"
+      CHAT_RATE_LIMIT: "3"
+
+  db:
+    # Durability off: a test database that loses data on a crash is fine,
+    # and every commit skips the disk flush.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
