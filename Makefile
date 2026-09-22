@@ -17,7 +17,7 @@ S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check lint fmt typecheck test test-api test-web test-fast e2e check \
-        deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
+        image-check deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -139,6 +139,19 @@ e2e: ## Browser tests (Playwright) against the running production stack: make pr
 	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'
 
 check: lint typecheck test ## Everything CI checks, before you push
+
+# The production api image, checked the way CI checks it (CI calls this target).
+IMG := triage-assistant-api:check
+image-check: ## Build the production api image; assert non-root, no dev tools, every module imports
+	docker build -q --target production -t $(IMG) apps/api >/dev/null
+	test "$$(docker run --rm --entrypoint id $(IMG) -u)" = "10001"
+	@if docker run --rm --entrypoint sh $(IMG) -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then \
+	  echo "dev tooling found in the production image"; exit 1; fi
+	@# Tests run with dev dependencies installed, so an import that only resolves
+	@# through a test tool passes CI and crashes production. Read-only rootfs +
+	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
+	docker run --rm --read-only --tmpfs /tmp --entrypoint python $(IMG) -c "import app.main, app.triage, app.llm, app.routes.chat, app.metrics"
+	@echo "production image: non-root, no dev tools, all modules import"
 
 # --- Dependencies --------------------------------------------------------------
 # Lockfiles are updated inside the container (same uv/npm as CI), as your

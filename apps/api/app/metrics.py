@@ -29,6 +29,13 @@ from prometheus_client import (
 )
 from starlette.responses import Response
 
+# gunicorn's on_starting hook creates (and empties) this directory for the
+# server. Any other process importing this module - a one-off script, a
+# `docker exec` debugging session - would otherwise crash here: metric
+# objects open their files as soon as they are defined.
+if _multiproc_dir := os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+    os.makedirs(_multiproc_dir, exist_ok=True)
+
 # Seconds. Buckets decide which quantiles can be answered accurately:
 # they bracket the latencies we care about, from 5ms to 10s.
 HTTP_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
