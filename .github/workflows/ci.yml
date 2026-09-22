@@ -21,3 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t triage-assistant-api ./apps/api
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: cd apps/web && npm ci
+      - run: cd apps/web && npm run build
