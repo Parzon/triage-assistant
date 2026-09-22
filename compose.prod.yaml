@@ -9,6 +9,7 @@ services:
       target: production
     image: ${IMAGE_PREFIX:-triage-assistant}-api:${IMAGE_TAG:-local}
     environment:
+      APP_ENV: prod
       # Worker count follows the CPU limit below (gunicorn.conf.py). To pin
       # it, add WEB_CONCURRENCY: "<n>" - never an empty value: gunicorn
       # parses WEB_CONCURRENCY at import time and crashes on "".
@@ -28,6 +29,16 @@ services:
         limits:
           cpus: "${API_CPUS:-2}"
           memory: 1g
+
+  migrate:
+    build:
+      target: production
+    image: ${IMAGE_PREFIX:-triage-assistant}-api:${IMAGE_TAG:-local}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
   web:
     build:

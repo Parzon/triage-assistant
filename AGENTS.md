@@ -23,6 +23,12 @@ Run `make` to list every target. The ones you need most:
 - After any dependency change: `make rebuild` — NOT `docker compose up
   --build`, which keeps the old `.venv`/`node_modules` anonymous volume
 - Production-shaped stack locally: `make prod-up` (nginx on `HTTP_PORT`)
+- Tests: `make test` (full suite + coverage gate in a throwaway stack, the
+  same command CI runs), `make test-fast` (unit only, seconds)
+- Types: `make typecheck` (mypy strict). Before pushing: `make check`
+- Schema change: edit `app/models.py`, then `make migration m="..."`,
+  review the generated file (autogenerate misses renames and some
+  constraint changes), `make migrate`
 
 ## Docs — when to write which
 
@@ -42,8 +48,11 @@ deployment pattern), even if nobody asked for it.
   this is a real project repo, not the practice workspace.
 
 ## Testing instructions
-Every new endpoint needs at least one test before it's considered done.
-Don't report a task complete without a passing local test run.
+Every new endpoint needs tests for its success path and its failure
+paths (validation, not found, dependency down). Unit tests go in
+`apps/api/tests/unit` (no services), anything touching Postgres/Redis in
+`apps/api/tests/integration`. Coverage below 85% fails CI. Don't report a
+task complete without a green `make check`.
 
 ## Contribution conventions
 Branch naming: `type/<issue-number>-<short-desc>`. PRs reference an

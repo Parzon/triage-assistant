@@ -4,15 +4,66 @@ version = "0.1.0"
 description = "triage-assistant API: alert intake, triage chat (LLM streaming), health/readiness"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
     "gunicorn>=26.2.0",
+    "pydantic-settings>=2.15.0",
     "redis>=8.1.0",
-    "slowapi>=0.1.10",
+    "sqlalchemy[asyncio]>=2.0.54",
     "uvicorn-worker>=0.4",
     "uvicorn[standard]>=0.53",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle, pyflakes
+    "I",             # import order
+    "B",             # bugbear: likely bugs
+    "UP",            # modern syntax for the target Python
+    "S",             # bandit: security smells
+    "ASYNC",         # blocking calls inside async functions (event-loop stalls)
+    "DTZ",           # timezone-naive datetimes
+    "SIM", "C4", "RUF", "PT",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]    # asserts and fake credentials are fine in tests
+# 0.0.0.0 is the point inside a container; /dev/shm is a deliberate RAM-backed heartbeat dir
+"gunicorn.conf.py" = ["S104", "S108"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["app"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["integration: needs Postgres, PgBouncer and Redis - run via `make test`"]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true

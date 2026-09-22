@@ -8,8 +8,10 @@ platforms (ECS, Kubernetes) without a rebuild.
 import os
 from pathlib import Path
 
+from app.logs import logging_config
 
-def available_cpus() -> int:
+
+def available_cpus(cpu_max: Path = Path("/sys/fs/cgroup/cpu.max")) -> int:
     """CPUs this container may actually use.
 
     os.cpu_count() reports the host's cores even inside a CPU-limited
@@ -18,7 +20,7 @@ def available_cpus() -> int:
     when unlimited. sched_getaffinity() covers `--cpuset-cpus`.
     """
     try:
-        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        quota, period = cpu_max.read_text().split()
         if quota != "max":
             return max(1, -(-int(quota) // int(period)))  # ceiling division
     except (OSError, ValueError):
@@ -65,3 +67,7 @@ worker_tmp_dir = "/dev/shm"
 # file sets "*" because the api is reachable only through nginx, which
 # overwrites X-Forwarded-For (see apps/web/nginx/snippets/proxy.conf).
 forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,::1")
+
+# Gunicorn's own lines (master boot, worker timeouts) in the same JSON
+# format as the application's.
+logconfig_dict = logging_config(os.environ.get("LOG_LEVEL", "INFO"))
