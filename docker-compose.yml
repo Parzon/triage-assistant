@@ -1,15 +1,36 @@
 services:
   api:
-    build: ./apps/api
+    build:
+      context: ./apps/api
+      # dev stage: bind-mounted source + --reload. Production builds
+      # use --target production instead (gunicorn, non-root, no mount).
+      target: dev
     ports:
       - "8010:8010"
+    volumes:
+      - ./apps/api:/api
+      # Anonymous volume for .venv - without this, the bind mount above
+      # would shadow the .venv that was built INTO the image, since the
+      # host has no .venv at this path. Same trick as web's node_modules.
+      - /api/.venv
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
+      # gunicorn.conf.py defaults to (2 x cores + 1), reading the HOST's
+      # core count, not a real allocation - dangerous for local dev on
+      # a big dev box. Explicit override here; production sets its own
+      # value sized to whatever CPU allocation it actually has.
+      - WEB_CONCURRENCY=2
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     depends_on:
       pgbouncer:
-        condition: service_started
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -25,14 +46,21 @@ services:
     restart: unless-stopped
 
   web:
-    build: ./apps/web
+    build:
+      context: ./apps/web
+      # Explicit: this is the dev stage (source bind-mounted, hot
+      # reload). Production builds use `--target production` instead,
+      # which builds static files and serves them via nginx - see
+      # apps/web/Dockerfile and gold_standard_development_guide.md.
+      target: dev
     ports:
       - "5173:5173"
     volumes:
       - ./apps/web:/app
       - /app/node_modules
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   pgbouncer:
@@ -41,6 +69,14 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - POOL_MODE=transaction
     restart: unless-stopped
+    healthcheck:
+      # pgbouncer speaks the real Postgres wire protocol, so pg_isready
+      # (bundled in this image) works against it directly, same tool
+      # already used for the real db healthcheck below.
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     depends_on:
       db:
         condition: service_healthy
