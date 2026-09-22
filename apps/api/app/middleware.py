@@ -16,6 +16,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.errors import error_response
 from app.logs import request_id_var
+from app.metrics import http_duration, http_in_progress, http_requests
 
 log = logging.getLogger(__name__)
 access_log = logging.getLogger("app.access")
@@ -65,6 +66,7 @@ class RequestContextMiddleware:
             started = started or message["type"] == "http.response.start"
             await send_wrapper(message)
 
+        http_in_progress.inc()
         try:
             await self.app(scope, receive, tracking_send)
         except Exception as exc:
@@ -78,13 +80,19 @@ class RequestContextMiddleware:
                 scope, receive, send_wrapper
             )
         finally:
+            http_in_progress.dec()
+            duration = time.perf_counter() - start
+            route = route_template(scope)
+            if route != "/metrics":  # scrapes every 15s would drown real traffic
+                http_requests.labels(scope["method"], route, str(status)).inc()
+                http_duration.labels(scope["method"], route).observe(duration)
             access_log.info(
                 "request",
                 extra={
                     "method": scope["method"],
-                    "route": route_template(scope),
+                    "route": route,
                     "status": status,
-                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "duration_ms": round(duration * 1000, 2),
                     "client": (scope.get("client") or ("-",))[0],
                 },
             )

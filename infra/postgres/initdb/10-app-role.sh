@@ -3,10 +3,11 @@
 # Editing this file does nothing to an existing volume: recreate it
 # (`make nuke`) or apply the change with a migration/by hand.
 #
-# Two roles, least privilege:
+# Roles, least privilege:
 #   POSTGRES_USER  owns the schema; migrations run as it (direct to Postgres).
 #   APP_DB_USER    what the api uses (through PgBouncer): read/write rows,
 #                  cannot create, alter or drop anything.
+#   MONITOR_DB_USER  statistics only (pg_monitor), for postgres-exporter.
 set -euo pipefail
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
@@ -26,4 +27,14 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"app_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO :"app_user";
+SQL
+
+# Monitoring: a role that can read statistics (pg_monitor) and nothing else,
+# for postgres-exporter; and the extension that records per-query timing
+# (loaded via shared_preload_libraries in compose.yaml).
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+  -v monitor_user="$MONITOR_DB_USER" -v monitor_password="$MONITOR_DB_PASSWORD" <<'SQL'
+CREATE ROLE :"monitor_user" LOGIN PASSWORD :'monitor_password';
+GRANT pg_monitor TO :"monitor_user";
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 SQL

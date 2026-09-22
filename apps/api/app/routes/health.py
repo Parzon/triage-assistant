@@ -17,8 +17,10 @@ import asyncio
 from collections.abc import Awaitable
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
+
+from app.metrics import metrics_response
 
 router = APIRouter(tags=["health"])
 
@@ -57,3 +59,9 @@ async def _probe(check: Awaitable[object], *, timeout_s: float) -> bool:
     except Exception:
         return False
     return True
+
+
+# Scraped by Prometheus on the private network; nginx refuses /api/metrics.
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return metrics_response()

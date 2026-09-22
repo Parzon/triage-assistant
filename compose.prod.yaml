@@ -77,3 +77,50 @@ services:
         limits:
           cpus: "0.5"
           memory: 256m
+
+  # Observability. Dashboards listen on the VM's loopback only: reach them
+  # through an SSH tunnel (ssh -L 3000:127.0.0.1:3000 <vm>), never on a
+  # public interface. Limits sized from measured idle use (make obs-up;
+  # docker stats) with headroom: grafana ~320MiB, prometheus ~64MiB (grows
+  # with series count and retention), exporters 10-30MiB each.
+  grafana:
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  prometheus:
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  alertmanager:
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+  cadvisor:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  postgres-exporter:
+    deploy: {resources: {limits: {memory: 64m}}}
+
+  pgbouncer-exporter:
+    deploy: {resources: {limits: {memory: 64m}}}
+
+  redis-exporter:
+    deploy: {resources: {limits: {memory: 64m}}}
+
+  node-exporter:
+    deploy: {resources: {limits: {memory: 64m}}}

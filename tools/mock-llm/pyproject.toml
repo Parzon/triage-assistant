@@ -5,5 +5,6 @@ description = "OpenAI-compatible mock LLM server with tunable latency and failur
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.141.1",
+    "prometheus-client>=0.23",
     "uvicorn[standard]>=0.53",
 ]

@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict
 
 from app.llm import LLMClient, LLMError, LLMTimeout, Usage
+from app.metrics import llm_active_streams, llm_duration, llm_requests, llm_tokens, llm_ttft
 from app.models import Alert
 from app.sse import HEARTBEAT, sse
 
@@ -78,6 +79,10 @@ async def answer_events(
     start = time.perf_counter()
     ttft_s: float | None = None
     usage: Usage | None = None
+    # Anything that ends the stream without reaching "ok" or an error code -
+    # a client hang-up, i.e. cancellation or aclose() - counts as cancelled.
+    outcome = "cancelled"
+    llm_active_streams.inc()
     yield sse(
         "meta",
         {"request_id": request_id, "model": llm.model, "alerts_in_context": alerts_in_context},
@@ -93,6 +98,7 @@ async def answer_events(
             if item is _END:
                 break
             if isinstance(item, Exception):
+                outcome = item.code if isinstance(item, LLMError) else "internal_error"
                 yield _error_event(item, request_id)
                 return
             if isinstance(item, Usage):
@@ -100,6 +106,7 @@ async def answer_events(
                 continue
             if ttft_s is None:
                 ttft_s = time.perf_counter() - start
+                llm_ttft.labels(llm.model).observe(ttft_s)
             yield sse("token", {"delta": item})
         duration_s = time.perf_counter() - start
         log.info(
@@ -110,6 +117,7 @@ async def answer_events(
                 "completion_tokens": usage.completion_tokens if usage else None,
             },
         )
+        outcome = "ok"
         yield sse(
             "done",
             {
@@ -124,6 +132,12 @@ async def answer_events(
         producer.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await producer
+        llm_active_streams.dec()
+        llm_requests.labels(llm.model, outcome).inc()
+        llm_duration.labels(llm.model, outcome).observe(time.perf_counter() - start)
+        if usage is not None:
+            llm_tokens.labels(llm.model, "prompt").inc(usage.prompt_tokens)
+            llm_tokens.labels(llm.model, "completion").inc(usage.completion_tokens)
 
 
 def _error_event(exc: Exception, request_id: str) -> str:

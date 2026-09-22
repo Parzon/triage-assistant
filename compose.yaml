@@ -31,6 +31,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:8020/v1}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-mock-1}
+      # Shared with Alertmanager (secret below); empty = webhook disabled.
+      ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -95,6 +97,8 @@ services:
       # clients (app connections) may queue for them.
       DEFAULT_POOL_SIZE: 20
       MAX_CLIENT_CONN: 500
+      # May run SHOW STATS/POOLS on the admin console (pgbouncer-exporter).
+      STATS_USERS: ${APP_DB_USER}
     depends_on:
       db:
         condition: service_healthy
@@ -117,6 +121,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       APP_DB_USER: ${APP_DB_USER}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      MONITOR_DB_USER: ${MONITOR_DB_USER}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD}
+    # pg_stat_statements records timing for every distinct query: the first
+    # place to look for "which query is slow" (make psql, then the queries
+    # in the handbook's performance chapter).
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
     # Docker's default 64MB /dev/shm is too small for parallel queries
     # ("could not resize shared memory segment").
     shm_size: 256mb
@@ -149,5 +159,142 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # --- Observability (profile "observability") -----------------------------
+  # Enable with COMPOSE_PROFILES=mock,observability in .env, or `make obs-up`.
+  # Note `docker compose --profile observability ...` REPLACES the profiles
+  # from .env (the mock would drop out); list them all instead.
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Both caps: whichever is hit first. Without a size cap, a busy
+      # Prometheus on a small VM fills the disk.
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      # POST /-/reload re-reads config and rules without a restart.
+      - --web.enable-lifecycle
+      # Accepts client-side metrics pushed by k6 load tests.
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./infra/observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    logging: *logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    profiles: ["observability"]
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./infra/observability/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    # Its config file cannot read environment variables; the webhook token
+    # arrives as a file under /run/secrets instead.
+    secrets:
+      - alertmanager_webhook_token
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # Dashboards readable without login; changing anything needs admin.
+      # Behind SSO in a real environment, not open like this.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # No phone-home from inside a corporate network.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+    logging: *logging
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    profiles: ["observability"]
+    command: ["--collector.stat_statements"]
+    environment:
+      # A pg_monitor role: can read statistics, nothing else.
+      DATA_SOURCE_URI: db:5432/${POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_USER: ${MONITOR_DB_USER}
+      DATA_SOURCE_PASS: ${MONITOR_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  pgbouncer-exporter:
+    image: quay.io/prometheuscommunity/pgbouncer-exporter:v0.12.1
+    profiles: ["observability"]
+    command:
+      - --pgBouncer.connectionString=postgres://${APP_DB_USER}:${APP_DB_PASSWORD}@pgbouncer:5432/pgbouncer?sslmode=disable
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.91.1
+    profiles: ["observability"]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    restart: unless-stopped
+    logging: *logging
+
+  # Host metrics (CPU, memory, disk). In a bridge network its network
+  # metrics describe its own container, not the host - fine for the disk
+  # and memory alerts that matter here.
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    profiles: ["observability"]
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+    logging: *logging
+
+  # Per-container CPU/memory (the api's multiprocess metrics cannot report
+  # process resources). Reads Docker's state from the host, hence privileged.
+  # Newer releases are published on ghcr.io; gcr.io stopped at v0.52.
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    profiles: ["observability"]
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      # Export only these container labels: by default every label of every
+      # container becomes a Prometheus label (unbounded cardinality).
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.project,com.docker.compose.service
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+    logging: *logging
+
+secrets:
+  alertmanager_webhook_token:
+    environment: ALERTMANAGER_WEBHOOK_TOKEN
+
 volumes:
   pgdata:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

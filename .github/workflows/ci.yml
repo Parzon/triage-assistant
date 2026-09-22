@@ -36,6 +36,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - name: Observability config (Prometheus config, alert rule unit tests, Alertmanager config)
+        working-directory: .
+        run: make obs-check
 
   test-api:
     runs-on: ubuntu-24.04
@@ -67,21 +70,9 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build production api image
-        run: docker build --target production -t triage-assistant-api:ci apps/api
-      - name: Image runs as non-root and carries no dev tooling
-        # Explicit if/exit rather than `! cmd`: bash exempts negated
-        # commands from `set -e`, so `!` only fails a step on its last line.
-        run: |
-          test "$(docker run --rm --entrypoint id triage-assistant-api:ci -u)" = "10001"
-          if docker run --rm --entrypoint sh triage-assistant-api:ci -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then
-            echo "::error::dev tooling found in the production image"; exit 1
-          fi
-      - name: Production image imports every module (no dev-only dependency leaks)
-        # Tests run with dev dependencies installed, so an import that only
-        # resolves through a test tool passes CI and crashes production.
-        run: docker run --rm --entrypoint python triage-assistant-api:ci -c "import app.main, app.triage, app.llm, app.routes.chat"
-
+      # Builds the production api image and asserts: runs as UID 10001, no
+      # dev tooling inside, every module imports under a read-only rootfs.
+      - run: make image-check
 
   web-build:
     runs-on: ubuntu-24.04

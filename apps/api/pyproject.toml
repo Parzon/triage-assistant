@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "gunicorn>=26.2.0",
     "openai>=3.17",
+    "prometheus-client>=0.23",
     "pydantic-settings>=2.15.0",
     "redis>=8.1.0",
     "sqlalchemy[asyncio]>=2.0.54",

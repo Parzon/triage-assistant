@@ -16,8 +16,8 @@ AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock lint fmt typecheck test test-api test-web test-fast e2e check \
-        deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
+        migrate migration mock obs-up obs-down obs-check lint fmt typecheck test test-api test-web test-fast e2e check \
+        image-check deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -66,6 +66,25 @@ migrate: ## Apply migrations to the dev database (also runs on every `make up`)
 migration: ## New migration from model changes: make migration m="add alert source index"
 	@test -n "$(m)" || { echo 'usage: make migration m="<what changes>"'; exit 2; }
 	$(DEV) run --rm $(AS_ME) migrate alembic revision --autogenerate -m "$(m)"
+
+# --- Observability --------------------------------------------------------------
+# Profiles from .env plus "observability". Not `--profile observability`: a
+# --profile flag REPLACES the profiles in .env (the mock LLM would drop out).
+WITH_OBS := COMPOSE_PROFILES="$$(sed -n 's/^COMPOSE_PROFILES=//p' .env),observability"
+
+obs-up: ## Start Prometheus, Alertmanager, Grafana + exporters next to the dev stack
+	$(WITH_OBS) $(DEV) up -d
+	@echo "Grafana http://localhost:$${GRAFANA_PORT:-3000}  Prometheus http://localhost:$${PROMETHEUS_PORT:-9090}"
+
+obs-down: ## Stop the observability containers (dev stack keeps running)
+	$(WITH_OBS) $(DEV) stop prometheus alertmanager grafana postgres-exporter pgbouncer-exporter redis-exporter node-exporter cadvisor
+
+OBS := $(CURDIR)/infra/observability
+obs-check: ## Validate Prometheus config, unit-test alert rules, validate Alertmanager config
+	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/etc/prometheus:ro" prom/prometheus:v3.14.0 check config /etc/prometheus/prometheus.yml
+	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/p:ro" -w /p prom/prometheus:v3.14.0 test rules alerts.test.yml
+	docker run --rm --entrypoint amtool -v "$(OBS)/alertmanager:/c:ro" prom/alertmanager:v0.34.1 check-config /c/alertmanager.yml
+	@python3 -c 'import json, glob; [json.load(open(f)) for f in glob.glob("$(OBS)/grafana/dashboards/*.json")]; print("dashboards: valid JSON")'
 
 # --- Mock LLM ----------------------------------------------------------------------
 # The mock is not published on the host; this talks to it from inside the
@@ -120,6 +139,19 @@ e2e: ## Browser tests (Playwright) against the running production stack: make pr
 	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'
 
 check: lint typecheck test ## Everything CI checks, before you push
+
+# The production api image, checked the way CI checks it (CI calls this target).
+IMG := triage-assistant-api:check
+image-check: ## Build the production api image; assert non-root, no dev tools, every module imports
+	docker build -q --target production -t $(IMG) apps/api >/dev/null
+	test "$$(docker run --rm --entrypoint id $(IMG) -u)" = "10001"
+	@if docker run --rm --entrypoint sh $(IMG) -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then \
+	  echo "dev tooling found in the production image"; exit 1; fi
+	@# Tests run with dev dependencies installed, so an import that only resolves
+	@# through a test tool passes CI and crashes production. Read-only rootfs +
+	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
+	docker run --rm --read-only --tmpfs /tmp --entrypoint python $(IMG) -c "import app.main, app.triage, app.llm, app.routes.chat, app.metrics"
+	@echo "production image: non-root, no dev tools, all modules import"
 
 # --- Dependencies --------------------------------------------------------------
 # Lockfiles are updated inside the container (same uv/npm as CI), as your

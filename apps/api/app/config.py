@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     # the model is still thinking.
     sse_heartbeat_s: float = Field(15.0, gt=0)
 
+    # Shared secret Alertmanager sends as a bearer token. Unset = the
+    # webhook endpoint does not exist (404).
+    alertmanager_webhook_token: SecretStr | None = None
+
+    @field_validator("alertmanager_webhook_token", mode="before")
+    @classmethod
+    def _empty_token_means_disabled(cls, value: object) -> object:
+        # Compose passes ${VAR:-} as "", not "unset": an empty secret must
+        # disable the webhook, never match an empty Authorization header.
+        return None if value == "" else value
+
     @field_validator("database_url")
     @classmethod
     def _postgres_url(cls, value: SecretStr) -> SecretStr:
