@@ -9,7 +9,10 @@ SHELL := bash
 DEV  := docker compose
 PROD := docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml
 TEST := docker compose -p triage-assistant-test -f compose.yaml -f compose.override.yaml -f compose.test.yaml
-AS_ME := --user "$$(id -u):$$(id -g)"
+# Run as your UID so files written into the repo stay yours. HOME=/tmp: a UID
+# that has no account in the image (CI runners are 1001; only 1000 happens to
+# match the node image's user) gets HOME=/, and tools that write there fail.
+AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
@@ -111,7 +114,7 @@ test-fast: ## api unit tests only: no database, seconds
 # http://web:8080 and can drive the mock LLM's admin API.
 e2e: ## Browser tests (Playwright) against the running production stack: make prod-up first
 	docker run --rm --network triage-assistant-prod_default --shm-size=1g $(AS_ME) \
-	  -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+	  -e npm_config_cache=/tmp/npm \
 	  -e E2E_BASE_URL=http://web:8080 -e MOCK_ADMIN_URL=http://mock-llm:8020/_admin \
 	  -v "$(CURDIR)/tests/e2e:/e2e" -w /e2e mcr.microsoft.com/playwright:v1.63.0-noble \
 	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'

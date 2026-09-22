@@ -45,7 +45,7 @@ jobs:
       # Postgres, PgBouncer and Valkey, migrations + `alembic check`, then
       # pytest with the coverage gate from pyproject.toml.
       - run: cp .env.example .env
-      - run: make test
+      - run: make test-api
       - name: Coverage summary
         if: always()
         run: |
