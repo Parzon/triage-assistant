@@ -7,14 +7,16 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    // Local dev only: forwards /api/* to the backend by compose service
-    // name, so the browser never needs CORS configured. In production
-    // this exact job is done by nginx instead (same idea, different
-    // tool — see the deferred nginx task in PLAN.md).
+    // Dev only: forwards /api/* to the api service by its compose name, so
+    // the browser sees one origin and CORS never comes up. In production
+    // nginx does the same job (apps/web/nginx/default.conf).
     proxy: {
       '/api': {
         target: 'http://api:8010',
         changeOrigin: true,
+        // Send X-Forwarded-For like nginx does, so rate limiting sees the
+        // real client in dev too.
+        xfwd: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },

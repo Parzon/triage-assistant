@@ -3,8 +3,8 @@
 ## Local setup
 
 ```
-cp .env.example .env
-docker compose up --build
+make setup      # creates .env from .env.example, builds images
+make up         # dev stack with hot reload
 ```
 
 ## Workflow

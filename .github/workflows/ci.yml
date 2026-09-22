@@ -6,30 +6,68 @@ on:
   push:
     branches: [main]
 
+# A newer push to the same branch cancels the run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege for the GITHUB_TOKEN: these jobs only read the repo.
+permissions:
+  contents: read
+
+# Actions are pinned to full commit SHAs (tags can be moved to malicious
+# code, as in the 2025 tj-actions/changed-files compromise). Dependabot
+# keeps the SHAs and the version comments current.
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/api
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - run: cd apps/api && uv sync --frozen
-      - run: cd apps/api && uv run ruff check .
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          working-directory: apps/api
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t triage-assistant-api ./apps/api
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build production api image
+        run: docker build --target production -t triage-assistant-api:ci apps/api
+      - name: Image runs as non-root and carries no dev tooling
+        # Explicit if/exit rather than `! cmd`: bash exempts negated
+        # commands from `set -e`, so `!` only fails a step on its last line.
+        run: |
+          test "$(docker run --rm --entrypoint id triage-assistant-api:ci -u)" = "10001"
+          if docker run --rm --entrypoint sh triage-assistant-api:ci -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then
+            echo "::error::dev tooling found in the production image"; exit 1
+          fi
 
   web-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version-file: apps/web/.nvmrc
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
-      - run: cd apps/web && npm ci
-      - run: cd apps/web && npm run build
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Build production web image and validate its nginx config
+        run: |
+          docker build --target production -t triage-assistant-web:ci .
+          docker run --rm --entrypoint nginx triage-assistant-web:ci -t

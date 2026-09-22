@@ -15,3 +15,15 @@ node_modules/
 
 # OS/editor noise
 .DS_Store
+
+# tool caches and reports
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+coverage/
+playwright-report/
+test-results/

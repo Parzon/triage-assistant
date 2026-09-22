@@ -1,0 +1,68 @@
+# Production shape: images from the `production` Dockerfile targets, no
+# source mounts, only nginx published, least privilege everywhere.
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+# (`make prod-up` runs this under the project name triage-assistant-prod so
+# it can sit next to a dev stack with separate volumes.)
+services:
+  api:
+    build:
+      target: production
+    image: ${IMAGE_PREFIX:-triage-assistant}-api:${IMAGE_TAG:-local}
+    environment:
+      # Worker count follows the CPU limit below (gunicorn.conf.py). To pin
+      # it, add WEB_CONCURRENCY: "<n>" - never an empty value: gunicorn
+      # parses WEB_CONCURRENCY at import time and crashes on "".
+      # Only nginx can reach the api (it publishes no ports), and nginx
+      # overwrites X-Forwarded-For, so trusting any peer here is safe.
+      FORWARDED_ALLOW_IPS: "*"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # > gunicorn graceful_timeout (120s), or Docker SIGKILLs in-flight
+    # streams during a deploy/stop.
+    stop_grace_period: 130s
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPUS:-2}"
+          memory: 1g
+
+  web:
+    build:
+      target: production
+    image: ${IMAGE_PREFIX:-triage-assistant}-web:${IMAGE_TAG:-local}
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+
+  pgbouncer:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
+
+  db:
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
