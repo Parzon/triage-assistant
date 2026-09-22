@@ -7,3 +7,8 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn>=0.53.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+]
