@@ -5,6 +5,8 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
+    "redis>=8.1.0",
+    "slowapi>=0.1.10",
     "uvicorn>=0.53.0",
 ]
 
