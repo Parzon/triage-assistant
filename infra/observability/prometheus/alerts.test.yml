@@ -75,3 +75,24 @@ tests:
       - eval_time: 90m
         alertname: DiskAlmostFull
         exp_alerts: []
+
+  - name: Event loop lag alert fires on sustained saturation, not a blip
+    interval: 15s
+    input_series:
+      # every observation lands in the 0.25s bucket or above: p95 ~ 0.25s
+      - series: 'event_loop_lag_seconds_bucket{le="0.1"}'
+        values: "0+0x40"
+      - series: 'event_loop_lag_seconds_bucket{le="0.25"}'
+        values: "0+4x40"
+      - series: 'event_loop_lag_seconds_bucket{le="+Inf"}'
+        values: "0+4x40"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: EventLoopLagHigh
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: EventLoopLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "api event loop lag p95 above 100ms: workers are saturated or something blocks the loop"

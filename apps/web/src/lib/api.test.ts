@@ -64,6 +64,14 @@ describe('streamChat', () => {
     ])
   })
 
+  it('treats a stream that ends without done/error as cut off', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => sseBody('event: meta\ndata: {"request_id":"r","model":"m","alerts_in_context":0}\n\nevent: token\ndata: {"delta":"par"}\n\n')),
+    )
+    await expect(all(streamChat('q'))).rejects.toMatchObject({ code: 'stream_incomplete' })
+  })
+
   it('throws ApiError when the request is refused before streaming', async () => {
     vi.stubGlobal(
       'fetch',

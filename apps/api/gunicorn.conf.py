@@ -54,11 +54,14 @@ graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "120"))
 # proxy reuses a connection the worker has just closed: sporadic 502s.
 keepalive = int(os.environ.get("GUNICORN_KEEPALIVE", "75"))
 
-# Recycle workers to cap slow memory growth; jitter stops them all
-# restarting at once. Recycling waits for in-flight requests
-# (graceful_timeout), so streams are not cut.
-max_requests = int(os.environ.get("GUNICORN_MAX_REQUESTS", "10000"))
-max_requests_jitter = int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "1000"))
+# Worker recycling after N requests is a memory-leak mitigation, and it has
+# a cost: a recycling worker closes the idle keep-alive connections nginx
+# holds to it, and nginx does not retry a POST on another connection - the
+# load test saw bursts of 502 ("Connection reset by peer" in nginx's log)
+# exactly when uvicorn logged "Maximum request limit ... exceeded". Off by
+# default; set GUNICORN_MAX_REQUESTS only if memory is measured to grow.
+max_requests = int(os.environ.get("GUNICORN_MAX_REQUESTS", "0"))
+max_requests_jitter = int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "0"))
 
 # Heartbeat file in RAM: /tmp can be a slow overlay filesystem in containers,
 # which makes healthy workers miss heartbeats and get killed.

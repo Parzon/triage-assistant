@@ -17,7 +17,8 @@ S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check lint fmt typecheck test test-api test-web test-fast e2e check \
-        image-check deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
+        image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -152,6 +153,61 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
 	docker run --rm --read-only --tmpfs /tmp --entrypoint python $(IMG) -c "import app.main, app.triage, app.llm, app.routes.chat, app.metrics"
 	@echo "production image: non-root, no dev tools, all modules import"
+
+# --- Performance lab ------------------------------------------------------------
+# Load tests run against the production-shaped stack (make prod-up), through
+# nginx, from a container on its network. Raise the rate limits for them:
+#   ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up
+
+seed: ## Insert N synthetic alerts: make seed n=1000000 [ENV=prod]
+	@test -n "$(n)" || { echo 'usage: make seed n=<rows> [ENV=prod]'; exit 2; }
+	$(if $(filter prod,$(ENV)),$(PROD),$(DEV)) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v n=$(n)' < scripts/seed-alerts.sql
+
+s ?= alerts-read
+load: ## k6 scenario through nginx on the prod stack: make load s=chat VUS=100 (alerts-read|chat|health)
+	docker run --rm --network triage-assistant-prod_default $(AS_ME) -v "$(CURDIR)/tests/load:/scripts:ro" \
+	  -e BASE_URL=http://web:8080 -e RATE=$(RATE) -e VUS=$(VUS) -e DURATION=$(DURATION) \
+	  -e K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write \
+	  -e 'K6_PROMETHEUS_RW_TREND_STATS=p(50),p(95),p(99),max' \
+	  grafana/k6:2.3.0 run --no-usage-report \
+	  $$(docker ps -q -f name='^triage-assistant-prod-prometheus-1$$' | grep -q . && echo -o experimental-prometheus-rw) \
+	  /scripts/k6/$(s).js
+
+# One reference implementation per tool, same scenario (tests/load/<tool>/).
+load-compare: ## Same scenario through k6, vegeta, oha, Locust, Artillery, JMeter; one table (RATE=200 DURATION=30)
+	RATE=$(or $(RATE),200) DURATION=$(or $(DURATION),30) scripts/load-compare.sh
+
+USERS ?= 50
+CLASS ?= AlertReader
+load-tool: ## Run one tool's reference script: make load-tool TOOL=locust CLASS=ChatUser USERS=50
+	@case "$(TOOL)" in \
+	  locust) docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
+	    locustio/locust:2.46.6 -f /load/locust/locustfile.py $(CLASS) --headless -u $(USERS) -r $(USERS) \
+	    -t $(or $(DURATION),30s) --host http://web:8080 --only-summary ;; \
+	  artillery) docker run --rm --network triage-assistant-prod_default -e ARTILLERY_DISABLE_TELEMETRY=true \
+	    -v "$(CURDIR)/tests/load:/load:ro" artilleryio/artillery:2.0.34 run /load/artillery/alerts.yml ;; \
+	  jmeter) docker build -q -t triage-assistant-jmeter tools/load/jmeter >/dev/null && \
+	    docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
+	    triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx ;; \
+	  *) echo "usage: make load-tool TOOL=locust|artillery|jmeter  (k6: make load; all: make load-compare)"; exit 2 ;; \
+	esac
+
+# py-spy joins the api container's PID namespace with CAP_SYS_PTRACE; the
+# api itself keeps cap_drop ALL. C= picks the container (dev: C=triage-assistant-api-1).
+C ?= triage-assistant-prod-api-1
+PYSPY = docker run --rm --pid=container:$(C) --cap-add SYS_PTRACE
+.py-spy-image:
+	@docker build -q -t triage-assistant-py-spy tools/py-spy >/dev/null
+
+py-spy-dump: .py-spy-image ## Stack of every api process right now: what is it doing, or stuck on?
+	$(PYSPY) triage-assistant-py-spy dump --pid 1 --subprocesses
+
+py-spy-top: .py-spy-image ## Live top-style view of where the api spends time (Ctrl-C to stop)
+	$(PYSPY) -it triage-assistant-py-spy top --pid 1 --subprocesses
+
+py-spy-record: .py-spy-image ## 30s flame graph -> docs/images/api-flame.svg (run load meanwhile)
+	$(PYSPY) -v "$(CURDIR)/docs/images:/out" --entrypoint sh triage-assistant-py-spy -c \
+	  'py-spy record --pid 1 --subprocesses --duration $${SECONDS_:-30} -o /out/api-flame.svg && chown $(shell id -u):$(shell id -g) /out/api-flame.svg'
 
 # --- Dependencies --------------------------------------------------------------
 # Lockfiles are updated inside the container (same uv/npm as CI), as your
