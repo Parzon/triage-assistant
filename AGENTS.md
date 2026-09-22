@@ -8,18 +8,21 @@ for the reasoning behind this repo's shape — it's the template every
 project this team builds should follow.
 
 ## Development environment
-`docker compose up --build` brings up `api` + `pgbouncer` + `db` +
-`redis` + `web`, with `.env` (copy from `.env.example`) providing local
-credentials. Nothing needs installing on the host except Docker —
-`apps/api` runs `uv` inside its own container, `apps/web` runs Node 20
-inside its own container.
+`make setup && make up` brings up `api` + `pgbouncer` + `db` + `redis`
+(Valkey) + `web` with hot reload; `.env` (created from `.env.example`)
+provides local settings. Compose is split in three: `compose.yaml` (base),
+`compose.override.yaml` (dev, merged automatically), `compose.prod.yaml`
+(production shape, `make prod-up`). Toolchains live in the containers:
+Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
 
 ## Build & test commands
-- Run the whole stack: `docker compose up --build`
-- Backend tests: `docker compose exec api uv run pytest` (once tests exist)
-- Backend lint: `docker compose exec api uv run ruff check .`
-- Frontend build/type-check: `docker compose exec web npm run build`
-- Rebuild after a dependency change: `docker compose up --build`
+Run `make` to list every target. The ones you need most:
+- Start / stop the dev stack: `make up` / `make down`
+- Lint + format check: `make lint`; auto-format: `make fmt`
+- Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
+- After any dependency change: `make rebuild` — NOT `docker compose up
+  --build`, which keeps the old `.venv`/`node_modules` anonymous volume
+- Production-shaped stack locally: `make prod-up` (nginx on `HTTP_PORT`)
 
 ## Docs — when to write which
 

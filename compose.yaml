@@ -1,0 +1,99 @@
+# Base definition shared by every environment. It is never run alone:
+#   dev   docker compose up -d        (compose.override.yaml is merged automatically)
+#   prod  docker compose -f compose.yaml -f compose.prod.yaml up -d
+# `docker compose [-f ...] config` prints the fully merged result.
+name: triage-assistant
+
+x-logging: &logging
+  # Docker keeps container stdout in a JSON file per container, unbounded by
+  # default: without rotation a chatty service eventually fills the disk.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    build:
+      context: ./apps/web
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      POOL_MODE: transaction
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # PgBouncer speaks the Postgres wire protocol, so pg_isready works on it.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Docker's default 64MB /dev/shm is too small for parallel queries
+    # ("could not resize shared memory segment").
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # $$ defers expansion to the container's shell (its own env), not compose.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    # Valkey: the Linux Foundation fork of Redis 7.2, BSD-licensed (Redis
+    # 7.4+ is RSALv2/SSPLv1; 8.x adds AGPLv3). Same protocol, same clients,
+    # so the service keeps the protocol's name. See docs/adr/0002.
+    image: valkey/valkey:8.1-alpine
+    # Rate-limit counters are disposable: no persistence, bounded memory, and
+    # evict old keys instead of refusing writes when full.
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pgdata:

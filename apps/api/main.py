@@ -12,7 +12,7 @@ from slowapi.util import get_remote_address
 app = FastAPI()
 
 # Redis-backed: the rate limit is shared correctly across every worker/
-# replica, unlike an in-memory store (see unifiedlearning's /login bug).
+# replica, unlike an in-memory store, which counts per process.
 limiter = Limiter(key_func=get_remote_address, storage_uri=os.environ["REDIS_URL"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -51,4 +51,6 @@ async def token_stream(message: str) -> AsyncIterator[str]:
 
 @app.post("/chat/stream")
 async def chat_stream(payload: ChatRequest):
-    return StreamingResponse(token_stream(payload.message), media_type="text/event-stream")
+    return StreamingResponse(
+        token_stream(payload.message), media_type="text/event-stream"
+    )

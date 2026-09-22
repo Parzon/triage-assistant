@@ -1,0 +1,9 @@
+# Normalise line endings to LF in the repository and on checkout. Without
+# this, a Windows checkout turns shell scripts into CRLF and containers fail
+# with "/bin/sh^M: bad interpreter" or "exec format error".
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
