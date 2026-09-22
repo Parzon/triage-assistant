@@ -1,0 +1,66 @@
+# Prometheus for one compose project (the `observability` profile).
+# It pulls ("scrapes") /metrics from every target every 15s and evaluates
+# the alert rules in alerts.yml on the same cadence.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # DNS discovery through Docker's embedded DNS instead of a static target:
+  # a service name resolves to one A record per container, so after
+  # `docker compose up --scale api=3` every replica is scraped - a static
+  # "api:8010" would scrape whichever single IP the lookup returned. A name
+  # that does not resolve (mock-llm when the profile is off) yields no
+  # target at all instead of a permanently "down" one.
+  - job_name: api
+    dns_sd_configs:
+      - names: [api]
+        type: A
+        port: 8010
+        refresh_interval: 15s
+
+  - job_name: mock-llm
+    dns_sd_configs:
+      - names: [mock-llm]
+        type: A
+        port: 8020
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: pgbouncer
+    static_configs:
+      - targets: ["pgbouncer-exporter:9127"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: cadvisor
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      # cAdvisor reports every container on the host, other projects
+      # included; keep only this stack's (dev, prod, test projects).
+      - source_labels: [container_label_com_docker_compose_project]
+        regex: triage-assistant.*
+        action: keep
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,77 @@
+# Unit tests for alerts.yml: `make obs-check` (and CI) runs
+#   promtool test rules alerts.test.yml
+# Each test feeds synthetic series and asserts which alerts fire when.
+# "1x5" = a value repeated 5 more times at each interval step.
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: Redis down fires only after one minute
+    interval: 15s
+    input_series:
+      - series: redis_up
+        values: "1 0x10"
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: RedisDown
+        exp_alerts: []
+      - eval_time: 90s
+        alertname: RedisDown
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Redis (Valkey) is down: rate limiting is off (fail-open, ADR-0004)"
+
+  - name: High error rate needs 5% of requests failing for 5 minutes
+    interval: 1m
+    input_series:
+      # 100 requests/min, 10 of them 500s = 10%
+      - series: 'http_requests_total{route="/alerts",status="201",method="POST"}'
+        values: "0+90x15"
+      - series: 'http_requests_total{route="/alerts",status="500",method="POST"}'
+        values: "0+10x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HighErrorRate
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "more than 5% of api requests fail with 5xx"
+
+  - name: A removed api service is caught by absent()
+    interval: 15s
+    input_series:
+      - series: 'up{job="postgres",instance="postgres-exporter:9187"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ApiMissing
+        exp_alerts:
+          - exp_labels: {severity: critical, job: api}
+            exp_annotations:
+              summary: "no api replica exists to scrape"
+
+  - name: Disk trend fires before the disk is full
+    interval: 1m
+    input_series:
+      # 100 GB disk losing 5 GB per 10 min: empty in ~3h
+      - series: 'node_filesystem_avail_bytes{mountpoint="/"}'
+        values: "60e9-0.5e9x120"
+      - series: 'node_filesystem_size_bytes{mountpoint="/"}'
+        values: "100e9x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: DiskWillFillIn6h
+        exp_alerts:
+          - exp_labels: {severity: high, mountpoint: "/"}
+            exp_annotations:
+              summary: "at the current rate the root disk is full within 6 hours"
+      - eval_time: 90m
+        alertname: DiskAlmostFull
+        exp_alerts: []

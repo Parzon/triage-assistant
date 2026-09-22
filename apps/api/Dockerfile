@@ -47,9 +47,13 @@ COPY --from=deps /api/.venv /api/.venv
 COPY alembic.ini gunicorn.conf.py ./
 COPY migrations/ ./migrations/
 COPY app/ ./app/
+# PROMETHEUS_MULTIPROC_DIR: one metrics file per worker, summed on scrape
+# (app/metrics.py). Must be set before start, never set to "" (the client
+# checks only that the variable exists). /tmp is a tmpfs in compose.prod.yaml.
 ENV PATH="/api/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
 USER 10001:10001
 EXPOSE 8010
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \

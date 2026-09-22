@@ -6,6 +6,7 @@ platforms (ECS, Kubernetes) without a rebuild.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 from app.logs import logging_config
@@ -76,3 +77,25 @@ control_socket = os.environ.get("GUNICORN_CONTROL_SOCKET", "/tmp/gunicorn.ctl")
 # Gunicorn's own lines (master boot, worker timeouts) in the same JSON
 # format as the application's.
 logconfig_dict = logging_config(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+# --- Prometheus multiprocess mode (see app/metrics.py) ---------------------
+
+
+def on_starting(server: object) -> None:
+    """Master start: empty the metrics directory. Sample files left by a
+    previous run would otherwise be summed into the new counters."""
+    path = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+    if path:
+        shutil.rmtree(path, ignore_errors=True)
+        os.makedirs(path, exist_ok=True)
+
+
+def child_exit(server: object, worker: object) -> None:
+    """A worker died or was recycled: drop its live gauges (requests in
+    progress, active streams) so a dead process stops being summed.
+    Its counters stay - totals must never go backwards."""
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        from prometheus_client import multiprocess
+
+        multiprocess.mark_process_dead(worker.pid)  # type: ignore[attr-defined]

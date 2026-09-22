@@ -21,6 +21,8 @@ from fastapi import HTTPException, Request
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.metrics import ratelimit_decisions
+
 log = logging.getLogger(__name__)
 
 
@@ -67,8 +69,11 @@ class RateLimiter:
                 "rate limiter unavailable, failing open",
                 extra={"scope": scope, "error": type(exc).__name__},
             )
+            ratelimit_decisions.labels(scope, "fail_open").inc()
             return Decision(True, limit, limit, reset_s, degraded=True)
-        return Decision(count <= limit, limit, max(0, limit - count), reset_s)
+        allowed = count <= limit
+        ratelimit_decisions.labels(scope, "allowed" if allowed else "rejected").inc()
+        return Decision(allowed, limit, max(0, limit - count), reset_s)
 
 
 def client_identity(request: Request) -> str:

@@ -1,0 +1,12 @@
+# Dashboards are JSON files in git (infra/observability/grafana/dashboards).
+# Edit in the UI to explore, then export the JSON and commit it - UI-only
+# changes are lost when the container is recreated (allowUiUpdates: false
+# makes that explicit).
+apiVersion: 1
+providers:
+  - name: triage-assistant
+    folder: triage-assistant
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

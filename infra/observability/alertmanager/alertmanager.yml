@@ -1,0 +1,26 @@
+# Alertmanager: groups, de-duplicates and routes firing alerts.
+# Here every alert goes to the triage-assistant api itself (it ingests
+# Alertmanager webhooks as alerts), which is the product's demo loop.
+#
+# In production, alerts about the notifier's own health (ApiDown,
+# ApiMissing) must go somewhere else - a pager, email, Slack - or nobody
+# hears that the thing that delivers alerts is down.
+
+route:
+  receiver: triage-assistant
+  group_by: [alertname]
+  group_wait: 30s        # wait for related alerts to batch the first notification
+  group_interval: 5m     # new alerts in an existing group are sent this often
+  repeat_interval: 4h    # a still-firing alert is re-sent this often (the api de-duplicates)
+
+receivers:
+  - name: triage-assistant
+    webhook_configs:
+      - url: http://api:8010/alerts/alertmanager
+        send_resolved: false
+        http_config:
+          authorization:
+            type: Bearer
+            # Alertmanager config does not expand environment variables;
+            # the token arrives as a compose secret file instead.
+            credentials_file: /run/secrets/alertmanager_webhook_token

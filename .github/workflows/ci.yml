@@ -36,6 +36,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - name: Observability config (Prometheus config, alert rule unit tests, Alertmanager config)
+        working-directory: .
+        run: make obs-check
 
   test-api:
     runs-on: ubuntu-24.04

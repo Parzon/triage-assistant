@@ -1,0 +1,130 @@
+# Alert rules. Each alert says what the user feels (symptom) where possible,
+# not only which box is sad (cause). `for:` is how long the condition must
+# hold before firing: long enough to ignore blips, short enough to matter.
+# severity -> the triage-assistant severity (info|warning|high|critical).
+
+groups:
+  - name: availability
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "api replica {{ $labels.instance }} is not answering /metrics"
+
+      # With DNS discovery a removed service has no `up` series at all, so
+      # `up == 0` can never fire for it - absent() catches that case.
+      - alert: ApiMissing
+        expr: absent(up{job="api"})
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "no api replica exists to scrape"
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Postgres is unreachable: alerts cannot be stored or read"
+
+      - alert: PgBouncerDown
+        expr: pgbouncer_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "PgBouncer is unreachable: the api cannot reach the database"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis (Valkey) is down: rate limiting is off (fail-open, ADR-0004)"
+
+      - alert: ExporterDown
+        expr: up{job=~"postgres|pgbouncer|redis|node|cadvisor"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} exporter is down: its dashboards and alerts are blind"
+
+  - name: service
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: {severity: high}
+        annotations:
+          summary: "more than 5% of api requests fail with 5xx"
+
+      - alert: SlowRequests
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, route) (rate(http_request_duration_seconds_bucket{route!="/chat/stream"}[5m]))
+          ) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 latency of {{ $labels.route }} is above 1s"
+
+      - alert: RateLimiterFailingOpen
+        expr: sum(rate(ratelimit_decisions_total{decision="fail_open"}[5m])) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "requests are passing unlimited: the rate limiter cannot reach Redis"
+
+      - alert: DatabasePoolSaturated
+        expr: max(pgbouncer_pools_client_waiting_connections) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "clients are queueing for a Postgres connection in PgBouncer"
+
+  - name: llm
+    rules:
+      - alert: LLMErrors
+        expr: |
+          sum(rate(llm_requests_total{outcome!~"ok|cancelled"}[5m]))
+            / sum(rate(llm_requests_total[5m])) > 0.1
+        for: 5m
+        labels: {severity: high}
+        annotations:
+          summary: "more than 10% of model calls fail"
+
+      - alert: LLMSlowFirstToken
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(llm_time_to_first_token_seconds_bucket[10m]))) > 10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "users wait over 10s (p95) for the first word of an answer"
+
+  - name: capacity
+    rules:
+      - alert: DiskWillFillIn6h
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[1h], 6 * 3600) < 0
+        for: 15m
+        labels: {severity: high}
+        annotations:
+          summary: "at the current rate the root disk is full within 6 hours"
+
+      - alert: DiskAlmostFull
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.10
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "less than 10% of the root disk is free"
+
+      - alert: ContainerNearMemoryLimit
+        expr: |
+          container_memory_working_set_bytes
+            / (container_spec_memory_limit_bytes > 0) > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }} uses over 90% of its memory limit (next: OOM kill, exit 137)"

@@ -32,3 +32,19 @@ class AlertPage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+
+
+class AlertmanagerAlert(BaseModel):
+    status: Literal["firing", "resolved"]
+    labels: dict[str, str]
+    annotations: dict[str, str] = Field(default_factory=dict)
+    startsAt: datetime
+    fingerprint: str
+
+
+class AlertmanagerWebhook(BaseModel):
+    """Alertmanager webhook payload (version 4); unknown fields are ignored."""
+
+    version: str
+    status: str
+    alerts: list[AlertmanagerAlert]

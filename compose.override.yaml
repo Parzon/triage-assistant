@@ -34,3 +34,15 @@ services:
     volumes:
       - ./apps/web:/app
       - /app/node_modules
+
+  grafana:
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
+  prometheus:
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+
+  alertmanager:
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"

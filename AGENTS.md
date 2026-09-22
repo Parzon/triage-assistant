@@ -31,6 +31,10 @@ Run `make` to list every target. The ones you need most:
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
 - Browser tests: `make prod-up && make e2e` (Playwright through nginx)
+- Monitoring: `make obs-up` (Prometheus :9090, Grafana :3000, Alertmanager
+  :9093 on localhost); `make obs-check` validates configs and unit-tests the
+  alert rules (`infra/observability/prometheus/alerts.test.yml`). New metric
+  labels must be bounded (route templates, never raw paths or user input).
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults

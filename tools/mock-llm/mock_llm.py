@@ -28,7 +28,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from pydantic import BaseModel, ConfigDict
 
 FAIL_MODES = {"none", "http_429", "http_500", "hang", "drop_mid_stream"}
@@ -54,6 +55,12 @@ class Stats:
 behaviour = Behaviour()
 stats = Stats()
 app = FastAPI(title="mock-llm")
+
+# The provider's side of the story, for dashboards: what a real provider's
+# console would show you (requests, streams abandoned by the caller).
+requests_total = Counter("mock_llm_requests_total", "Requests received.", ["result"])
+streams_total = Counter("mock_llm_streams_total", "Streams by how they ended.", ["end"])
+active = Gauge("mock_llm_active_streams", "Streams in progress.")
 
 
 class ChatCompletionRequest(BaseModel):
@@ -110,12 +117,16 @@ async def chat_completions(
     stats.requests += 1
     key = (authorization or "").removeprefix("Bearer ").strip()
     if not key or key == "invalid-key":  # "invalid-key": test hook for auth failures
+        requests_total.labels("401").inc()
         return openai_error(401, "invalid API key", "invalid_api_key")
     failing = behaviour.fail_mode != "none" and random.random() < behaviour.fail_rate  # noqa: S311
     if failing and behaviour.fail_mode == "http_429":
+        requests_total.labels("429").inc()
         return openai_error(429, "rate limit reached for requests", "rate_limit_exceeded")
     if failing and behaviour.fail_mode == "http_500":
+        requests_total.labels("500").inc()
         return openai_error(500, "the server had an error", "server_error")
+    requests_total.labels("200").inc()
 
     tokens = tokenize(reply_for(body.messages))[: body.max_tokens]
     prompt_tokens = sum(len(str(m.get("content", "")).split()) for m in body.messages)
@@ -156,6 +167,7 @@ async def stream(
 ) -> AsyncIterator[str]:
     stats.streams_started += 1
     stats.active_streams += 1
+    active.inc()
     try:
         if failing and behaviour.fail_mode == "hang":
             await asyncio.sleep(3600)
@@ -174,18 +186,29 @@ async def stream(
             yield chunk(completion_id, model, choices=[], usage=usage)
         yield "data: [DONE]\n\n"
         stats.streams_completed += 1
+        streams_total.labels("completed").inc()
     except asyncio.CancelledError:
         # The caller hung up. A real provider would stop generating (and
         # billing) here; the counter lets tests prove we hung up.
         stats.streams_cancelled += 1
+        streams_total.labels("cancelled_by_caller").inc()
+        raise
+    except ConnectionAbortedError:
+        streams_total.labels("dropped").inc()
         raise
     finally:
         stats.active_streams -= 1
+        active.dec()
 
 
 @app.get("/v1/models")
 async def models() -> dict[str, Any]:
     return {"object": "list", "data": [{"id": "mock-1", "object": "model", "owned_by": "mock"}]}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
