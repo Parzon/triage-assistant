@@ -25,6 +25,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       # nginx and the Vite dev proxy serve the api under /api.
       ROOT_PATH: /api
+      # Any OpenAI-compatible endpoint. Default: the mock below. Deliberately
+      # no depends_on it: the LLM is an external dependency - the api must
+      # start without it and report its failures, not refuse to boot.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:8020/v1}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-mock-1}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -55,6 +61,16 @@ services:
       db:
         condition: service_healthy
     restart: "no"
+    logging: *logging
+
+  # Stand-in for the LLM provider (tools/mock-llm): OpenAI-compatible, with
+  # tunable latency and failure modes. Runs when the "mock" profile is
+  # active - COMPOSE_PROFILES=mock in .env, the default for local work.
+  mock-llm:
+    build:
+      context: ./tools/mock-llm
+    profiles: ["mock"]
+    restart: unless-stopped
     logging: *logging
 
   web:

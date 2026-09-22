@@ -92,3 +92,29 @@ async def blackhole_port() -> AsyncIterator[int]:
     server.close()
     server.abort_clients()
     await server.wait_closed()
+
+
+class MockLLM:
+    """Drives tools/mock-llm's admin API: failure modes, timing, counters."""
+
+    def __init__(self, admin_url: str) -> None:
+        self._http = AsyncClient(base_url=admin_url, timeout=5)
+
+    async def configure(self, **behaviour: object) -> None:
+        (await self._http.post("/config", json=behaviour)).raise_for_status()
+
+    async def stats(self) -> dict[str, int]:
+        return dict((await self._http.get("/stats")).json())
+
+    async def reset(self) -> None:
+        (await self._http.post("/reset")).raise_for_status()
+
+
+@pytest.fixture
+async def mock_llm(settings: Settings) -> AsyncIterator[MockLLM]:
+    mock = MockLLM(os.environ["MOCK_LLM_ADMIN_URL"])
+    await mock.reset()
+    await mock.configure(ttft_ms=50, tokens_per_s=500)  # fast unless a test slows it
+    yield mock
+    await mock.reset()
+    await mock._http.aclose()

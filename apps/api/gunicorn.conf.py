@@ -68,6 +68,11 @@ worker_tmp_dir = "/dev/shm"
 # overwrites X-Forwarded-For (see apps/web/nginx/snippets/proxy.conf).
 forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,::1")
 
+# gunicorn >= 25.1 opens a control socket for the `gunicornc` CLI (worker
+# status, resize, reload) under $HOME by default - read-only in our image.
+# /tmp is the tmpfs mount: `docker exec <api> gunicornc -s /tmp/gunicorn.ctl ...`
+control_socket = os.environ.get("GUNICORN_CONTROL_SOCKET", "/tmp/gunicorn.ctl")
+
 # Gunicorn's own lines (master boot, worker timeouts) in the same JSON
 # format as the application's.
 logconfig_dict = logging_config(os.environ.get("LOG_LEVEL", "INFO"))

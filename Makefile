@@ -9,15 +9,18 @@ SHELL := bash
 DEV  := docker compose
 PROD := docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml
 TEST := docker compose -p triage-assistant-test -f compose.yaml -f compose.override.yaml -f compose.test.yaml
-AS_ME := --user "$$(id -u):$$(id -g)"
+# Run as your UID so files written into the repo stay yours. HOME=/tmp: a UID
+# that has no account in the image (CI runners are 1001; only 1000 happens to
+# match the node image's user) gets HOME=/, and tools that write there fail.
+AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration lint fmt typecheck test test-fast check \
+        migrate migration mock lint fmt typecheck test test-api test-web test-fast e2e check \
         deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Dev stack -------------------------------------------------------------------
 
@@ -64,6 +67,17 @@ migration: ## New migration from model changes: make migration m="add alert sour
 	@test -n "$(m)" || { echo 'usage: make migration m="<what changes>"'; exit 2; }
 	$(DEV) run --rm $(AS_ME) migrate alembic revision --autogenerate -m "$(m)"
 
+# --- Mock LLM ----------------------------------------------------------------------
+# The mock is not published on the host; this talks to it from inside the
+# network (through the api container, which has Python).
+
+mock: ## Mock LLM: show config+stats; change: c='{"fail_mode":"http_429"}' / c='{"tokens_per_s":5}'; c=reset
+	@$(DEV) exec -T api python -c 'import sys, urllib.request as u; \
+	  c = sys.argv[1]; base = "http://mock-llm:8020/_admin/"; \
+	  post = lambda p, d: u.urlopen(u.Request(base + p, data=d.encode(), headers={"content-type": "application/json"})).read().decode(); \
+	  print(post("reset", "{}") if c == "reset" else post("config", c) if c else \
+	        "config " + u.urlopen(base + "config").read().decode() + "\nstats  " + u.urlopen(base + "stats").read().decode())' '$(c)'
+
 # --- Code quality ---------------------------------------------------------------
 
 lint: ## ruff (lint + format check) for the api, oxlint for the web
@@ -75,18 +89,35 @@ fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff check --fix .
 
-typecheck: ## mypy (strict) on the api
+typecheck: ## mypy (strict) on the api, tsc on the web
 	$(DEV) run --rm --no-deps api mypy
+	$(DEV) run --rm --no-deps web npx tsc -b
 
 # --- Tests -------------------------------------------------------------------
 
-test: ## Full api suite with coverage, in a throwaway stack (same command CI runs)
-	@$(TEST) run --rm migrate sh -c 'alembic upgrade head && alembic check' \
-	  && $(TEST) run --rm $(AS_ME) api pytest --cov --cov-report=term --cov-report=xml:coverage.xml; \
+test: test-api test-web ## Every test suite (api + web), as CI runs them
+
+# --build: `run` never rebuilds an existing image, and the test project has
+# its own images - without it, tests silently run against stale dependencies.
+test-api: ## api suite + coverage gate, in a throwaway stack (real Postgres/PgBouncer/Valkey/mock LLM)
+	@$(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check' \
+	  && $(TEST) run --build --rm $(AS_ME) api pytest --cov --cov-report=term --cov-report=xml:coverage.xml; \
 	  status=$$?; $(TEST) down --volumes --remove-orphans >/dev/null 2>&1; exit $$status
 
-test-fast: ## Unit tests only: no database, seconds
+test-web: ## web unit/component tests + coverage gate (vitest)
+	$(DEV) run --rm --no-deps $(AS_ME) web npm test
+
+test-fast: ## api unit tests only: no database, seconds
 	$(DEV) run --rm --no-deps $(AS_ME) api pytest tests/unit -q
+
+# The browser joins the production stack's network: it reaches the site as
+# http://web:8080 and can drive the mock LLM's admin API.
+e2e: ## Browser tests (Playwright) against the running production stack: make prod-up first
+	docker run --rm --network triage-assistant-prod_default --shm-size=1g $(AS_ME) \
+	  -e npm_config_cache=/tmp/npm \
+	  -e E2E_BASE_URL=http://web:8080 -e MOCK_ADMIN_URL=http://mock-llm:8020/_admin \
+	  -v "$(CURDIR)/tests/e2e:/e2e" -w /e2e mcr.microsoft.com/playwright:v1.63.0-noble \
+	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'
 
 check: lint typecheck test ## Everything CI checks, before you push
 
@@ -104,7 +135,10 @@ deps-api: ## Add a Python dependency: make deps-api p=httpx   (dev-only: p="--de
 
 deps-web: ## Add an npm dependency: make deps-web p=zod   (dev-only: p="-D vitest")
 	@test -n "$(p)" || { echo 'usage: make deps-web p=<package>'; exit 2; }
-	$(DEV) run --rm --no-deps $(AS_ME) -e npm_config_cache=/tmp/npm -e PKGS='$(p)' web sh -c 'set -f; npm install --package-lock-only --no-audit --no-fund $$PKGS'
+	@# Plain `docker run`, not the compose service: npm also rewrites a hidden lockfile
+	@# inside node_modules, and the service's node_modules volume is root-owned.
+	docker run --rm $(AS_ME) -v "$(CURDIR)/apps/web:/app" -w /app -e npm_config_cache=/tmp/npm \
+	  -e PKGS='$(p)' node:$$(cat apps/web/.nvmrc)-slim sh -c 'set -f; npm install --package-lock-only --no-audit --no-fund $$PKGS'
 	$(DEV) up -d --build --renew-anon-volumes web
 
 # --- Production-shaped stack (locally, or on the demo VM) ----------------------

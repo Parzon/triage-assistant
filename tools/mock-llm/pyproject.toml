@@ -1,0 +1,9 @@
+[project]
+name = "mock-llm"
+version = "0.1.0"
+description = "OpenAI-compatible mock LLM server with tunable latency and failure modes (dev/test only)"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.53",
+]

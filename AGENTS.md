@@ -2,8 +2,12 @@
 
 ## Project overview
 AI Ops / Incident Triage Assistant. FastAPI backend (`apps/api`),
-Postgres + PgBouncer + Redis for data, React+Vite frontend (`apps/web`),
-all deployed via Docker Compose locally. See `docs/adr/0001-standard-project-shape.md`
+Postgres + PgBouncer + Valkey (Redis protocol), a streaming chat backed by
+any OpenAI-compatible model, React + Vite frontend (`apps/web`), all run
+with Docker Compose. The AI-specific logic is `apps/api/app/triage.py`
+(prompt + streaming); the provider seam is `apps/api/app/llm.py`.
+Locally the model is `tools/mock-llm` (OpenAI-compatible, tunable
+latency and failure modes). See `docs/adr/0001-standard-project-shape.md`
 for the reasoning behind this repo's shape — it's the template every
 project this team builds should follow.
 
@@ -25,7 +29,11 @@ Run `make` to list every target. The ones you need most:
 - Production-shaped stack locally: `make prod-up` (nginx on `HTTP_PORT`)
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
-- Types: `make typecheck` (mypy strict). Before pushing: `make check`
+- Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
+- Browser tests: `make prod-up && make e2e` (Playwright through nginx)
+- Mock LLM behaviour: `make mock` shows its config and counters;
+  `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
+  changes it; `make mock c=reset` restores defaults
 - Schema change: edit `app/models.py`, then `make migration m="..."`,
   review the generated file (autogenerate misses renames and some
   constraint changes), `make migrate`

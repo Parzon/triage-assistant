@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from app.config import Settings, get_settings
 from app.db import create_engine, create_sessionmaker
 from app.errors import install_error_handlers
+from app.llm import OpenAICompatibleClient
 from app.middleware import RequestContextMiddleware
 from app.ratelimit import RateLimiter
 from app.routes import alerts, chat, health
@@ -34,9 +35,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             max_connections=64,
         )
         app.state.limiter = RateLimiter(app.state.redis, timeout_s=settings.ratelimit_timeout_s)
+        # One client per process: it holds the HTTP connection pool to the
+        # provider, so connections (and TLS handshakes) are reused.
+        app.state.llm = OpenAICompatibleClient(settings)
         try:
             yield
         finally:
+            await app.state.llm.aclose()
             await app.state.redis.aclose()
             await app.state.engine.dispose()
 
