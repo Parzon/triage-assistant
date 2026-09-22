@@ -5,12 +5,24 @@ services:
       - "8010:8010"
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379/0
     restart: unless-stopped
     depends_on:
       pgbouncer:
         condition: service_started
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
   pgbouncer:
     image: edoburu/pgbouncer
