@@ -61,6 +61,7 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
   })
   if (!res.ok || !res.body) throw await toApiError(res)
 
+  let finished = false
   for await (const { event, data } of parseSSE(res.body)) {
     const payload = JSON.parse(data)
     switch (event) {
@@ -76,6 +77,7 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
         yield { type: 'token', delta: payload.delta }
         break
       case 'done':
+        finished = true
         yield {
           type: 'done',
           ttftMs: payload.ttft_ms,
@@ -84,9 +86,16 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
         }
         break
       case 'error':
+        finished = true
         yield { type: 'error', code: payload.code, message: payload.message, requestId: payload.request_id }
         break
     }
+  }
+  // The connection closed without the api's closing event: a worker was
+  // killed, a proxy timed out, or a deploy cut the stream. Without this the
+  // UI would wait forever on a stream that is gone.
+  if (!finished) {
+    throw new ApiError(0, 'stream_incomplete', 'The answer was cut off before it finished.')
   }
 }
 

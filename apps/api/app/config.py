@@ -28,8 +28,15 @@ class Settings(BaseSettings):
     # A plain postgresql:// URL (what psql, RDS and secret stores hand out);
     # the async driver is chosen in async_database_url.
     database_url: SecretStr
-    db_pool_size: int = Field(5, ge=1)
-    db_max_overflow: int = Field(5, ge=0)
+    # Per worker. Size the pool for peak concurrency, not the average, and
+    # avoid relying on overflow: SQLAlchemy closes overflow connections when
+    # they are returned, so irregular arrivals churn them - every new
+    # connection pays a SCRAM login (~12ms) and setup queries, requests slow
+    # down, concurrency stays high, and the churn sustains itself. Measured:
+    # 5+5 gave 196 new connections and ~90ms requests in 20s of bursty load;
+    # PgBouncer makes a larger app pool cheap for Postgres.
+    db_pool_size: int = Field(20, ge=1)
+    db_max_overflow: int = Field(0, ge=0)
     db_pool_timeout_s: float = Field(5.0, gt=0)
     db_connect_timeout_s: float = Field(5.0, gt=0)
     # Client-side cap per query. The server-side cap is statement_timeout on
@@ -37,8 +44,14 @@ class Settings(BaseSettings):
     db_command_timeout_s: float = Field(10.0, gt=0)
 
     redis_url: SecretStr
-    # Budget for one rate-limit round trip. Past it the limiter fails open.
-    ratelimit_timeout_s: float = Field(0.05, gt=0)
+    # Budget for one rate-limit round trip; past it the limiter fails open.
+    # It is wall-clock time, so it also counts time the reply spends waiting
+    # for a busy event loop: at 50ms the load test saw the limiter fail open
+    # thousands of times at only ~46% CPU per worker.
+    ratelimit_timeout_s: float = Field(0.2, gt=0)
+    # Redis connections per worker: roughly the requests one worker holds at
+    # once. Too few and requests fail open with MaxConnectionsError.
+    redis_max_connections: int = Field(256, ge=1)
     ratelimit_window_s: int = Field(60, ge=1)
     alerts_rate_limit: int = Field(60, ge=1)
     chat_rate_limit: int = Field(10, ge=1)

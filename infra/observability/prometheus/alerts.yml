@@ -71,6 +71,15 @@ groups:
         annotations:
           summary: "p95 latency of {{ $labels.route }} is above 1s"
 
+      # The saturation signal: when the loop runs timers late, every request
+      # waits that long before its code starts, whatever the endpoint.
+      - alert: EventLoopLagHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(event_loop_lag_seconds_bucket[5m]))) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "api event loop lag p95 above 100ms: workers are saturated or something blocks the loop"
+
       - alert: RateLimiterFailingOpen
         expr: sum(rate(ratelimit_decisions_total{decision="fail_open"}[5m])) > 0
         for: 2m

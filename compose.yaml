@@ -31,6 +31,9 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:8020/v1}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-mock-1}
+      # Per client per minute. Load tests raise them (make load).
+      ALERTS_RATE_LIMIT: ${ALERTS_RATE_LIMIT:-60}
+      CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}
       # Shared with Alertmanager (secret below); empty = webhook disabled.
       ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:-}
     depends_on:

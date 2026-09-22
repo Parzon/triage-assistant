@@ -15,6 +15,7 @@ never the raw path, and never user ids or free text - every distinct
 label combination is a separate time series that Prometheus keeps in RAM.
 """
 
+import asyncio
 import os
 
 from prometheus_client import (
@@ -78,11 +79,30 @@ llm_active_streams = Gauge(
     "llm_active_streams", "Answers being streamed right now.", multiprocess_mode="livesum"
 )
 
+event_loop_lag = Histogram(
+    "event_loop_lag_seconds",
+    "How late the event loop runs a timer: the wait any callback has before it can start.",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+)
+
 ratelimit_decisions = Counter(
     "ratelimit_decisions_total",
     "Rate limiter outcomes: allowed, rejected, or fail_open (Redis unreachable).",
     ["scope", "decision"],
 )
+
+
+async def watch_event_loop_lag(interval_s: float = 0.25) -> None:
+    """The saturation signal for an async worker. Ask for a timer every
+    interval_s and record how late it fires. Near zero on a healthy worker;
+    it grows when CPU-bound work, a blocking call or simply too many
+    requests keep the loop busy - and every timeout measured in wall-clock
+    time (DB pool, Redis budget, LLM read) starts firing spuriously."""
+    loop = asyncio.get_running_loop()
+    while True:
+        start = loop.time()
+        await asyncio.sleep(interval_s)
+        event_loop_lag.observe(max(0.0, loop.time() - start - interval_s))
 
 
 def metrics_response() -> Response:

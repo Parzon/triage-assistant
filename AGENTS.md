@@ -31,6 +31,11 @@ Run `make` to list every target. The ones you need most:
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
 - Browser tests: `make prod-up && make e2e` (Playwright through nginx)
+- Load tests (production stack, rate limits raised):
+  `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
+  `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
+  `make load-compare` (same scenario through six tools), `make load-tool TOOL=locust`.
+  Profile a live worker: `make py-spy-dump` / `py-spy-top` / `py-spy-record`.
 - Monitoring: `make obs-up` (Prometheus :9090, Grafana :3000, Alertmanager
   :9093 on localhost); `make obs-check` validates configs and unit-tests the
   alert rules (`infra/observability/prometheus/alerts.test.yml`). New metric

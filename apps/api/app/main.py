@@ -3,6 +3,8 @@ limiter, settings) is created in the lifespan and hung on app.state, so
 tests build an app with their own settings and nothing is created at
 import time."""
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,6 +15,7 @@ from app.config import Settings, get_settings
 from app.db import create_engine, create_sessionmaker
 from app.errors import install_error_handlers
 from app.llm import OpenAICompatibleClient
+from app.metrics import watch_event_loop_lag
 from app.middleware import RequestContextMiddleware
 from app.ratelimit import RateLimiter
 from app.routes import alerts, chat, health
@@ -32,15 +35,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             socket_connect_timeout=settings.ratelimit_timeout_s,
             # Bounded: when Redis is slow, requests fail open instead of
             # opening connections without limit.
-            max_connections=64,
+            max_connections=settings.redis_max_connections,
         )
         app.state.limiter = RateLimiter(app.state.redis, timeout_s=settings.ratelimit_timeout_s)
         # One client per process: it holds the HTTP connection pool to the
         # provider, so connections (and TLS handshakes) are reused.
         app.state.llm = OpenAICompatibleClient(settings)
+        lag_watcher = asyncio.create_task(watch_event_loop_lag())
         try:
             yield
         finally:
+            lag_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await lag_watcher
             await app.state.llm.aclose()
             await app.state.redis.aclose()
             await app.state.engine.dispose()

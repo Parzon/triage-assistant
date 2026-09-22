@@ -28,6 +28,13 @@ class Alert(Base):
         # re-sends a firing alert every repeat_interval. NULLs never
         # collide, so manually created alerts are unaffected.
         Index("uq_alerts_external_id", "external_id", unique=True),
+        # Serves every newest-first read (the list, keyset pagination, the
+        # chat's context) as a backward index scan. Measured on 2M rows:
+        # 152ms -> 0.1ms, severity=critical 43ms -> 3.8ms. A second index on
+        # (severity, created_at, id) takes that to 0.06ms but costs every
+        # insert (~2x this one's); add it when a rarer filter shows up in
+        # the SlowRequests alert, not before. See the performance chapter.
+        Index("ix_alerts_created_at_id", "created_at", "id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     source: Mapped[str] = mapped_column(Text)

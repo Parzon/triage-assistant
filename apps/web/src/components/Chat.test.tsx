@@ -84,6 +84,17 @@ describe('Chat', () => {
     expect(alert).toHaveTextContent('req-77')
   })
 
+  it('does not hang when the stream is cut off without a closing event', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('token', { delta: 'half an ans' })
+    stream.close()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The answer was cut off before it finished.')
+    expect(screen.getByRole('status')).toHaveTextContent('Failed')
+    expect(answer()).toBe('half an ans')
+  })
+
   it('explains a rate limit and when to retry', async () => {
     vi.stubGlobal(
       'fetch',

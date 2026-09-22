@@ -1,6 +1,6 @@
 # ADR-0004: The rate limiter fails open
 
-**Status:** accepted
+**Status:** accepted — the 50 ms budget is superseded by ADR-0009 (200 ms); the fail-open policy stands
 **Date:** 2026-09-22
 
 ## Context

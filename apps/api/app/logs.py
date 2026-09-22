@@ -60,6 +60,11 @@ def logging_config(level: str) -> dict[str, Any]:
             "gunicorn.access": {"handlers": [], "propagate": False},
             # Chatty below WARNING; raise to INFO to see every SQL statement.
             "sqlalchemy.engine": {"level": "WARNING"},
+            # The openai SDK's HTTP client logs every request at INFO: one
+            # line per model call, thousands under load. Our own
+            # "chat answered" line already records each answer.
+            "httpx2": {"level": "WARNING"},
+            "httpx": {"level": "WARNING"},
         },
     }
 
