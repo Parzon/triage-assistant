@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# env/secrets
+.env
+.env.*
+!.env.example
+
+# node
+node_modules/
+
+# OS/editor noise
+.DS_Store
