@@ -136,7 +136,7 @@ img=ghcr.io/<owner>/<name>-api; tag=0.1.0
 token=$(curl -s "https://ghcr.io/token?scope=repository:${img#ghcr.io/}:pull" | sed 's/.*"token":"\([^"]*\)".*/\1/')
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
   -H "Accept: application/vnd.oci.image.index.v1+json" "https://ghcr.io/v2/${img#ghcr.io/}/manifests/$tag"
-# 200: public. 401 or 403: private.
+# 200: public. 401 or 403: private, or no such image or tag.
 ```
 
 ## 5. First run, first release
