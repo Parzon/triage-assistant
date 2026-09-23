@@ -82,6 +82,11 @@ them is rotated, not just deleted.
   the old version keeps serving while they run (daily-work chapter). The
   teams migration (v0.2.0) is the worked example: measured under load,
   the previous release kept serving with 0 errors (performance chapter).
+- **Releases are never skipped when one contracts what another
+  expanded.** v0.3.0's migration turns on row-level security, which hides
+  every alert from v0.1.0 (it never says who is asking). Go through
+  v0.2.0, which does. A release note names the minimum version it can
+  follow.
 - **A breaking API change is a release note, not a surprise.** v0.2.0
   made every endpoint require a session: any script or integration
   calling the api needs one (`make session`, or a real sign-in), and

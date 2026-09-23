@@ -162,7 +162,10 @@ Each rule exists because breaking it cost something measurable here.
     place.** Every data route takes the caller's `Principal`. Reads go
     through the shared visibility query. What a caller cannot see is a 404.
     The model is only ever given what the asker may see. Hiding a button
-    is never the control. ([security](docs/handbook/security.md), ADR-0013)
+    is never the control. Postgres enforces the same rule underneath
+    (row-level security), so a forgotten filter returns nothing rather
+    than leaking. ([security](docs/handbook/security.md), ADR-0013,
+    ADR-0014)
 
 ## The handbook
 
@@ -464,6 +467,24 @@ something bites.
 - **Setting the tenant with a session-level `SET` through PgBouncer leaks
   it to the next client** on that server connection: `set_config(...,
   true)`, local to the transaction, tested.
+- **Under row-level security, a query that forgot the context returns
+  nothing, silently**: a test fixture's `DELETE FROM alerts` as the app
+  role deleted 0 rows. Declare the context (the fixture runs as an org
+  admin). Querying as the owner hides the policies entirely: test as the
+  app role.
+- **A setting reads `NULL` before it was ever set in a connection, and
+  `''` after the transaction that set it ended**: `''::bigint[]` is an
+  error. `nullif(..., '')` in the policy.
+- **A function call in a policy runs per row**: wrapped in a scalar
+  subquery, `(SELECT f(...))`, it is an InitPlan evaluated once. 44 ms
+  against 100 ms over 1 M rows. But `= ANY ((SELECT ...))` is the
+  *subquery* form of ANY (`bigint = bigint[]` error): cast it,
+  `(SELECT ...)::bigint[]`.
+- **`INSERT ... RETURNING` also needs the SELECT policy** to allow the
+  new row: the Alertmanager service reads every team, not only writes.
+- **The contract migration must not run before every instance sends the
+  context**: against the release before it, every alert would vanish.
+  Releases are never skipped (v0.2.0 → v0.3.0).
 - **A compose `${VAR:?message}` is checked for every service, including
   ones whose profile is off**: it would force demo passwords on
   deployments without the bundled Keycloak. The check lives in the
@@ -656,6 +677,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - releases and deploys (0011)
 - HTTPS at the edge (0012)
 - sign-in and team access (0013)
+- row-level security (0014)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -663,8 +685,6 @@ A merged ADR is never edited: a new one supersedes it.
 
 What a real launch still needs. Each item is a known gap, not an
 oversight:
-- **Row-level security** (issue #34): Postgres enforcing team isolation
-  itself, behind the app's checks. The expand half shipped with sign-in.
 - **Credentials for machine clients** (OAuth client credentials), and
   back-channel logout from the identity provider.
 - **Outside-in monitoring**: an uptime check, and a dead man's switch for

@@ -8,7 +8,7 @@ layer caught in this repo. All numbers are from the current `main`.
 | Layer | Runs against | Count | Command | Proves |
 |---|---|---|---|---|
 | api unit | nothing (pure Python) | 108 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model |
-| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, Keycloak, mock LLM | 82 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what; signing in through the real identity provider |
+| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, Keycloak, mock LLM | 91 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what, through the api and at the database (row-level security); signing in through the real identity provider |
 | web unit/component | jsdom (Vitest + React Testing Library) | 47 | `make test-web` | UI states, the sign-in gate, role-dependent UI, the SSE parser, error handling in the API client |
 | end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 12 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: signing in and out through Keycloak's page, two users seeing different alerts, a cross-site POST refused, incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
 | image | the production image | 2 checks | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem, and the operator CLI runs without touching the server's metrics directory |
@@ -21,7 +21,7 @@ layer caught in this repo. All numbers are from the current `main`.
 `make test` runs the api and web suites exactly as CI does. `make check`
 also runs lint and types. Run it before every push.
 
-**Coverage:** the api has **96.5% line+branch coverage** (gate: 85%, branch
+**Coverage:** the api has **96.6% line+branch coverage** (gate: 85%, branch
 coverage on). The web has **100% of lines and 95.7% of branches** (gates:
 85% lines, 80% branches). The api measures with
 `concurrency = ["greenlet", "thread"]`: without it, coverage loses track
@@ -43,7 +43,7 @@ Before pytest runs:
 The test database runs with `fsync=off` and `synchronous_commit=off`.
 Durability is useless for throwaway data, and every commit skips the
 disk flush. Keycloak starts first and boots (~20 s) while the images
-build and the migrations run. The 190 tests take ~22 s; with the stack
+build and the migrations run. The 199 tests take ~24 s; with the stack
 created and destroyed around them, `make test-api` takes ~40 s. `make
 test-fast` (unit tests only, no services) takes ~4 s.
 

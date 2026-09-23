@@ -149,9 +149,8 @@ class Alert(Base):
         Index("ix_alerts_team_id_created_at_id", "team_id", "created_at", "id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    # The database still gives this column a default (the "default" team)
-    # for the release before teams, which inserts without it: the expand
-    # half of the change (migration 3713e56869fa). Always set it.
+    # Row-level security (migration ce83ff21ab01, ADR-0014): the app role
+    # sees and changes only rows of the teams the transaction names.
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", name="fk_alerts_team_id"))
     source: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(Text)

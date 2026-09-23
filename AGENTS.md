@@ -115,6 +115,10 @@ Access control, for every change that touches data:
   trusted without that check.
 - What the caller cannot see is a 404, never a 403 that confirms it
   exists.
+- Postgres enforces the same rule with row-level security on `alerts`
+  (ADR-0014). A new table holding team data gets `ENABLE ROW LEVEL
+  SECURITY`, policies reading `app.*_team_ids`, and database-level tests
+  (`test_row_level_security.py`), in the same migration.
 - The model's context comes from the same visibility query as the list:
   never give the assistant data the asker could not read.
 - Never log tokens, cookies, authorization codes or alert text; log the

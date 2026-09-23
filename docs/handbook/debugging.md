@@ -357,6 +357,19 @@ store is never the bottleneck; the network round trip and the event loop
 are. 📘 `MONITOR` streams every command to your terminal and slows the
 server: never on a production instance.
 
+## Row-level security ✅
+
+"The table is empty" as the app role, but not as the owner: that is
+row-level security with no caller named (ADR-0014). `make psql` connects
+as the owner, which the policies do not apply to. To see what a caller
+sees, as the app role in a direct session:
+```
+SELECT set_config('app.read_team_ids', '{2,3}', false);   -- their team ids
+SELECT count(*) FROM alerts;
+```
+A 500 whose traceback says "new row violates row-level security policy"
+means the app skipped its own role check: Postgres refused the write.
+
 ## Signing in ✅
 
 A sign-in crosses the browser, the api and the identity provider, so look
