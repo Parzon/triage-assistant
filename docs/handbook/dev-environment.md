@@ -111,18 +111,46 @@ Windows checkout turns shell scripts into CRLF, and containers fail with
   for npm. That's a Dockerfile change: keep it in a local override, not
   in the shared Dockerfiles.
 
-## Editor
+## Editor: dev containers ✅
 
-`.vscode/extensions.json` recommends the Python, debugpy, Ruff, Docker
-and EditorConfig extensions. `.vscode/launch.json` attaches the debugger
-to the containerised api (`make debug-up`; the debugging chapter).
+The editor needs the project's packages for completion, type checking
+and debugging. Rather than installing Python and Node on every laptop,
+open the code *inside* the running containers:
 
-For code completion and type checking in the editor, the editor needs
-the packages. That's the one optional reason to install uv and Node on
-the host: `cd apps/api && uv sync` makes a local `.venv`, and `npm ci` in
-`apps/web` a local `node_modules`. Inside the containers, those
-paths are volumes, so the local copies never leak into the containers,
-and the reverse.
+- **VS Code:** install the Dev Containers extension. Run `make up`, then
+  "Dev Containers: Reopen in Container" and pick **api (Python 3.13)** or
+  **web (Node 24)**.
+- **JetBrains Gateway** and **GitHub Codespaces** read the same files
+  (`.devcontainer/api/devcontainer.json`, `.devcontainer/web/devcontainer.json`).
+
+Each config attaches to the `make up` stack as a non-root user: `dev` in
+the api container, `node` in the web one. The api image's `dev` user is
+built with your UID and GID (`make` passes `DEV_UID`/`DEV_GID`), so on
+Linux files you create stay yours.
+
+✅ Verified with the Dev Containers CLI, against a running dev stack:
+- In the api container: user `dev`; Python imports; ruff; a new file in
+  the source tree belongs to UID 1000.
+- In the web container: user `node`; Node 24; `node_modules` resolves;
+  `tsc` 6.0.3.
+
+Upgrading a checkout from before the non-root dev image? Run `make
+fix-perms` once: caches written when the container ran as root
+(`.mypy_cache`) are otherwise unwritable, and mypy fails with an "INTERNAL
+ERROR".
+
+Without dev containers, the fallback is to install uv and Node on the
+host: `cd apps/api && uv sync` gives the editor a local `.venv`, and `npm
+ci` in `apps/web` a local `node_modules`. Inside the containers those
+paths are volumes, so nothing leaks either way.
+
+`.vscode/extensions.json` recommends the extensions, and
+`.vscode/launch.json` attaches the debugger to the containerised api
+(`make debug-up`; the debugging chapter).
+
+`make hooks` installs a pre-push hook that runs lint, types and unit
+tests in containers (~10 s) before anything leaves your machine. CI still
+runs everything.
 
 ## Ports on your machine
 

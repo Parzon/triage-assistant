@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Before anything leaves your machine: the fast half of what CI checks
+# (lint, types, unit tests - about 10 seconds, all in containers, so it
+# behaves the same on every OS). CI still runs everything.
+#   make hooks      install it (per clone)
+#   git push --no-verify   skip it, when you really mean to
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: make lint typecheck test-fast"
+make --no-print-directory lint typecheck test-fast
