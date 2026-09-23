@@ -21,6 +21,9 @@ services:
       PUBLIC_URL: http://localhost:${WEB_PORT:-5173}
       OIDC_ISSUER: http://localhost:${WEB_PORT:-5173}/auth/realms/triage
       SESSION_COOKIE_SECURE: "false"
+      # Evals only (make evals), so development only: the key of a judge at
+      # another provider than the model under test. Empty: LLM_API_KEY.
+      JUDGE_API_KEY: ${JUDGE_API_KEY:-}
     volumes:
       - ./apps/api:/api
       # Anonymous volume: keeps the image's .venv visible under the bind

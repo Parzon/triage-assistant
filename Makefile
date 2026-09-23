@@ -22,7 +22,7 @@ S    ?=
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore acme-test fresh-host-test drills image-check session revoke seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
-        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
+        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -108,6 +108,20 @@ mock: ## Mock LLM: show config+stats; change: c='{"fail_mode":"http_429"}' / c='
 	  print(post("reset", "{}") if c == "reset" else post("config", c) if c else \
 	        "config " + u.urlopen(base + "config").read().decode() + "\nstats  " + u.urlopen(base + "stats").read().decode())' '$(c)'
 
+# --- A real model on this machine (Ollama, profile "ollama") ----------------------
+
+ollama-pull: ## Download a model into the local Ollama: make ollama-pull m=llama3.1:8b (starts the service)
+	@test -n "$(m)" || { echo 'usage: make ollama-pull m=<model>'; exit 2; }
+	$(DEV) --profile ollama up -d --wait ollama
+	$(DEV) --profile ollama exec ollama ollama pull $(m)
+
+# --- Evals (apps/api/evals; docs/handbook/ai-engineering.md) -------------------------
+# In the running dev api: the service's own settings, prompt and model client.
+# CI runs plumbing mode against the mock (tests/integration/test_evals.py).
+
+evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model gemma3:27b --repeat 3"]; a="--calibrate-judge ..."
+	$(DEV) exec -T api python -m evals $(a)
+
 # --- Code quality ---------------------------------------------------------------
 
 lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/
@@ -134,8 +148,11 @@ test: test-api test-web ## Every test suite (api + web), as CI runs them
 # its own images - without it, tests silently run against stale dependencies.
 # Keycloak starts first and boots (~20s) while images build and migrations
 # run; the sign-in tests wait for it (tests/integration/test_auth_flow.py).
+# `run --build` rebuilds the service it runs, not its dependencies: the mock
+# is built explicitly, or a change to it is tested against a stale image.
 test-api: ## api suite + coverage gate, in a throwaway stack (real Postgres/PgBouncer/Valkey/Keycloak/mock LLM)
 	@$(TEST) up -d keycloak \
+	  && $(TEST) build -q mock-llm \
 	  && $(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check' \
 	  && $(TEST) run --build --rm $(AS_ME) api pytest --cov --cov-report=term --cov-report=xml:coverage.xml; \
 	  status=$$?; $(TEST) down --volumes --remove-orphans >/dev/null 2>&1; exit $$status

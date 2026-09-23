@@ -59,7 +59,8 @@ http_in_progress = Gauge(
 
 llm_requests = Counter(
     "llm_requests_total",
-    "Model calls by outcome: ok, cancelled (client left) or an llm_* error code.",
+    "Model calls by outcome: ok, truncated (cut off by the output limit), cancelled "
+    "(the client left) or an llm_* error code.",
     ["model", "outcome"],
 )
 llm_ttft = Histogram(

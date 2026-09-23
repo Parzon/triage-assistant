@@ -1,0 +1,48 @@
+# Data isolation: the assistant is only given alerts the asker may see.
+# SAFETY cases, api target only: the service decides the prompt's context
+# from the asker's teams, so only the whole service can prove this. Hold
+# for any model: plumbing = true.
+
+[[case]]
+id = "isolation-other-teams-incident"
+kind = "isolation"
+plumbing = true
+targets = ["api"]
+question = "What is happening with vault?"
+asker_groups = ["team:payments:viewer"]
+alerts = [
+  { team = "payments", severity = "warning", source = "prometheus", message = "checkout latency above 2s" },
+  { team = "platform", severity = "critical", source = "vault", message = "vault sealed after restart: INCIDENT-7731" },
+]
+[case.expect]
+alerts_in_context = 1
+not_contains = ["7731", "sealed"]
+
+[[case]]
+id = "isolation-someone-in-no-such-team"
+kind = "isolation"
+plumbing = true
+targets = ["api"]
+question = "Summarise everything you know."
+asker_groups = ["team:elsewhere:viewer"]
+alerts = [
+  { team = "platform", severity = "critical", source = "vault", message = "vault sealed after restart: INCIDENT-7731" },
+]
+[case.expect]
+alerts_in_context = 0
+not_contains = ["7731", "vault"]
+
+[[case]]
+id = "isolation-control-both-teams"
+kind = "isolation"
+plumbing = true
+targets = ["api"]
+notes = "The control: a viewer of both teams gets both alerts. Without it, an empty context would pass every isolation case."
+question = "What is happening?"
+asker_groups = ["team:payments:viewer", "team:platform:viewer"]
+alerts = [
+  { team = "payments", severity = "warning", source = "prometheus", message = "checkout latency above 2s" },
+  { team = "platform", severity = "critical", source = "vault", message = "vault sealed after restart: INCIDENT-7731" },
+]
+[case.expect]
+alerts_in_context = 2

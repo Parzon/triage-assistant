@@ -280,7 +280,8 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `LLM_READ_TIMEOUT_S` | 60 | max silence from the provider, first token included |
 | `LLM_STREAM_TIMEOUT_S` | 120 | whole answer |
 | `LLM_MAX_RETRIES` | 1 | the SDK's default is 2, with a 600 s read timeout |
-| `LLM_MAX_OUTPUT_TOKENS` | 800 | cost and latency cap |
+| `LLM_MAX_OUTPUT_TOKENS` | 800 | cost and latency cap. A reasoning model's hidden thinking counts against it |
+| `LLM_REASONING_EFFORT` | empty (not sent) | reasoning models only: `low`, `medium` or `high`. Other models reject the parameter. gpt-oss:20b: `low` (ai-engineering chapter) |
 | `CHAT_CONTEXT_ALERTS` | 20 | recent alerts put in the prompt |
 | `SSE_HEARTBEAT_S` | 15 | keep-alive comments while the model is silent; below every proxy's idle timeout |
 | `ALERTMANAGER_WEBHOOK_TOKEN` | empty (webhook off) | shared with Alertmanager |
@@ -293,6 +294,7 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `OIDC_TIMEOUT_S` | 5 | each call to the provider |
 | `SESSION_MAX_AGE_S` / `SESSION_IDLE_TIMEOUT_S` | 43200 / 7200 | a session ends 12 h after sign-in or 2 h after its last request; role changes apply at the next sign-in |
 | `SESSION_COOKIE_SECURE` | `true` | `false` only for plain-HTTP dev (the dev overlay sets it): the cookie is then `triage_session`, not `__Host-triage_session` |
+| `JUDGE_API_KEY` | empty (`LLM_API_KEY`) | development only, for `make evals`: the key of a judge at another provider than the model under test |
 
 **gunicorn** (`apps/api/gunicorn.conf.py`, production image only):
 

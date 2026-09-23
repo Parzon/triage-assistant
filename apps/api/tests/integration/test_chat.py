@@ -189,3 +189,24 @@ async def test_no_database_connection_is_held_while_the_answer_streams(
             if line.startswith("event: token"):
                 assert app.state.engine.pool.checkedout() == 0
                 break
+
+
+async def test_an_empty_answer_is_an_error_event(client: AsyncClient, mock_llm: MockLLM) -> None:
+    # What a reasoning model does when thinking uses the whole output limit.
+    await mock_llm.configure(fail_mode="empty_answer")
+    _, body = await ask(client)
+    name, data = events_of(body)[-1]
+    assert (name, data["code"]) == ("error", "llm_empty_answer")
+
+
+async def test_an_answer_cut_by_the_output_limit_is_flagged(
+    settings: Settings, mock_llm: MockLLM
+) -> None:
+    app = create_app(settings.model_copy(update={"llm_max_output_tokens": 5}))
+    async with (
+        app.router.lifespan_context(app),
+        await signed_in(app, "team:default:viewer") as client,
+    ):
+        _, body = await ask(client)
+    name, data = events_of(body)[-1]
+    assert (name, data["finish_reason"]) == ("done", "length")

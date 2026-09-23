@@ -31,6 +31,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:8020/v1}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-mock-1}
+      # Reasoning models only (low | medium | high); empty = not sent.
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       # Per client per minute. Load tests raise them (make load).
       ALERTS_RATE_LIMIT: ${ALERTS_RATE_LIMIT:-60}
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}
@@ -88,6 +90,36 @@ services:
     build:
       context: ./tools/mock-llm
     profiles: ["mock"]
+    restart: unless-stopped
+    logging: *logging
+
+  # A real model on this machine, served OpenAI-compatibly at
+  # http://ollama:11434/v1: for evals and realistic latency without a
+  # provider key. Profile "ollama"; `make ollama-pull m=<model>` downloads
+  # one. The GPU reservation needs an NVIDIA GPU and the NVIDIA container
+  # toolkit; on a Mac, run the Ollama app natively instead (containers cannot
+  # use Apple's GPU) and point LLM_BASE_URL at
+  # http://host.docker.internal:11434/v1.
+  ollama:
+    image: ollama/ollama:0.34.3
+    profiles: ["ollama"]
+    environment:
+      # Unload a model after 5 idle minutes: its GPU memory goes back.
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
     logging: *logging
 
@@ -388,6 +420,7 @@ secrets:
 
 volumes:
   pgdata:
+  ollama-models:
   prometheus-data:
   alertmanager-data:
   grafana-data:

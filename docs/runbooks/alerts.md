@@ -133,7 +133,8 @@ explains how the last leak worked.
 ## LLMErrors
 
 **Users:** chat answers end with an error: `llm_unavailable`,
-`llm_rate_limited`, `llm_timeout` or `llm_error`. Everything else works.
+`llm_rate_limited`, `llm_timeout`, `llm_empty_answer` or `llm_error`.
+Everything else works.
 **Check:** the "Model calls by outcome" panel (which code), the
 provider's status page, and the key's quota in the provider console.
 **Codes:**
@@ -143,6 +144,9 @@ provider's status page, and the key's quota in the provider console.
 - `llm_unavailable`: the provider is down, returns 5xx, or the
   connection broke mid-answer.
 - `llm_timeout`: the provider is slow (LLMSlowFirstToken).
+- `llm_empty_answer`: the model finished without a word. Almost always a
+  reasoning model that spent the whole `LLM_MAX_OUTPUT_TOKENS` thinking:
+  see LLMAnswersTruncated.
 
 ## LLMSlowFirstToken
 
@@ -150,6 +154,17 @@ provider's status page, and the key's quota in the provider console.
 **Check:** the provider's latency and status. The model and prompt
 size: `CHAT_CONTEXT_ALERTS` alerts go into every prompt. Then our
 event-loop lag (a busy api delays tokens too).
+
+## LLMAnswersTruncated
+
+**Users:** answers stop mid-sentence, with "The answer was cut short: it
+reached the length limit." under them.
+**Check:** the `finish_reason` in the api's "chat answered" log lines,
+and whether the model or `LLM_REASONING_EFFORT` changed recently. A
+reasoning model's hidden thinking counts against `LLM_MAX_OUTPUT_TOKENS`.
+**Fix:** lower `LLM_REASONING_EFFORT`, or raise `LLM_MAX_OUTPUT_TOKENS`,
+which raises cost and latency. Run the evals before and after either
+change (`make evals`).
 
 ## IdentityProviderDown
 

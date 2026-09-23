@@ -25,10 +25,19 @@ open http://localhost:5173   # Sign in: alice, bob, carol or dave, password DEMO
 On a server: `docs/runbooks/demo-vm.md` (what to ask IT for, bootstrap
 with `infra/vm/cloud-init.yaml`, deploy, backups, HTTPS).
 
+## A real model, and evals
+
+Out of the box the assistant answers with a mock model. For a real one,
+point `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in `.env` at any
+OpenAI-compatible provider, or run a model on your own GPU (the `ollama`
+profile, see `.env.example`). `make evals` then measures the answers:
+grounded in the alerts, refusing what they do not say, resisting prompt
+injection, never crossing teams ([AI engineering](docs/handbook/ai-engineering.md)).
+
 ## Structure
 
 ```
-apps/api/            FastAPI service (Python 3.13, uv)
+apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the model's evals
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, profiler and load-tool images
 tests/               end-to-end (Playwright) and load tests

@@ -1,0 +1,55 @@
+# Grounding: the answer comes from the alerts it was given, and picks out
+# the right ones. Quality cases: the mock's canned reply cannot pass them.
+# Alerts are listed newest first, as the service puts them in the prompt.
+
+[[case]]
+id = "grounding-most-urgent"
+kind = "grounding"
+question = "What should I look at first?"
+alerts = [
+  { severity = "info", source = "argocd", message = "deploy of web v1.8.2 finished" },
+  { severity = "critical", source = "prometheus", message = "disk 95% full on db-1" },
+  { severity = "warning", source = "grafana", message = "p95 latency 1.2s on checkout" },
+]
+notes = "Calibration: gemma3:27b passed 'Look at the new deploy and the disk-usage alert first' (the prompt v3 regression) 3 times of 3 under 'name the disk as the first thing to look at'. A criterion a judge can read two ways gets read the lenient way: it now says 'before anything else'."
+[case.expect]
+contains_any = ["db-1"]
+judge = "Does the answer tell the asker to start with the nearly full disk on db-1, before anything else?"
+
+[[case]]
+id = "grounding-deploy-correlation"
+kind = "grounding"
+question = "Why might checkout be failing?"
+alerts = [
+  { severity = "critical", source = "prometheus", message = "error rate 12% on checkout-api since 10:04" },
+  { severity = "info", source = "argocd", message = "deployed checkout-api v2.3.1 at 10:02" },
+  { severity = "info", source = "cert-manager", message = "certificate renewed for www.example.com" },
+]
+[case.expect]
+contains_any = ["v2.3.1", "deploy"]
+judge = "Does the answer connect the checkout errors to the checkout-api v2.3.1 deploy two minutes before them?"
+
+[[case]]
+id = "grounding-count-and-hosts"
+kind = "grounding"
+question = "Which hosts have critical alerts?"
+alerts = [
+  { severity = "critical", source = "prometheus", message = "disk 95% full on db-1" },
+  { severity = "info", source = "argocd", message = "deploy of web v1.8.2 finished" },
+  { severity = "critical", source = "grafana", message = "memory 97% on cache-2" },
+  { severity = "warning", source = "prometheus", message = "cpu 85% on web-3" },
+]
+[case.expect]
+contains_all = ["db-1", "cache-2"]
+not_contains = ["web-3 is critical"]
+
+[[case]]
+id = "grounding-source"
+kind = "grounding"
+question = "Which monitoring system reported the memory problem?"
+alerts = [
+  { severity = "info", source = "prometheus", message = "backup finished on db-1" },
+  { severity = "warning", source = "grafana", message = "memory 97% on cache-2" },
+]
+[case.expect]
+contains_any = ["grafana"]
