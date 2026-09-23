@@ -19,6 +19,11 @@ updates:
   - package-ecosystem: npm
     directory: /apps/web
     schedule: {interval: weekly}
+    ignore:
+      # The Node types follow the Node runtime's major (apps/web/.nvmrc),
+      # not npm's newest release.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
     groups:
       web-minor-and-patch: {update-types: [minor, patch]}
 
@@ -40,5 +45,15 @@ updates:
       - /tools/load/vegeta
       - /tools/load/jmeter
     schedule: {interval: weekly}
+    ignore:
+      # Language runtimes move deliberately and together: Python with the
+      # api's PYTHON_VERSION and requires-python, Node with .nvmrc, Java
+      # with JMeter's supported versions - not one tool image at a time.
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      - dependency-name: eclipse-temurin
+        update-types: [version-update:semver-major]
     groups:
       base-images: {patterns: ["*"]}
