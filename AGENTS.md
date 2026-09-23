@@ -68,6 +68,14 @@ Run `make` to list every target. The ones you need most:
   (rate limits raised, as for load tests) and records what users see;
   `make drills d="db-freeze deploy"` runs a selection. Run the database
   drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010).
+- Evals (the model's answers, not the code; `apps/api/evals`, docs/handbook/ai-engineering.md):
+  `make evals` runs them in the dev api against `LLM_*` (quality mode). Before
+  merging any change to `SYSTEM_PROMPT` or the model: `make evals a="--judge
+  --judge-model gemma3:27b --repeat 10 --baseline evals/baselines/gpt-oss-20b.json"`,
+  with the before/after numbers in the PR. `a="--calibrate-judge ..."` checks the
+  judge against labelled answers. A real model locally: add `ollama` to
+  `COMPOSE_PROFILES`, `make ollama-pull m=gpt-oss:20b`, point `LLM_*` at it
+  (`.env.example`). CI runs plumbing mode with the mock.
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults
@@ -135,3 +143,7 @@ Access control, for every change that touches data:
   the PR description first.
 - Don't edit a merged `docs/adr/*.md` file — write a new ADR that
   supersedes it instead.
+- Don't weaken, delete or re-label an eval case or a calibration answer to
+  make a run pass. A failing case is a claim to investigate: read the
+  answer and the judge's reason, and change a check only when the check is
+  shown wrong, in its own commit, saying why in the case's `notes`.

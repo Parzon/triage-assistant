@@ -22,6 +22,7 @@ needs a real cloud account). Where the two differ, trust ✅.
 | on call | [alert runbook](docs/runbooks/alerts.md) → [debugging](docs/handbook/debugging.md) → [failure modes](docs/handbook/failure-modes.md) |
 | preparing a demo or a server | [the VM runbook](docs/runbooks/demo-vm.md) (includes the request to send IT) |
 | on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
+| changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
 | deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
 
 ## The system on one page
@@ -166,6 +167,11 @@ Each rule exists because breaking it cost something measurable here.
     (row-level security), so a forgotten filter returns nothing rather
     than leaking. ([security](docs/handbook/security.md), ADR-0013,
     ADR-0014)
+19. **A prompt or model change ships with eval runs before and after.**
+    The whole suite, repeated, against the baseline, with a calibrated
+    judge. Every prompt fix here had a side effect elsewhere, and a
+    2.5% failure showed only in 200 runs.
+    ([AI engineering](docs/handbook/ai-engineering.md), ADR-0016)
 
 ## The handbook
 
@@ -181,6 +187,7 @@ Each rule exists because breaking it cost something measurable here.
 | [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
 | [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
 | [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
+| [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md) | an alert fired; setting up or operating a server |
@@ -546,6 +553,39 @@ something bites.
   attempt prompt injection.** There are no tools, so the worst case is a
   wrong answer.
 
+### The model, the prompt and evals
+All measured with gpt-oss:20b and gemma3:27b; the evidence is in
+[AI engineering](docs/handbook/ai-engineering.md).
+- **A reasoning model's thinking counts against the output limit.** At
+  its default effort, gpt-oss spent all 800 tokens thinking in 3 answers
+  of 5 and said nothing. Set `LLM_REASONING_EFFORT=low`, and treat an
+  empty answer as an error (`llm_empty_answer`), never a blank success.
+- **Only send parameters the model supports.** `reasoning_effort` makes
+  models without reasoning answer HTTP 400. OpenAI's reasoning models
+  refuse any temperature but 1.
+- **More reasoning is not more safety.** At medium effort, v4 printed
+  its prompt 1 run in 3, and cost 3× the tokens.
+- **Every prompt rule has side effects.** "If there are no alerts, say
+  so" made the model say "There are no alerts." when there was one, 8
+  runs in 40. Run the whole suite, not only the case you fixed.
+- **Small samples hide rare failures.** 110 passing calls missed a
+  failure that happens 1 run in 40. Zero failures in *n* runs means a
+  rate below about 3/*n*.
+- **A check that passes a wrong answer is worse than none.** Read the
+  answers, not just the pass rate.
+- **Model output uses typography**: a non-breaking hyphen in `db‑1`, a
+  curly apostrophe. Normalise before substring checks.
+- **A check that quotes the prompt goes blind when the prompt is
+  reworded.** Compare against the current prompt.
+- **An LLM judge fails silently unless a missing verdict fails the run.**
+  Here it inherited a parameter it rejects, and every check "passed".
+- **Calibrate the judge on labelled answers, including bad ones.**
+  Laid out as `Question: … Answer: …`, it graded correctness and passed
+  "The capital of France is Paris." as a refusal. Negated criteria
+  ("without claiming…") passed wrong answers 3 runs in 3.
+- **Safety cases never rest on the judge alone.** It reads output from
+  a model that may have been injected.
+
 ### Observability
 - **A ratio with a numerator that doesn't exist yet is "no data", not 0**:
   `or vector(0)`. ([observability](docs/handbook/observability.md))
@@ -699,6 +739,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - sign-in and team access (0013)
 - row-level security (0014)
 - rollbacks roll back code, not the schema (0015)
+- evals gate prompt and model changes (0016)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -716,6 +757,9 @@ oversight:
   acme-test`); a real domain is the step left.
 - **Image and secret scanning** in CI (GitHub's secret scanning with push
   protection is on).
+- **Quality evals on a schedule** against the production model, and
+  real answers sampled into the eval set. Today quality evals run on
+  demand, against a local model.
 - **Tracing (OpenTelemetry) and central logs**, once there is more than
   one service or host.
 

@@ -68,7 +68,14 @@ class Settings(BaseSettings):
     # Retries happen before the first token only; each one is added latency
     # the user watches, so keep it low for chat.
     llm_max_retries: int = Field(1, ge=0)
+    # For reasoning models (OpenAI's o-series and gpt-5, gpt-oss) the limit
+    # includes their hidden thinking: measured with gpt-oss:20b at the default
+    # effort, 3 of 5 answers spent all 800 tokens thinking and said nothing.
     llm_max_output_tokens: int = Field(800, ge=1)
+    # Reasoning models only ("low" | "medium" | "high"): how much they think
+    # before answering. Unset = not sent - other models reject the parameter.
+    # gpt-oss:20b at "low": 65-308 tokens instead of 460-800.
+    llm_reasoning_effort: Literal["low", "medium", "high"] | None = None
     chat_context_alerts: int = Field(20, ge=0)
     # SSE comment sent when nothing else has been for this long, so proxies
     # and load balancers (idle timeouts of ~60s) keep the stream open while
@@ -122,6 +129,11 @@ class Settings(BaseSettings):
         if url.scheme not in ("http", "https") or not url.netloc or url.path not in ("", "/"):
             raise ValueError("PUBLIC_URL must be scheme://host[:port] with no path")
         return f"{url.scheme}://{url.netloc}"
+
+    @field_validator("llm_reasoning_effort", mode="before")
+    @classmethod
+    def _empty_effort_means_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("oidc_discovery_url", mode="before")
     @classmethod

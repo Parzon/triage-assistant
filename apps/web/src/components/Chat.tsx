@@ -16,6 +16,7 @@ interface Meta {
   alertsInContext: number
   ttftMs?: number | null
   durationMs?: number | null
+  truncated?: boolean
 }
 
 const STATUS_TEXT: Record<Status, string> = {
@@ -57,7 +58,15 @@ export function Chat() {
           // Tokens carry their own spacing and newlines: append verbatim.
           setAnswer((text) => text + event.delta)
         } else if (event.type === 'done') {
-          setMeta((m) => m && { ...m, ttftMs: event.ttftMs, durationMs: event.durationMs })
+          setMeta(
+            (m) =>
+              m && {
+                ...m,
+                ttftMs: event.ttftMs,
+                durationMs: event.durationMs,
+                truncated: event.finishReason === 'length',
+              },
+          )
           setStatus('done')
         } else {
           setFailure({ code: event.code, message: event.message, requestId: event.requestId })
@@ -120,6 +129,9 @@ export function Chat() {
       <div className="answer" aria-live="polite" aria-busy={busy}>
         {answer}
       </div>
+      {meta?.truncated && (
+        <p className="muted">The answer was cut short: it reached the length limit.</p>
+      )}
 
       {failure && (
         <div className="error" role="alert">

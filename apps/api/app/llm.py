@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 import openai
-from openai import AsyncOpenAI, Timeout
+from openai import AsyncOpenAI, Timeout, omit
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.config import Settings
@@ -21,6 +21,16 @@ from app.config import Settings
 class Usage:
     prompt_tokens: int
     completion_tokens: int
+
+
+@dataclass(frozen=True)
+class Finish:
+    """Why the provider stopped: "stop" (the answer is complete), "length"
+    (the output limit cut it), or another reason it reports
+    ("content_filter"). Reasoning models spend hidden tokens first: a
+    "length" with no text at all means they used the whole budget thinking."""
+
+    reason: str
 
 
 class LLMError(Exception):
@@ -41,18 +51,32 @@ class LLMUnavailable(LLMError):
     code = "llm_unavailable"
 
 
+class LLMEmptyAnswer(LLMError):
+    code = "llm_empty_answer"
+
+
 class LLMClient(Protocol):
     model: str
 
-    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage]: ...
+    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage | Finish]: ...
 
     async def aclose(self) -> None: ...
 
 
 class OpenAICompatibleClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, temperature: float | None = None) -> None:
         self.model = settings.llm_model
         self._max_tokens = settings.llm_max_output_tokens
+        # None = not sent: the provider's default, and the only value OpenAI's
+        # reasoning models accept. The service leaves it unset; the eval
+        # judge sends 0.
+        self._temperature = temperature
+        # Only when configured: non-reasoning models reject the parameter.
+        self._extra: dict[str, str] = (
+            {"reasoning_effort": settings.llm_reasoning_effort}
+            if settings.llm_reasoning_effort
+            else {}
+        )
         self._client = AsyncOpenAI(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key.get_secret_value(),
@@ -68,7 +92,7 @@ class OpenAICompatibleClient:
             max_retries=settings.llm_max_retries,
         )
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage]:
+    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage | Finish]:
         try:
             stream = await self._client.chat.completions.create(
                 model=self.model,
@@ -80,6 +104,8 @@ class OpenAICompatibleClient:
                 # max_tokens, not max_completion_tokens: the latter is
                 # OpenAI-only; every compatible server accepts max_tokens.
                 max_tokens=self._max_tokens,
+                temperature=omit if self._temperature is None else self._temperature,
+                extra_body=self._extra or None,
             )
             # Leaving this block (done, error, or cancelled because the
             # client hung up) closes the HTTP stream, which is what tells
@@ -91,6 +117,8 @@ class OpenAICompatibleClient:
                     for choice in chunk.choices:
                         if choice.delta.content:
                             yield choice.delta.content
+                        if choice.finish_reason:
+                            yield Finish(choice.finish_reason)
         # The SDK maps transport failures to its own exceptions both before
         # and during the stream. Order matters: APITimeoutError is a
         # subclass of APIConnectionError.

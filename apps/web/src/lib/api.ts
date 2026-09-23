@@ -43,7 +43,14 @@ export async function toApiError(res: Response): Promise<ApiError> {
 export type ChatEvent =
   | { type: 'meta'; requestId: string; model: string; alertsInContext: number }
   | { type: 'token'; delta: string }
-  | { type: 'done'; ttftMs: number | null; durationMs: number | null; completionTokens: number | null }
+  | {
+      type: 'done'
+      ttftMs: number | null
+      durationMs: number | null
+      completionTokens: number | null
+      /** "length": the answer was cut off by the output limit. */
+      finishReason: string | null
+    }
   | { type: 'error'; code: string; message: string; requestId: string }
 
 /**
@@ -83,6 +90,7 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
           ttftMs: payload.ttft_ms,
           durationMs: payload.duration_ms,
           completionTokens: payload.usage?.completion_tokens ?? null,
+          finishReason: payload.finish_reason ?? null,
         }
         break
       case 'error':

@@ -259,7 +259,15 @@ query.
   the worst a successful injection can do is produce a wrong or
   misleading answer. If the assistant ever gets actions (restart a
   service, open a ticket), every action needs human confirmation, and
-  the permissions of the account behind it bound the damage.
+  the permissions of the account behind it bound the damage. The
+  injection eval cases measure how often the prompt holds, and they are
+  a release gate: every run must pass
+  ([AI engineering](ai-engineering.md)).
+- **The system prompt is not a secret.** It is in this public repo.
+  Measured: prompt v4 printed itself 5 times in 200 when an alert asked
+  it to; v5, 0 in 200. Rarer is not never. Never put credentials,
+  internal URLs or anything confidential in a prompt, and never make it
+  the thing that enforces access (OWASP LLM07).
 - **Output handling.** The answer is rendered as text (`white-space:
   pre-wrap`), never as HTML or markdown. A model coaxed into writing
   `<script>` shows it, rather than running it. Keep it that way, or

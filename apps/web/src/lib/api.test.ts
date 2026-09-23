@@ -52,14 +52,14 @@ describe('streamChat', () => {
         sseBody(
           'event: meta\ndata: {"request_id":"r","model":"m","alerts_in_context":3}\n\n' +
             'event: token\ndata: {"delta":"Hi\\n"}\n\n' +
-            'event: done\ndata: {"usage":{"prompt_tokens":1,"completion_tokens":2},"ttft_ms":12.5,"duration_ms":40}\n\n',
+            'event: done\ndata: {"usage":{"prompt_tokens":1,"completion_tokens":2},"ttft_ms":12.5,"duration_ms":40,"finish_reason":"stop"}\n\n',
         ),
       ),
     )
     expect(await all(streamChat('q'))).toEqual([
       { type: 'meta', requestId: 'r', model: 'm', alertsInContext: 3 },
       { type: 'token', delta: 'Hi\n' },
-      { type: 'done', ttftMs: 12.5, durationMs: 40, completionTokens: 2 },
+      { type: 'done', ttftMs: 12.5, durationMs: 40, completionTokens: 2, finishReason: 'stop' },
     ])
   })
 

@@ -7,11 +7,13 @@ layer caught in this repo. All numbers are from the current `main`.
 
 | Layer | Runs against | Count | Command | Proves |
 |---|---|---|---|---|
-| api unit | nothing (pure Python) | 108 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model |
-| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, Keycloak, mock LLM | 91 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what, through the api and at the database (row-level security); signing in through the real identity provider |
-| web unit/component | jsdom (Vitest + React Testing Library) | 47 | `make test-web` | UI states, the sign-in gate, role-dependent UI, the SSE parser, error handling in the API client |
+| api unit | nothing (pure Python) | 134 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model, the eval harness's checks, gate and judge parsing |
+| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, Keycloak, mock LLM | 95 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what, through the api and at the database (row-level security); signing in through the real identity provider |
+| web unit/component | jsdom (Vitest + React Testing Library) | 49 | `make test-web` | UI states, the sign-in gate, role-dependent UI, the SSE parser, error handling in the API client |
 | end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 12 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: signing in and out through Keycloak's page, two users seeing different alerts, a cross-site POST refused, incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
 | image | the production image | 2 checks | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem, and the operator CLI runs without touching the server's metrics directory |
+| evals, plumbing | the mock, through the model and api targets | every CI run (in the integration suite) | `make test-api` | the eval harness, the service and the gate work end to end; isolation and injection cases hold with a canned model |
+| evals, quality | a real model (Ollama locally, or a provider) | 14 cases, before a prompt or model change | `make evals a="--judge --repeat 10 --baseline ..."` | answers stay grounded, refuse what the alerts do not say, resist injection, never cross teams: a pass rate per case ([AI engineering](ai-engineering.md)) |
 | load | the production stack | on demand | `make load`, `make load-compare` | capacity, latency under load (performance chapter) |
 | failure drills | the production stack | 22 drills | `make drills` | what users see when each dependency fails, and that it recovers (failure-modes chapter) |
 | fresh host | a clean Docker host (DinD) | 1 run | `make fresh-host-test` | the committed tree comes up from `.env.example` alone, serving HTTPS |
@@ -21,8 +23,8 @@ layer caught in this repo. All numbers are from the current `main`.
 `make test` runs the api and web suites exactly as CI does. `make check`
 also runs lint and types. Run it before every push.
 
-**Coverage:** the api has **96.6% line+branch coverage** (gate: 85%, branch
-coverage on). The web has **100% of lines and 95.7% of branches** (gates:
+**Coverage:** the api has **94.1% line+branch coverage**, the eval harness
+included (gate: 85%, branch coverage on). The web has **100% of lines and 95.7% of branches** (gates:
 85% lines, 80% branches). The api measures with
 `concurrency = ["greenlet", "thread"]`: without it, coverage loses track
 at SQLAlchemy's greenlet switches and reports the lines after an `await
@@ -116,6 +118,10 @@ Real incidents in this repo, and the layer that found them:
 | the operator CLI crashed in the production image: an empty `PROMETHEUS_MULTIPROC_DIR` still turns multiprocess mode on, pointed at a relative path on a read-only root | `OSError: Read-only file system` from `make load` | running it against the production stack; now `make image-check` |
 | the first sign-in design doubled CPU per request and collapsed at 1,000 req/s (p95 1.07 s) | fine at low load, every functional test green | only an A/B load test |
 | an identity provider outage was invisible: sign-in redirects came from cached metadata | no failed request anywhere | only the `idp-stop` drill; now a 30 s check, `/ready` and an alert |
+| a reasoning model spent the whole output limit thinking and returned nothing, which the service reported as a successful, blank answer | an empty chat bubble, outcome `ok` | a quality eval run (3 answers in 5); now `llm_empty_answer` and a test |
+| every judge check "passed" while the judge was failing every call (HTTP 400: it had inherited a parameter it does not support) | a green eval report | reading the report: the judge had no verdicts; now a missing verdict fails the run |
+| prompt v4 answered "There are no alerts." with an alert in the list, 8 runs in 40 | a green eval report: the case's only check looked for "Paris" | reading the answers, then a stronger case; fixed in prompt v5 |
+| prompt v4 printed its own instructions when an alert asked it to, 5 runs in 200 | 110 calls over 10 runs had all passed | only 200 runs of the one case |
 
 Each layer earns its place by finding a class of bug the layer below
 could not.
@@ -147,6 +153,10 @@ request sees), not on internal calls.
 Playwright runs with `retries: 0`, and nothing is retried in pytest. A
 test that fails sometimes is reporting a race, in the test or in the
 app. Both are bugs. Retrying hides the second kind.
+
+A model's answers are the exception: they vary by design, so evals
+measure a pass rate over repeated runs instead of retrying
+([AI engineering](ai-engineering.md)).
 
 Common causes met here:
 - **Done-callbacks.** asyncio runs them one loop iteration after the

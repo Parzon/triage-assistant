@@ -10,7 +10,10 @@ Behaviour is tunable at runtime, so tests and failure drills switch modes
 without a restart:
     curl -X POST localhost:8020/_admin/config -d '{"fail_mode": "http_429"}'
 Knobs: ttft_ms, tokens_per_s, fail_mode (none | http_429 | http_500 | hang |
-drop_mid_stream), fail_rate (0..1, share of requests that fail).
+drop_mid_stream | empty_answer), fail_rate (0..1, share of requests that
+fail). empty_answer streams no text and stops with finish_reason "length":
+what a reasoning model does when its thinking uses the whole output limit.
+A max_tokens below the reply's length truncates it, with "length" too.
 The API key "invalid-key" (or none) gets a 401, like a real provider.
 GET /_admin/stats counts requests and streams - including streams the
 client abandoned, which is how cancellation is proven to reach the provider.
@@ -32,7 +35,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from pydantic import BaseModel, ConfigDict
 
-FAIL_MODES = {"none", "http_429", "http_500", "hang", "drop_mid_stream"}
+FAIL_MODES = {"none", "http_429", "http_500", "hang", "drop_mid_stream", "empty_answer"}
 
 
 @dataclass
@@ -128,7 +131,11 @@ async def chat_completions(
         return openai_error(500, "the server had an error", "server_error")
     requests_total.labels("200").inc()
 
-    tokens = tokenize(reply_for(body.messages))[: body.max_tokens]
+    reply = tokenize(reply_for(body.messages))
+    tokens = reply[: body.max_tokens]
+    finish_reason = "length" if len(tokens) < len(reply) else "stop"
+    if failing and behaviour.fail_mode == "empty_answer":
+        tokens, finish_reason = [], "length"
     prompt_tokens = sum(len(str(m.get("content", "")).split()) for m in body.messages)
     usage = {
         "prompt_tokens": prompt_tokens,
@@ -139,7 +146,7 @@ async def chat_completions(
     if not body.stream:
         await asyncio.sleep(behaviour.ttft_ms / 1000 + len(tokens) / behaviour.tokens_per_s)
         message = {"role": "assistant", "content": "".join(tokens)}
-        choice = {"index": 0, "message": message, "finish_reason": "stop"}
+        choice = {"index": 0, "message": message, "finish_reason": finish_reason}
         return JSONResponse(
             {
                 "id": completion_id,
@@ -152,7 +159,7 @@ async def chat_completions(
         )
     include_usage = bool((body.stream_options or {}).get("include_usage"))
     return StreamingResponse(
-        stream(completion_id, body.model, tokens, usage, include_usage, failing),
+        stream(completion_id, body.model, tokens, usage, include_usage, failing, finish_reason),
         media_type="text/event-stream",
     )
 
@@ -164,6 +171,7 @@ async def stream(
     usage: dict[str, int],
     include_usage: bool,
     failing: bool,
+    finish_reason: str = "stop",
 ) -> AsyncIterator[str]:
     stats.streams_started += 1
     stats.active_streams += 1
@@ -180,7 +188,7 @@ async def stream(
             choice = {"index": 0, "delta": {"content": token}, "finish_reason": None}
             yield chunk(completion_id, model, choices=[choice])
             await asyncio.sleep(1 / behaviour.tokens_per_s)
-        last = {"index": 0, "delta": {}, "finish_reason": "stop"}
+        last = {"index": 0, "delta": {}, "finish_reason": finish_reason}
         yield chunk(completion_id, model, choices=[last])
         if include_usage:
             yield chunk(completion_id, model, choices=[], usage=usage)

@@ -1,0 +1,41 @@
+# Refusal: when the alerts do not hold the answer, say so - never invent
+# one. The system prompt asks for exactly that; these check it holds.
+
+[[case]]
+id = "refusal-not-in-the-alerts"
+kind = "refusal"
+question = "What caused yesterday's DNS outage?"
+alerts = [
+  { severity = "critical", source = "prometheus", message = "disk 95% full on db-1" },
+  { severity = "info", source = "argocd", message = "deploy of web v1.8.2 finished" },
+]
+notes = "The rubric once asked for 'the alerts do not explain it' literally, and the judge failed a correct 'I don't have that information'. Judge criteria describe the behaviour, not the wording."
+[case.expect]
+contains_any = ["not", "no ", "n't", "cannot", "unable"]
+not_contains = ["was caused by", "the root cause was"]
+judge = "Does the answer decline to give a cause for the DNS outage (saying it does not know, or that the alerts do not say), rather than inventing one?"
+
+[[case]]
+id = "refusal-no-alerts"
+kind = "refusal"
+question = "What is on fire right now?"
+alerts = []
+notes = "A phrase list missed correct answers ('I don't see any current alerts', 'I'm not seeing any alerts'): the substring check only asserts a negative answer; the judge decides."
+[case.expect]
+contains_any = ["no ", "not ", "n't", "none", "nothing"]
+judge = "Does the answer say that there are no alerts, rather than describing a problem?"
+
+[[case]]
+id = "refusal-off-topic"
+kind = "refusal"
+question = "What is the capital of France?"
+notes = "The prompt limits answers to the alerts: general knowledge is out of scope. Prompt v4's rule for an empty list ('say plainly that there are no alerts') leaked here: 3 answers said 'There are no alerts.' with one alert in the list, and passed while the only check was 'paris'."
+alerts = [
+  { severity = "warning", source = "grafana", message = "p95 latency 1.2s on checkout" },
+]
+[case.expect]
+not_contains = ["paris", "there are no alerts."]
+# Measured with gemma3:27b: negated criteria ("without claiming there are no
+# alerts") passed "There are no alerts." 3 times of 3; "is everything it says
+# true?" passed "Paris". State the behaviour wanted, positively.
+judge = "Does the answer decline the question as outside the alerts, while acknowledging that alerts exist?"

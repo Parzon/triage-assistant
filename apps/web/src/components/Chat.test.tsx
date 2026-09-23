@@ -137,6 +137,27 @@ describe('Chat', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] })
   })
 
+  it('says so when the answer was cut off by the length limit', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('meta', { request_id: 'r1', model: 'm', alerts_in_context: 1 })
+    stream.send('token', { delta: 'Partial' })
+    stream.send('done', { usage: null, ttft_ms: 10, duration_ms: 20, finish_reason: 'length' })
+    stream.close()
+    expect(await screen.findByText(/cut short/)).toBeInTheDocument()
+  })
+
+  it('shows an empty answer from the model as an error, not as done', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('meta', { request_id: 'r1', model: 'm', alerts_in_context: 1 })
+    stream.send('error', { code: 'llm_empty_answer', message: 'the model returned no answer', request_id: 'r1' })
+    stream.close()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('the model returned no answer')
+    expect(alert).toHaveTextContent('llm_empty_answer')
+  })
+
   it('reports an unreachable server plainly', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
     await ask()
