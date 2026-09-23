@@ -1,0 +1,44 @@
+# Dependency update PRs, weekly and grouped (one PR per ecosystem, not one
+# per package). Each is an ordinary PR: CI must pass before merging, and a
+# major version gets read like any other change. GitHub Actions stay pinned
+# to commit SHAs; Dependabot moves the SHA and its version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}
+
+  - package-ecosystem: uv
+    directory: /apps/api
+    schedule: {interval: weekly}
+    groups:
+      api-minor-and-patch: {update-types: [minor, patch]}
+
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule: {interval: weekly}
+    groups:
+      web-minor-and-patch: {update-types: [minor, patch]}
+
+  - package-ecosystem: npm
+    directory: /tests/e2e
+    schedule: {interval: weekly}
+    groups:
+      e2e: {patterns: ["*"]}
+
+  # Base images in the Dockerfiles. Images named in the compose files
+  # (postgres, valkey, pgbouncer, the monitoring stack) are bumped by hand:
+  # a new major Postgres needs a data migration, not just a new tag.
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/web
+      - /tools/mock-llm
+      - /tools/py-spy
+      - /tools/load/vegeta
+      - /tools/load/jmeter
+    schedule: {interval: weekly}
+    groups:
+      base-images: {patterns: ["*"]}

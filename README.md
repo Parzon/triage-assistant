@@ -28,12 +28,20 @@ with `infra/vm/cloud-init.yaml`, deploy, backups, HTTPS).
 ```
 apps/api/            FastAPI service (Python 3.13, uv)
 apps/web/            React + Vite UI (Node 24); nginx config for production
+tools/               mock LLM provider, profiler and load-tool images
+tests/               end-to-end (Playwright) and load tests
+infra/               monitoring as code, Postgres roles, VM bootstrap (cloud-init)
+scripts/             deploy, backup/restore, failure drills, fresh-host test
 compose.yaml         services shared by every environment
 compose.override.yaml  dev: hot reload, ports on 127.0.0.1 (auto-merged)
 compose.prod.yaml    production shape: prod images, only nginx published
 Makefile             the single entry point for commands
-docs/                ADRs (docs/adr), PRD/RFC/design-doc templates
+docs/                handbook, runbooks, ADRs, PRD/RFC/design-doc templates
 ```
+
+How it is built, tested, shipped and operated, with every measurement
+and trap: [`gold_standard_development_guide.md`](gold_standard_development_guide.md)
+and the chapters in [`docs/handbook/`](docs/handbook/).
 
 ## Contributing
 

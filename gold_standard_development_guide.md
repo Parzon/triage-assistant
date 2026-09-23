@@ -1,292 +1,545 @@
-# Gold Standard Development Guide
+# Gold standard: building and running an AI service here
 
-This document explains **every non-obvious decision** behind this
-repo's shape — not what the code does, but *why it's organized the way
-it is* — so this repo can serve as the template future AI projects on
-this team copy from. If you're new here, read this before your first
-PR. See `docs/adr/0001-standard-project-shape.md` for the condensed,
-permanent decision record; this doc is the fuller "why," including the
-real problems hit building it.
+This repository is a small, complete AI service: alerts in Postgres, an
+assistant that streams answers from any OpenAI-compatible model, a React
+UI. It is also the reference for how every such service here is built,
+tested, shipped, watched and repaired. This file is the map. The details
+live in the handbook chapters it links to.
 
-## 1. Naming conventions
+It is written from what was **measured in this repo**, not from what
+usually works. Every number has a command that reproduces it. Every
+failure mode listed was injected and watched. ✅ means done and verified
+here; 📘 means recommended practice not exercised here (usually because it
+needs a real cloud account). Where the two differ, trust ✅.
 
-- **Repo name (`triage-assistant`)**: lowercase, hyphenated, describes
-  what it does, not how it's built. No `-service`/`-app` suffix noise.
-- **Directory names (`apps/api`, `apps/web`)**: `api`, not `backend` —
-  it says what the service's job actually *is* (serving an API), not
-  just its position in an architecture diagram. `web`, not `frontend`
-  — shorter, and the more common convention in monorepos this size.
-  Both are one word, lowercase, no abbreviation guessing needed.
-- **Docker Compose service names** (`api`, `web`, `db`, `pgbouncer`,
-  `redis`) match the directory names where one exists, and are the
-  plain, boring name of the thing otherwise (`db`, not `postgres-main`
-  or `database-primary` — there's only one, name it for its role).
-  These names are also DNS hostnames inside the Compose network
-  (`api` resolves to the api container from `web`, etc.) — a
-  needlessly clever name here becomes a needlessly clever hostname
-  everywhere in code and config.
-- **Branch names**: `type/<issue-number>-<short-desc>` (e.g.
-  `feat/1-redis-rate-limit`). The issue number makes the branch
-  traceable back to why it exists without opening GitHub.
-- **Commit messages**: [Conventional Commits](https://www.conventionalcommits.org/)
-  (`feat:`, `fix:`, `chore:`...) — enables automated changelogs later
-  without anyone having to hand-write one.
-- **Docker image build targets** (`dev`, `production`) inside a
-  multi-stage Dockerfile: plain English, not abbreviations — `docker
-  build --target production` should be guessable without reading the
-  Dockerfile first.
+## Read this first
 
-## 2. Directory structure, folder by folder
+| You are… | Read, in order |
+|---|---|
+| a new developer | Day one (below) → [dev environment](docs/handbook/dev-environment.md) → [daily work](docs/handbook/daily-work.md) → [testing](docs/handbook/testing.md) → the gotchas below |
+| reviewing a PR | the rules and the gotchas below; [testing](docs/handbook/testing.md) (what each endpoint needs) |
+| on call | [alert runbook](docs/runbooks/alerts.md) → [debugging](docs/handbook/debugging.md) → [failure modes](docs/handbook/failure-modes.md) |
+| preparing a demo or a server | [the VM runbook](docs/runbooks/demo-vm.md) (includes the request to send IT) |
+| on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
+| deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
+
+## The system on one page
 
 ```
-apps/api/         FastAPI backend
-apps/web/          React + Vite frontend
-infra/             empty (see below) — infra's future home
-docs/              PRD / RFC / Design Doc / ADR templates + content
-scripts/           empty (see below) — one-off ops scripts' future home
-.github/workflows/ CI
-docker-compose.yml  the whole local stack, one command
-AGENTS.md / CLAUDE.md   instructions for AI coding tools
+                   ┌──────────────── one host (VM or laptop), one compose project ────────────────┐
+browser ──:80────► │ nginx (web)  static React build, /api/* → api, JSON errors, security headers │
+                   │   │                                                                          │
+                   │   ▼ http://api:8010                                                          │
+                   │ api  gunicorn → N uvicorn workers (N = CPU limit), FastAPI                   │
+                   │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17 (alerts)          │
+                   │   ├─► Valkey :6379 (rate-limit counters; if down, requests pass: fail-open)  │
+                   │   └─► the model: any OpenAI-compatible API (mock-llm locally), SSE to user   │
+                   │                                                                              │
+                   │ Prometheus ◄─ scrapes api, exporters, cAdvisor ─► Grafana; Alertmanager ─►   │
+                   │   api (alerts appear in the app)            [dashboards on 127.0.0.1 only]   │
+                   └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Why `apps/` and why `api`/`web` are separate
+Three request paths matter:
+- **Read alerts:** nginx → api → PgBouncer → Postgres (~2 ms at 500
+  req/s).
+- **Ask the assistant:** nginx (no buffering) → api loads recent alerts →
+  streams the model's answer as Server-Sent Events, with a heartbeat
+  every 15 s. Stop in the browser cancels the model call.
+- **Alert webhook:** Alertmanager → api (bearer token) → a row in
+  Postgres.
 
-Everything under `apps/` is an independently **buildable, deployable
-artifact** — each has its own Dockerfile, its own dependency manifest
-(`pyproject.toml` vs `package.json`), gets built into its own image,
-and is tested by its own CI job (`lint`/`build` vs `web-build`).
-Keeping them separate, even though today it's one team working on
-both, means:
+The same images run everywhere. Only configuration changes: `.env` on a
+host, a secret store on a platform.
 
-- They can scale independently later — the API might need 10
-  replicas under load, the frontend might be served from a CDN with
-  two nginx replicas. Totally different profiles.
-- Each has its own toolchain (`uv`/Python vs `npm`/Node) that
-  shouldn't leak into the other — no shared `node_modules` next to
-  Python code, no Python venv confusion in frontend tooling.
-- CI can build/test them in parallel, and a frontend-only change
-  doesn't need to wait on a Python dependency install.
-- It matches the "one monorepo, multiple deployables" call already
-  made in ADR-0001 over splitting into separate repos.
+```
+apps/api/        FastAPI service (Python 3.13, uv): app/, tests/{unit,integration}, migrations/
+apps/web/        React + Vite UI (Node 24); nginx config for production
+tools/           mock-llm (a provider stand-in with failure modes), py-spy and load-tool images
+tests/           e2e (Playwright through production nginx), load (k6, Locust, vegeta, JMeter, Artillery)
+infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, vm (cloud-init)
+scripts/         deploy, backup, restore, failure drills, fresh-host test, SQL helpers, debug scripts
+docs/            handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ rfc/ design-docs/ (templates)
+compose*.yaml    base / dev (auto-merged) / prod shape / test / debug overlays
+Makefile         every command; `make` lists them
+```
 
-### Why `infra/` exists and is currently empty
+## Day one: from clone to a merged change
 
-This project is pre-production — there's nothing to deploy yet beyond
-`docker compose up` on a laptop. `infra/` is a **placeholder with
-intent**: once this graduates past prototype and needs to actually run
-on AWS, this is where Terraform (or whatever IaC tool infra standardizes
-on) goes — VPC/subnet definitions, ECS/EKS task definitions or k8s
-manifests, ECR repo definitions, IAM roles, the golden AMI definition.
-The point of having the empty folder now, with this doc explaining it,
-is that whoever inherits this repo from the AI team has an obvious,
-already-agreed-upon place to put their code — they don't have to
-propose a repo restructure first.
+1. Install Docker (Engine on Linux; Docker Desktop, Colima or OrbStack on
+   macOS; WSL2 on Windows: see [dev environment](docs/handbook/dev-environment.md)),
+   plus make and git. Not Python, Node or Postgres.
+2. `git clone https://github.com/Parzon/triage-assistant.git && cd
+   triage-assistant`
+3. `make setup` creates `.env` from `.env.example` and builds the images.
+4. `make up && make ps`: every service `(healthy)`. Open
+   http://localhost:5173 and ask the assistant about an alert.
+5. `make check`: lint, types, all tests, as CI runs them (~40 s).
+6. Pick an issue. `git switch -c fix/<issue>-<what>`. Change code with hot
+   reload running. Add tests for the success and the failure paths.
+7. `make prod-up && make e2e` if you touched anything a browser or nginx
+   sees.
+8. Push, open a PR (`Closes #N`, how you verified it, one line per new
+   dependency). CI's five checks must pass. Squash-merge.
 
-### Why `scripts/` exists and is currently empty
+## The rules
 
-For one-off operational scripts that don't belong in application code:
-a one-time data migration, a script to seed the dev DB with realistic
-fixture data, a credential-rotation script, a bulk-export script for
-debugging a production incident. None have been needed yet — the app
-is this early — but the convention exists so that when someone
-inevitably needs "a quick script to fix prod data," there's a
-designated, git-tracked, discoverable place for it, instead of it
-living in someone's home directory or a throwaway branch that gets
-lost.
+Each rule exists because breaking it cost something measurable here.
 
-### `docs/`
+1. **Everything runs in containers; the Makefile is the interface.** No
+   host toolchains, so no "works on my machine": the image is the
+   environment. ([dev environment](docs/handbook/dev-environment.md))
+2. **Prove it in the production shape before calling it done.**
+   Streaming worked in dev and was fully buffered by production nginx. A
+   dev dependency masked a missing runtime one. `make prod-up`, `make
+   e2e`, `make image-check`. ([testing](docs/handbook/testing.md))
+3. **Build once, promote the same image.** A `vX.Y.Z` tag publishes it;
+   hosts pull it by tag; `latest` is never deployed.
+   ([shipping](docs/handbook/environments-and-shipping.md), ADR-0011)
+4. **Configuration from the environment; secrets never in git, images or
+   logs.** A leaked secret is rotated, not deleted.
+   ([security](docs/handbook/security.md))
+5. **Every endpoint is tested on its failure paths**: dependency down,
+   dependency hung, invalid input, rate limit. Not just the happy path.
+   ([testing](docs/handbook/testing.md))
+6. **Every wait is bounded, and bounded where the work happens.** Server
+   side: `statement_timeout`, PgBouncer's timeouts. Client-side query
+   timeouts leaked connections here. Failures answer in JSON with a
+   request id. ([ADR-0010](docs/adr/0010-database-timeouts-and-failure-behaviour.md))
+7. **Liveness is not readiness.** `/health` checks nothing external.
+   `/ready` checks hard dependencies, and reports soft ones (Valkey)
+   without failing. ([failure modes](docs/handbook/failure-modes.md))
+8. **Nothing blocks the event loop.** One synchronous call inside async
+   code made `/health` take 4.8 s, and linters did not notice.
+   ([performance](docs/handbook/performance.md))
+9. **Metrics have bounded labels; dashboards and alerts are code, and
+   alerts have tests.** ([observability](docs/handbook/observability.md))
+10. **Migrations are backward compatible and never lock a table
+    silently**: expand/contract, `lock_timeout`, concurrent indexes.
+    ([daily work](docs/handbook/daily-work.md))
+11. **Deploy with `make deploy`, never by recreating a live container.**
+    A recreate refused requests for the whole drain. The rolling deploy
+    dropped none. ([VM runbook](docs/runbooks/demo-vm.md))
+12. **Every container: non-root, read-only root filesystem, no
+    capabilities, CPU and memory limits, no swap.**
+    ([security](docs/handbook/security.md))
+13. **Only the front door is published.** Published ports bypass the host
+    firewall; everything else binds to 127.0.0.1.
+    ([networking](docs/handbook/networking.md))
+14. **Measure before optimising; one change at a time; keep the numbers.**
+    Open-model load, production-sized data.
+    ([performance](docs/handbook/performance.md),
+    [load testing](docs/handbook/load-testing.md))
+15. **Drill the failures, and re-drill after changing the path.** The
+    worst bug here (a permanent pool leak) appeared only when a database
+    froze under load. ([failure modes](docs/handbook/failure-modes.md))
+16. **Pin everything**: lockfiles with hashes, image tags, Actions by
+    commit SHA; updates arrive as PRs.
+    ([security](docs/handbook/security.md))
+17. **Write the decision down.** An ADR for any "why is it like this?",
+    a runbook for any procedure needed under pressure, a line in the
+    gotcha list below for any trap.
 
-See `docs/README.md` for the full breakdown of PRD vs RFC vs Design
-Doc vs ADR and when to use each. Short version: these are the
-documents a real team needs to communicate with stakeholders (PRD),
-propose and review technical approaches (RFC), record the detailed
-plan (Design Doc), and permanently record *why* a decision was made
-(ADR) — separate from this guide, which is onboarding material, not a
-decision record.
+## The handbook
 
-### Root-level files
+| Chapter | Read it when |
+|---|---|
+| [Development environment](docs/handbook/dev-environment.md) | setting up a machine: Linux, macOS, Windows, Apple Silicon, corporate proxies |
+| [Daily work](docs/handbook/daily-work.md) | adding a dependency, an endpoint, a setting, a migration, a metric; the Git workflow; **every setting, in one table** |
+| [Testing](docs/handbook/testing.md) | writing tests; what each layer proves; which layer caught which real bug |
+| [Debugging](docs/handbook/debugging.md) | something is wrong: symptom → tool, how each tool works, real output |
+| [Observability](docs/handbook/observability.md) | adding metrics, panels or alerts; reading the dashboard |
+| [Performance](docs/handbook/performance.md) | something is slow; capacity numbers; how the bottlenecks were found |
+| [Load testing](docs/handbook/load-testing.md) | choosing a tool; open vs closed models; reference scripts for six tools |
+| [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
+| [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
+| [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
+| [Security](docs/handbook/security.md) | secrets, least privilege, exposure, supply chain, LLM-specific risks |
+| [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
+| Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md) | an alert fired; setting up or operating a server |
 
-`AGENTS.md`/`CLAUDE.md` live at the repo root (not in `docs/`) because
-that's the actual convention AI coding tools look for — same reason
-`README.md` lives at the root and not in a folder. `README.md` is the
-30-second "what is this, how do I run it" for a human. This file is
-the deeper "why is it built this way" for a human who's about to
-contribute.
+## Gotchas: the complete list
 
-## 3. How a new developer starts contributing
+Every trap met while building this repo, with what fixed it. One line
+each; the linked chapter has the evidence. Add to this list whenever
+something bites.
 
-1. **Install Docker. That's it.** No Python, no Node, no Postgres
-   client needed on your machine — everything runs inside containers.
-2. Clone the repo, `cp .env.example .env`.
-3. `docker compose up --build`. This brings up five containers:
-   - **`db`** — Postgres, the actual data store.
-   - **`pgbouncer`** — sits in front of `db`, pools connections. Why
-     it exists: many short-lived API requests each opening a raw
-     Postgres connection is expensive; pgbouncer holds a small pool of
-     real connections and multiplexes app requests through them. The
-     API talks to `pgbouncer`, never directly to `db`.
-   - **`redis`** — currently backs rate limiting on `POST /alerts`;
-     the natural place to add caching or a task queue later (see the
-     complexity-dial reasoning in the practice workspace's `NOTES.md`
-     — add either only when there's a measured need, not preemptively).
-   - **`api`** — FastAPI, hot-reloading in dev mode (bind-mounted
-     source, `uvicorn --reload`).
-   - **`web`** — React + Vite, hot-reloading dev server.
-4. Verify: `curl localhost:8010/health`, open `localhost:5173` in a
-   browser.
-5. **Make a change.** Edit `apps/api/main.py` or `apps/web/src/App.tsx`
-   — both hot-reload automatically, no rebuild command needed. (This
-   wasn't true for the API until this hardening pass — see Gotchas #7.)
-6. **Test.** `docker compose exec api uv run pytest` (once tests
-   exist), `docker compose exec api uv run ruff check .`,
-   `docker compose exec web npm run build` (type-checks + bundles).
-7. **Open a PR.** Branch per the naming convention above, reference an
-   issue (`Closes #N`), push, open the PR. CI (`lint`, `build`,
-   `web-build`) must pass before merge — branch protection enforces
-   this, it isn't optional discipline.
+### Docker and Compose
+- **`docker compose up --build` after a dependency change still runs the
+  old dependencies.** The anonymous `.venv`/`node_modules` volume
+  survives. Use `make rebuild` (`--renew-anon-volumes`).
+  ([daily work](docs/handbook/daily-work.md))
+- **Published ports bypass ufw.** DNAT happens in `PREROUTING`, before
+  the `INPUT` rules. Bind to 127.0.0.1; filter in `DOCKER-USER`.
+  ([networking](docs/handbook/networking.md))
+- **Docker never restarts an *unhealthy* container.** Restart policies
+  act on exit only; "unhealthy" matters to `depends_on` and orchestrators.
+- **`docker kill` counts as a manual stop:** the container stayed down
+  (exit 137, RestartCount 0). Simulate crashes with SIGKILL from the host
+  PID namespace. ([failure modes](docs/handbook/failure-modes.md))
+- **Inside a container, PID 1 ignores SIGKILL** sent from within its own
+  PID namespace.
+- **A stopped container vanishes from Docker DNS.** Clients get a name
+  resolution error (`gaierror`), not "connection refused": map it to 503.
+- **Docker hands out the lowest free IP.** Sequential test containers
+  shared an IP and looked like a single global rate limit.
+- **`-f` turns off the automatic `compose.override.yaml` merge**: list it
+  explicitly with an overlay.
+- **`--profile X` replaces `COMPOSE_PROFILES` from `.env`**: the mock LLM
+  dropped out. Set the full list instead.
+- **Compose merging:** `ports` concatenate, `environment` merges by key,
+  and `!reset` clears.
+- **An empty variable is not an unset one.** `${WEB_CONCURRENCY:-}` passed
+  `""`, and gunicorn crashed parsing it at import.
+- **A duplicate YAML key**: compose rejects it, but many YAML parsers
+  silently keep the last one.
+- **`docker compose run` never rebuilds an existing image**: tests ran on
+  stale dependencies. Use `run --build`.
+- **A memory limit without `memswap_limit` allows as much again in
+  swap.** A 50 MB limit reached 95 MB, silently, with no OOM.
+  ([failure modes](docs/handbook/failure-modes.md))
+- **Lowering a live container's memory limit OOM-kills processes even
+  with swap allowed**: reclaim gives up quickly. Use it for drills only.
+- **Docker's `OOMKilled` flag can read `false` after PID 1 was
+  OOM-killed.** Read the kernel log and cAdvisor's counter.
+  ([debugging](docs/handbook/debugging.md))
+- **An OOM-killed gunicorn worker leaves the container "healthy"**: the
+  only traces are a log line, the cgroup counter and the alert.
+- **A directory bind mount pins the directory, not the path.** `git
+  checkout` recreated it, and Prometheus kept an empty view until its
+  reload failed. Recreate the container.
+- **`docker events --since` can't look back**: the daemon keeps 256
+  events, and healthchecks filled them in 44 s. Stream events to the
+  journal.
+- **A rolling deploy renames the container** (`api-2`, `api-3`): never
+  hardcode a container name; use `docker compose ps -q api`.
+- **`docker compose up` without the deployed `IMAGE_TAG` silently rolls
+  back**: `make deploy` records the tag in `.env`.
+- **`docker run --rm` then `docker logs`**: the logs went with the
+  container.
+- **Piping a script into `docker run` without `-i`**: nothing runs, and
+  there's no error.
+- **`docker logs --since <timestamp without a zone>` is local time.** Use
+  relative times.
+- **Container-created files in bind mounts come out owned by root.** Run
+  as your UID (`AS_ME`), or `make fix-perms`.
+- **Docker-in-Docker needs a volume for `/var/lib/docker`**: overlay
+  can't stack on overlay.
+- **Postgres refuses a data directory from an older major version**
+  (16 → 17): dump/restore or `pg_upgrade`. The `postgres:18` image also
+  moved `PGDATA`.
+- **Docker Hub limits pulls per IP**, and an office shares one IP: log in,
+  or use a mirror. ([dev environment](docs/handbook/dev-environment.md))
+- **Docker Desktop needs a paid licence** above 250 employees or $10 M
+  revenue.
+- **Slim images have no `ps`**: use `docker top` from the host.
+- **"port is already allocated"** is usually a forgotten stack: `docker
+  ps`, `ss -ltnp`.
 
-## 4. Two paths: development vs. production
+### nginx and the network
+- **nginx buffers responses**: SSE arrived all at once. Set
+  `proxy_buffering off` on the stream location, and send
+  `X-Accel-Buffering: no`. ([networking](docs/handbook/networking.md))
+- **nginx resolves an upstream name once at start**, then connects to a
+  dead IP forever. Use `resolver 127.0.0.11` plus `server api:8010
+  resolve`.
+- **Behind a proxy, every client has the proxy's IP**, so the rate limit
+  was global. nginx overwrites `X-Forwarded-For`; gunicorn trusts it only
+  from nginx.
+- **Appending to `X-Forwarded-For` lets clients forge their IP**:
+  overwrite it at the edge.
+- **The side that closes idle keep-alive connections must be the
+  proxy**: nginx 60 s < gunicorn 75 s.
+- **nginx doesn't retry a POST on a reset keep-alive connection**: that's
+  a 502. Worker recycling caused bursts of them.
+- **A request on an existing keep-alive connection to a vanished
+  upstream waits the read timeout** (30 s), not the 2 s connect timeout.
+- **`$host` drops the port**: use `$http_host` when the port matters.
+- **Starlette's slash redirects behind a prefix-stripping proxy** pointed
+  at the wrong path and port: `redirect_slashes=False`.
+- **nginx's own 502/504 pages are HTML**: `error_page 502 504` → a JSON
+  location, status kept.
+- **An `add_header` in a location discards every inherited
+  `add_header`**: include the security headers in each location.
+- **`server_tokens on` advertises nginx's version.**
+- **Load balancers close idle connections** (ALB: 60 s): the SSE heartbeat
+  (15 s) must stay below the smallest idle timeout in the path.
+- **Behind a load balancer**, trust `X-Forwarded-For` only from its subnet
+  (the realip module), or the rate limit is per load balancer.
 
-Every service that needs it (`api`, `web`) has a **multi-stage
-Dockerfile** with a `dev` target and a `production` target — this is
-the actual mechanism behind "identical scaffold regardless of the AI
-logic inside" from ADR-0001.
+### Python, async, FastAPI, gunicorn
+- **A synchronous call in async code blocks every request on the
+  worker.** `ruff --select ASYNC` did not flag an SDK's sync client.
+  ([performance](docs/handbook/performance.md))
+- **On a busy event loop, every wall-clock timeout fires early**: limiter
+  fail-opens and pool timeouts at 46% CPU. Watch `event_loop_lag_seconds`.
+- **`asyncio.timeout()` cancels once, and cleanup can block again**
+  afterwards: a readiness probe took over 10 s despite a 2 s timeout.
+  Abandon the task instead. (ADR-0010)
+- **A second `task.cancel()` before the first is delivered merges into
+  one.**
+- **Done-callbacks run one loop iteration after the task finishes.**
+- **`StreamingResponse` never `aclose()`s your generator**: a cancelled
+  stream kept the model call running. Wrap it in `contextlib.aclosing`.
+- **Starlette's exception handler runs outside your middleware**: the
+  request id was lost on 500s. Handle errors in the middleware.
+- **`logging.dictConfig` inside the app factory removed pytest's
+  `caplog`**: configure logging in `asgi.py`.
+- **`async with lifespan_context(app) as x` binds `None`**, not the app.
+- **`assert` disappears under `python -O`**: use `isinstance` plus
+  `raise` for runtime checks.
+- **`os.cpu_count()` ignores container CPU limits.** Worker count is read
+  from cgroup `cpu.max`. "2 × cores + 1" is the *sync*-worker heuristic;
+  async workers need about one per core.
+- **gunicorn's `max_requests` recycling caused 502 bursts under load**:
+  keep it off without a measured leak.
+- **gunicorn's control socket defaults to `$HOME`**, which is read-only:
+  put it in `/tmp`.
+- **`uvicorn --reload` runs the app in a child process with stdin on
+  `/dev/null`**: pdb needs a foreground server without reload, and
+  debugpy can't debug the child.
+  ([debugging](docs/handbook/debugging.md))
+- **A paused breakpoint stops the whole event loop**: every request on
+  that worker waits.
+- **A forgotten `breakpoint()` hangs a production worker** until gunicorn
+  kills it: `PYTHONBREAKPOINT=0` in images.
+- **prometheus_client reads `PROMETHEUS_MULTIPROC_DIR` at import**: the
+  directory must exist first, and the variable must never be `""`.
+  ([observability](docs/handbook/observability.md))
+- **The openai SDK depends on `httpx2`, not `httpx`.** Importing `httpx`
+  worked only because it was a dev dependency, and the production image
+  crashed.
+- **The openai SDK's defaults are a 600 s read timeout and 2 retries**:
+  set both explicitly.
+- **openai 3.17 wraps transport errors even mid-stream**, and
+  `APITimeoutError` subclasses `APIConnectionError`: catch it first.
+- **`httpx2` logs every request at INFO**: set it to WARNING.
+- **pydantic's `model_copy()` skips validators**: validate values set that
+  way yourself.
+- **anyio's default thread pool has 40 slots**: sync endpoints queue
+  behind a hung dependency.
 
-| | `dev` (what Compose runs) | `production` |
+### Database: Postgres, PgBouncer, SQLAlchemy, asyncpg, Alembic
+- **PgBouncer's default md5 auth can't answer Postgres' SCRAM**, so every
+  query failed, while `pg_isready` stayed green (it doesn't
+  authenticate). Use `AUTH_TYPE=scram-sha-256`, and `/ready` runs a real
+  query.
+- **A `SET` before Alembic's `begin_transaction()` opens a transaction
+  first**: the migration logged success and was rolled back. Use `SET
+  LOCAL` inside it.
+- **Transaction pooling ignores session `SET`s**: put limits on the role
+  (`statement_timeout`).
+- **asyncpg's `command_timeout`, or cancelling its task, sends a cancel
+  and then waits for the acknowledgement forever** if the connection dies
+  first: 13 of 40 pool connections leaked. No client-side query timeout.
+  (ADR-0010)
+- **SQLAlchemy's checkout event fires only after the pre-ping
+  succeeds**: a gauge built on it missed stuck requests. Sample
+  `pool.checkedout()`.
+- **SQLAlchemy discards overflow connections on return**: bursty load
+  churned them (196 logins in 20 s), a metastable slow state. Pool 20,
+  overflow 0. ([performance](docs/handbook/performance.md))
+- **Pre-ping adds round trips per checkout**, and can double the wait
+  during a frozen database: one run took 10.6 s instead of 5.3 s, most
+  likely two PgBouncer queue waits in a row.
+- **A connection closed mid-query is a generic `DBAPIError`**, not an
+  `OperationalError`: classify by SQLSTATE (08*, 57P01-3, 53300).
+- **PgBouncer's defaults suit batch jobs, not a web app**:
+  `query_wait_timeout` 120 s, `server_login_retry` 15 s, and
+  `dns_nxdomain_ttl` 15 s, which kept failing after Postgres was back.
+- **An idle `EXPLAIN` is not a load test**: 43 ms idle, p95 7 s at 40
+  req/s.
+- **A DDL statement waiting on a lock makes every later query on the
+  table wait behind it**: `lock_timeout` on migrations.
+- **`CREATE INDEX` blocks writes for the whole build**: use
+  `CONCURRENTLY`, outside a transaction.
+- **Alembic's autogenerate writes a rename as drop plus add** (data
+  lost), and misses some constraints: read every generated migration.
+- **`CREATE TABLE ... (LIKE x INCLUDING DEFAULTS)` doesn't copy
+  `IDENTITY`**: add `INCLUDING IDENTITY`.
+- **Monitoring has a cost**: the exporter's statistics query was 25% of
+  DB time on an idle database.
+- **Docker's default 64 MB `/dev/shm` is too small for parallel
+  queries**: `shm_size: 256mb`.
+
+### Valkey / Redis
+- **redis-py's socket timeouts must be set explicitly**, with a bounded
+  pool: a hung Valkey otherwise holds requests (older versions waited
+  forever).
+- **Redis 7.4 moved to source-available licences** (8.x adds AGPLv3):
+  Valkey is the BSD-licensed fork, with the same protocol (ADR-0002).
+- **`allkeys-lru` evicts counters when full.** That's fine for rate
+  limits, wrong for data you must keep.
+
+### Streaming, the model, the frontend
+- **The browser's `EventSource` can't send a POST body**: use `fetch` and
+  read the stream.
+- **Raw SSE `data:` lines can't carry a model's newlines**: JSON-encode
+  each event (ADR-0007).
+- **A silent stream is closed by proxies**: heartbeat comments every
+  15 s.
+- **React reused one `<button>` for Ask and Stop**, and its type flipped
+  mid-click, so Stop re-submitted. jsdom didn't reproduce it; Playwright
+  did. Use distinct `key`s. ([testing](docs/handbook/testing.md))
+- **A stream that ends without `done` or `error` left the UI spinning**:
+  treat it as `stream_incomplete`.
+- **Model output is untrusted**: render it as text, never HTML.
+  ([security](docs/handbook/security.md))
+- **Alert text reaches the prompt, so anyone who can send an alert can
+  attempt prompt injection.** There are no tools, so the worst case is a
+  wrong answer.
+
+### Observability
+- **A ratio with a numerator that doesn't exist yet is "no data", not 0**:
+  `or vector(0)`. ([observability](docs/handbook/observability.md))
+- **`rate()` needs two samples, and a new series' first increment is
+  invisible** to `rate()`/`increase()`.
+- **A removed service has no `up` series**: alert with `absent()`.
+- **cAdvisor exports every container label by default**: whitelist
+  them.
+- **cAdvisor's newer releases are only on ghcr.io**, and
+  `grafana/grafana-oss` has no 13.x tag (`grafana/grafana` is the OSS
+  image).
+- **Alertmanager's config can't read environment variables**: pass
+  secrets as files.
+- **promtool runs as `nobody`** and can't read a 700 directory.
+- **A fault shorter than the scrape interval can leave no trace in
+  metrics.**
+- **A dashboard edited in the Grafana UI is lost on reload**: change the
+  generator, `make dashboard`.
+- **curl treats `{…}` in a PromQL URL as a glob**: use `-G
+  --data-urlencode`.
+
+### Testing and CI
+- **CI runs as UID 1001, which has no account in the node image**, so
+  `HOME=/` broke Vitest. `AS_ME` sets `HOME=/tmp`.
+  ([testing](docs/handbook/testing.md))
+- **Coverage is a floor, not a proof**: the Stop re-submit bug passed its
+  unit tests; only a real browser showed it.
+- **Run CI's steps locally before pushing** (`make check`, `obs-check`,
+  `image-check`): skipping one let a crash reach CI.
+- **Branch protection needs a paid plan on private repositories.**
+- **The gitleaks GitHub Action needs a licence for organisations**: use
+  its CLI.
+- **An Action pinned by tag can be moved to malicious code**: pin by
+  commit SHA.
+- **npm rewrites a hidden lockfile inside `node_modules`**: a root-owned
+  volume makes it fail with EACCES.
+- **`tsc -b` writes build info under `node_modules/.tmp`**, which also
+  needs to be writable.
+- **`make help`'s pattern skipped targets with digits** (`e2e`).
+
+### Load testing
+- **A closed model (N users waiting on replies) hides the queue**, and
+  with it coordinated omission: use arrival-rate executors.
+  ([load testing](docs/handbook/load-testing.md))
+- **Arrival shape matters as much as rate**: the same 100 req/s gave
+  1.5 ms evenly spread, 29 ms in clumps.
+- **A saturated load generator measures itself**: Artillery needed 534%
+  CPU for 200 req/s.
+- **k6 and Artillery phone home by default.**
+- **Rate limits turn a load test into a 429 test**: raise them for the
+  run.
+- **JMeter and Artillery report whole milliseconds**, which can't
+  resolve a 1.5 ms service.
+
+### Operations
+- **Recreating a single container refuses requests for the whole
+  drain** (6.7 s, up to 120 s with long streams): `make deploy`.
+  ([VM runbook](docs/runbooks/demo-vm.md))
+- **Replacing the only nginx refuses connections for ~0.3 s**; only a
+  load balancer removes that.
+- **A backup on the same disk dies with it, and an untested restore is a
+  hope**: copy dumps off the host, and rehearse
+  (`DUMP=... make fresh-host-test`).
+- **The first bottleneck came from missing data, not missing
+  hardware**: a missing index, invisible until 2 M rows.
+
+### Shell, Git, host
+- **`! cmd` is exempt from `set -e`**: test explicitly with `if`.
+- **`mv src existing-dir` moves into it** instead of renaming.
+- **`sudo` needs a terminal for its password, and a password pasted into
+  a chat is burned**: rotate it.
+- **Branch before the first edit**; `git switch -c` carries uncommitted
+  changes over.
+- **Windows checkouts turn scripts into CRLF**: `.gitattributes` forces
+  LF.
+- **On Windows, a repo under `/mnt/c` gets no file events**, so hot
+  reload stops: clone into WSL.
+- **A formatter that is never checked drifts**: CI runs `ruff format
+  --check`.
+- **shellcheck found an unguarded `cd`** in a script without `set -e`: it
+  runs in `make lint` and CI.
+- **`mapfile` needs bash 4**; macOS ships 3.2 (the deploy script is for
+  Linux hosts).
+- **The host's Node was too old for a scaffolding tool**: run toolchains
+  in containers, not on the host.
+
+## Failure modes, in one table
+
+Measured with `make drills`; the full matrix is in
+[failure modes](docs/handbook/failure-modes.md).
+
+| When this fails… | users see… | back after |
 |---|---|---|
-| **api** | Source bind-mounted, `uvicorn --reload`, single process, fast iteration | `gunicorn` managing N `uvicorn` worker processes, non-root user, `HEALTHCHECK` baked in, no bind mount — the image *is* the artifact |
-| **web** | Source bind-mounted, Vite dev server, hot module reload | Static assets built (`npm run build`) and served by `nginx` (unprivileged, non-root, port 8080), which also reverse-proxies `/api/*` to the `api` service |
+| Valkey (down or frozen) | nothing, but rate limits are off | 0 s |
+| PgBouncer or Postgres (down or frozen) | JSON 503 within 5–10 s; nothing hangs, nothing leaks | 1–2 s |
+| the model provider (down, 429, 500, hang, drop) | a typed error in the chat stream; everything else works | 0 s |
+| one api worker (killed, OOM) | its in-flight requests cut; a new worker starts | 0 s |
+| the api container (crash) | in-flight streams cut, ~0.5 s of 502 | < 1 s |
+| a deploy | nothing with `make deploy` (0.3 s at the nginx swap); 6.7 s of 502 with a plain recreate | — |
+| nginx or the VM | the site is down, and **nothing inside the stack alerts** | — |
 
-`docker compose up` always builds `dev` (`target: dev` set explicitly
-in `docker-compose.yml`). A real deploy builds `production`:
-```
-docker build --target production -t triage-assistant-api ./apps/api
-docker build --target production -t triage-assistant-web ./apps/web
-```
-The frontend's production nginx config (`apps/web/nginx.conf`) does
-the *exact same job* Vite's dev-only proxy does locally — forwards
-`/api/*` to the backend — so there's no behavior surprise moving from
-dev to prod, just a different tool doing the forwarding.
+## Bottlenecks, in the order they bite
 
-## 5. Hardening decisions, and why
+A missing index → pool churn → api CPU (~500 reads/s per core; 500
+streams per 2 CPUs, the SDK's per-chunk cost) → event-loop saturation
+turning into timeouts elsewhere → connection budgets (~12 replicas) →
+the provider's quota. Details and numbers:
+[performance](docs/handbook/performance.md).
 
-- **Non-root containers** (`api` production target, `web` production
-  target via `nginxinc/nginx-unprivileged`) — a compromised app
-  process can't touch anything root-owned inside the container. The
-  plain `nginx` image needs root to bind port 80; the unprivileged
-  variant runs as a real user on port 8080 instead, which is why the
-  production frontend listens on 8080, not 80 (a real load
-  balancer/ingress in front of it maps the public 443/80 to this).
-- **Multi-process (`gunicorn` + `UvicornWorker`)** in production —
-  the FastAPI-recommended production shape, and the same pattern
-  already audited live in this team's `unifiedlearning` service.
-  Worker count is `2 x cores + 1` by default (gunicorn's own
-  long-standing recommendation), **overridable via `WEB_CONCURRENCY`**
-  rather than hardcoded — see Gotcha #7 for why the default alone is
-  dangerous.
-- **Healthchecks on every service that can have a meaningful one**
-  (`db`, `pgbouncer`, `redis`, `api`, and `web`'s production nginx
-  image) — `depends_on: condition: service_healthy` only works if the
-  thing being depended on actually reports health, and an
-  orchestrator (ECS, k8s) needs the same signal to know when to route
-  traffic to a new instance. `web`'s *dev* target deliberately has no
-  healthcheck — it's a local convenience server, nothing depends on
-  its health status for an orchestration decision.
-- **Secrets never in the image or in git** — `.env` is gitignored,
-  `.env.example` documents required vars with placeholder values,
-  real secrets are injected at runtime (locally via `.env`, in
-  production via whatever secrets manager infra wires up — the app
-  code doesn't change either way, it just reads env vars).
+## Decisions
 
-## 6. Gotchas — real problems hit building this
+The ADRs in [docs/adr](docs/adr/) record what was decided and why:
+- the project shape (0001)
+- Valkey (0002)
+- compose and make (0003)
+- rate limiter fail-open (0004)
+- database access (0005)
+- the model seam (0006)
+- the SSE format (0007)
+- observability (0008)
+- performance defaults (0009)
+- database timeouts (0010)
+- releases and deploys (0011)
 
-Everything below actually happened building this repo, in this order,
-live — not a hypothetical list. If you hit one of these, this is
-where the answer already is.
+A merged ADR is never edited: a new one supersedes it.
 
-1. **Host Node too old for the Vite scaffolding CLI.** This box's
-   Node was 18.19; the current `create-vite` needs Node 20+
-   (`node:util`'s `styleText` export doesn't exist before then). Fix:
-   don't upgrade host Node — scaffold via `docker run node:20-slim`
-   instead. You never need a "correct" Node on your host at all; the
-   container is the correct environment, always.
-2. **Container-created files come out root-owned.** Scaffolding via a
-   plain `docker run` (no `--user` flag) writes files as root into
-   whatever host directory is bind-mounted. Fix: a throwaway
-   `docker run --rm -v <path>:/app alpine chown -R $(id -u):$(id -g) /app`
-   — no `sudo` needed, since the container itself has root inside its
-   own namespace regardless of the host user running it.
-3. **Port collisions from a stale, forgotten stack.** An old
-   standalone container (or, later, the superseded practice-workspace
-   stack) silently held port 8010, and `docker compose up` failed with
-   "port is already allocated." Fix: `docker ps` first, always, before
-   assuming a fresh `up` will just work — `docker compose down` the
-   stale stack.
-4. **GitHub branch protection needs a paid plan on a private repo.**
-   Both the classic branch-protection API and the newer rulesets API
-   return the identical 403 on a free-tier private repo. Real options:
-   GitHub Pro/Team, a different host with a free private-repo tier
-   (GitLab), or go public if nothing sensitive is in the repo (what
-   this project did — verified no secrets were ever committed first).
-5. **`mv source existing-dir` nests instead of renaming.** Moving this
-   repo into `/opt/triage-assistant` (which already existed, freshly
-   created) put the whole repo one level too deep
-   (`/opt/triage-assistant/triage-assistant/`) instead of flattening
-   into it. `mv` only renames when the destination *doesn't already
-   exist* — moving into an existing directory always nests. Fix: move
-   the nested contents up one level, remove the now-empty directory.
-6. **`sudo` needs a real terminal for its password prompt.** Any
-   sudo command run by an agent/non-interactive process fails with
-   "a terminal is required to read the password." Either the human
-   runs the one-time privileged command themselves (creating
-   `/opt/triage-assistant` and `chown`ing it), or — if a password is
-   explicitly provided — `sudo -S` reads it from stdin instead.
-   **If you ever paste a real password into a chat/log to unblock
-   this, treat it as burned and rotate it afterward** — it's now in
-   plaintext history.
-7. **`gunicorn`'s worker-count formula reads the HOST's core count,
-   not a real per-container allocation.** `multiprocessing.cpu_count()`
-   inside a container returns the *host's* total cores unless the
-   container has a CPU limit AND a Python version that respects
-   cgroup quotas — neither was true here. On this 24-core dev box, the
-   formula (`2 x cores + 1`) spawned **49 worker processes** for a
-   tiny health-check service, live-confirmed via `docker top`. Fix:
-   an explicit `WEB_CONCURRENCY` env var override for local dev
-   (`=2` here), with the formula still available as production's
-   sane default once a real, deliberately-sized CPU allocation exists.
-8. **Don't trust a 429 alone as proof a distributed rate limiter
-   works.** It's easy for a rate limiter to *look* correct while
-   silently running in-memory per-process (the exact bug already found
-   in `unifiedlearning`). Real verification: `redis-cli KEYS '*'`
-   inside the redis container, confirming the counter genuinely lives
-   in Redis, not process memory.
-9. **The plain `nginx` image needs root to bind port 80.** Ports
-   below 1024 need `CAP_NET_BIND_SERVICE` or root. Fix:
-   `nginxinc/nginx-unprivileged`, which binds 8080 as a real non-root
-   user instead — consistent with the API's own non-root hardening.
-10. **A second, unrelated port collision, this time on 8080** — an
-    already-running process on this shared dev box (unrelated to this
-    project) was already bound to 8080, so the first verification run
-    of the production nginx image failed with the identical "address
-    already in use" error as gotcha #3, on a completely different
-    port. Same fix: check what's actually listening (`ss -ltnp`)
-    before assuming the port is free, use a different port for a
-    one-off manual test rather than fighting for the "real" one.
-11. **Committed directly to `main`'s working tree before branching,
-    twice.** Made real file edits, then remembered branch discipline
-    only after the fact. Fix used both times: `git switch -c
-    <branch-name>` *after* the edits — uncommitted changes carry over
-    onto the new branch cleanly, nothing was lost, just don't repeat
-    the mistake. Branch first, always, even for "just one small
-    thing."
-12. **`EventSource` can't send a POST body.** The native browser SSE
-    client only supports `GET` with no body, but a real prompt needs
-    to go in the request. Fix, and the actual pattern real LLM
-    streaming SDKs use: `fetch` + manually reading `response.body`'s
-    `ReadableStream`, parsing `data: ...` lines by hand instead of
-    using `EventSource` at all.
-13. **`ps` doesn't exist inside `python:3.12-slim`.** Slim images
-    strip most utilities to stay small. Fix: `docker top <container>`
-    runs from the *host* and lists a container's processes without
-    needing any tool installed inside it — the tool to reach for when
-    you need process visibility into a minimal image.
+## Not done yet
+
+What a real launch still needs. Each item is a known gap, not an
+oversight:
+- **Authentication**: there is none. Put the service behind SSO before
+  any real data goes in.
+- **HTTPS** in front: four options in the VM runbook.
+- **Outside-in monitoring**: an uptime check, and a dead man's switch for
+  Prometheus itself. Nothing notices when the VM or nginx is down.
+- **A second host.** One VM has single points of failure (listed in
+  failure modes).
+- **The first real release** (`git tag v0.1.0`). The workflow's build is
+  verified on PRs; the push hasn't happened yet.
+- **Image and secret scanning** in CI.
+- **Tracing (OpenTelemetry) and central logs**, once there is more than
+  one service or host.
+
+## Where things are written
+
+| Question | Document |
+|---|---|
+| What is this, how do I run it? | `README.md` |
+| How do I contribute? | `CONTRIBUTING.md` |
+| How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others) |
+| How is it built and run, and why, in depth? | this file and `docs/handbook/` |
+| Why was X decided? | `docs/adr/` |
+| What do I do when Y happens? | `docs/runbooks/` |
+| What are we building next, and should we? | `docs/prd/`, `docs/rfc/`, `docs/design-docs/` (templates in each) |

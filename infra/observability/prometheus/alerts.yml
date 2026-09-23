@@ -12,6 +12,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "api replica {{ $labels.instance }} is not answering /metrics"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#apidown"
 
       # With DNS discovery a removed service has no `up` series at all, so
       # `up == 0` can never fire for it - absent() catches that case.
@@ -21,6 +22,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "no api replica exists to scrape"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#apimissing"
 
       - alert: PostgresDown
         expr: pg_up == 0
@@ -28,6 +30,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "Postgres is unreachable: alerts cannot be stored or read"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#postgresdown"
 
       - alert: PgBouncerDown
         expr: pgbouncer_up == 0
@@ -35,6 +38,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "PgBouncer is unreachable: the api cannot reach the database"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#pgbouncerdown"
 
       - alert: RedisDown
         expr: redis_up == 0
@@ -42,6 +46,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "Redis (Valkey) is down: rate limiting is off (fail-open, ADR-0004)"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#redisdown"
 
       - alert: ExporterDown
         expr: up{job=~"postgres|pgbouncer|redis|node|cadvisor"} == 0
@@ -49,6 +54,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "{{ $labels.job }} exporter is down: its dashboards and alerts are blind"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#exporterdown"
 
   - name: service
     rules:
@@ -60,6 +66,7 @@ groups:
         labels: {severity: high}
         annotations:
           summary: "more than 5% of api requests fail with 5xx"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#higherrorrate"
 
       - alert: SlowRequests
         expr: |
@@ -70,6 +77,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "p95 latency of {{ $labels.route }} is above 1s"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#slowrequests"
 
       # The saturation signal: when the loop runs timers late, every request
       # waits that long before its code starts, whatever the endpoint.
@@ -79,6 +87,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "api event loop lag p95 above 100ms: workers are saturated or something blocks the loop"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#eventlooplaghigh"
 
       - alert: RateLimiterFailingOpen
         expr: sum(rate(ratelimit_decisions_total{decision="fail_open"}[5m])) > 0
@@ -86,6 +95,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "requests are passing unlimited: the rate limiter cannot reach Redis"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#ratelimiterfailingopen"
 
       - alert: DatabasePoolSaturated
         expr: max(pgbouncer_pools_client_waiting_connections) > 0
@@ -93,6 +103,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "clients are queueing for a Postgres connection in PgBouncer"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#databasepoolsaturated"
 
       # The api's own pools (in front of PgBouncer). Also what leaked
       # connections look like: stuck requests hold them until nothing is left.
@@ -102,6 +113,7 @@ groups:
         labels: {severity: high}
         annotations:
           summary: "the api's database pools are over 90% in use: requests will wait, then fail with 503"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#appdatabasepoolexhausted"
 
   - name: llm
     rules:
@@ -113,6 +125,7 @@ groups:
         labels: {severity: high}
         annotations:
           summary: "more than 10% of model calls fail"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#llmerrors"
 
       - alert: LLMSlowFirstToken
         expr: |
@@ -121,6 +134,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "users wait over 10s (p95) for the first word of an answer"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#llmslowfirsttoken"
 
   - name: capacity
     rules:
@@ -130,6 +144,7 @@ groups:
         labels: {severity: high}
         annotations:
           summary: "at the current rate the root disk is full within 6 hours"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#diskwillfillin6h--diskalmostfull"
 
       - alert: DiskAlmostFull
         expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.10
@@ -137,6 +152,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "less than 10% of the root disk is free"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#diskwillfillin6h--diskalmostfull"
 
       - alert: ContainerNearMemoryLimit
         expr: |
@@ -146,6 +162,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "{{ $labels.name }} uses over 90% of its memory limit (next: OOM kill, exit 137)"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#containernearmemorylimit"
 
       # The kernel killed a process for exceeding its container's memory
       # limit. When it is a gunicorn worker, the master starts a new one:
@@ -156,3 +173,4 @@ groups:
         labels: {severity: high}
         annotations:
           summary: "out of memory: the kernel killed a process in {{ $labels.container_label_com_docker_compose_service }}"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#containeroomkilled"
