@@ -3,7 +3,7 @@
 # supply chain. TARGETARCH (set by buildx) picks amd64 or arm64 (Apple
 # Silicon); the checksum line for that asset is looked up in the release's
 # checksums file.
-FROM alpine:3.20
+FROM alpine:3.24
 ARG VEGETA_VERSION=12.13.0
 ARG TARGETARCH=amd64
 RUN apk add --no-cache curl \

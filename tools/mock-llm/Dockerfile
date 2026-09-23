@@ -1,7 +1,7 @@
-FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.18 AS uv
 
 # A dev/test tool, not a shipped artifact: one stage is enough.
-FROM python:3.13-slim
+FROM python:3.14-slim
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

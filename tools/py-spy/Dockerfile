@@ -5,6 +5,6 @@
 #   make py-spy-dump    what is every worker doing right now?
 #   make py-spy-top     live view of where time goes
 #   make py-spy-record  flame graph -> docs/images/api-flame.svg
-FROM python:3.13-slim
+FROM python:3.14-slim
 RUN pip install --no-cache-dir --root-user-action=ignore py-spy==0.4.2
 ENTRYPOINT ["py-spy"]
