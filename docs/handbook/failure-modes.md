@@ -25,12 +25,14 @@ There are three kinds of drill (`scripts/failure-drills.sh`):
 
 | Kind | What it does |
 |---|---|
-| dependency fault | while the fault is active, one request on each user path: `/api/health` (liveness), `/api/ready` (readiness), `GET /api/alerts` (a database read), `POST /api/chat/stream` (a streamed answer) |
+| dependency fault | while the fault is active, one request on each user path: `/api/health` (liveness), `/api/ready` (readiness), `GET /api/alerts` (a database read), `POST /api/chat/stream` (a streamed answer), and sign-in (`/api/auth/login`, then the provider's login page) |
 | in-flight fault | 6 slow streams (~10 s each) are running when the fault hits, and `/api/health` is probed 4× a second throughout |
 | freeze under load | 20 client threads read continuously while a dependency is frozen for 20 s; afterwards, the api's database pools must hold 0 connections |
 
 Probes go where users go: HTTPS through the TLS edge (with the edge's
-local CA), or nginx on loopback when the edge is not running.
+local CA), or nginx on loopback when the edge is not running. They act as
+a signed-in user: a session minted by `app.cli`, stored in Postgres like
+anyone's.
 
 Faults are injected with plain Docker:
 - `docker stop` for "down".
@@ -66,7 +68,7 @@ Grafana.
 | Valkey frozen | same; each limiter call gives up after its 200 ms budget | same | 0 s |
 | PgBouncer stopped | JSON 503 `database_unavailable` in 2 ms; chat refused before streaming | `PgBouncerDown`, `HighErrorRate` | 1 s |
 | PgBouncer frozen | 503 after 5.0 s (connect timeout) | `PgBouncerDown` (exporter can't query), `HighErrorRate` | 0 s |
-| Postgres stopped | 503 in 15 ms (PgBouncer refuses at once while logins fail) | `PostgresDown`, `HighErrorRate` | 1–2 s |
+| Postgres stopped | 503 in 15 ms (PgBouncer refuses at once while logins fail), sessions included: nobody is signed in without the database. Sign-in answers 503 JSON too (it stores its state there first) | `PostgresDown`, `HighErrorRate` | 1–2 s |
 | Postgres frozen | 503 after 5.3 s, or 10.6 s when a pooled connection's pre-ping fails first (two PgBouncer waits in a row) | `PostgresDown`, `HighErrorRate`, `SlowRequests` | 1 s |
 | Postgres frozen 20 s under load | 67,121 reads OK; 28 × 503 (slowest 15.2 s: PgBouncer's `query_timeout`); in-flight ones slowest 20.1 s; **pool connections held afterwards: 0** | as above | 0 s |
 | PgBouncer frozen 20 s under load | 67,751 reads OK (in-flight ones waited, slowest 20.2 s); 4 × 503 (20.0 s); **pool held afterwards: 0** | as above | 0 s |
@@ -78,6 +80,7 @@ Grafana.
 | api cut from the network | JSON 504 `upstream_unavailable` after 2 s. A request that nginx sends on an **existing keep-alive connection** waits the full 30 s read timeout instead | `ApiDown` (Prometheus can't scrape it) | 0 s |
 | nginx stopped | the TLS edge holds each request for 5 s (it may be a restart), then answers `/api` with the JSON `upstream_unavailable` (502) | **nothing in the stack** (see gaps) | 1 s |
 | the TLS edge stopped | connection refused: the site is down (the edge owns ports 80/443) | **nothing in the stack** (see gaps) | 1 s |
+| the identity provider stopped (Keycloak) | **signed-in users notice nothing**: reads 200 in 5 ms, chat streams to the end. New sign-ins: `/api/auth/login` still redirects to the provider (its metadata is cached), and the provider's page fails (502 from the edge). Within 30 s `/ready` reports `identity_provider: degraded`, still 200 | `IdentityProviderDown` (2 min) | 0 s |
 | one gunicorn worker killed | streams on that worker cut (3 of 6); other requests unaffected; a new worker starts | nothing (by design: normal) | 0 s |
 | api crashes (PID 1 SIGKILL) | every in-flight stream cut; 502 for ~0.5 s; the restart policy brings it back | `ApiDown` only if it stays down 1 min | 0 s |
 | deploy (`up --force-recreate api`) | in-flight streams **finish** (graceful drain); **new requests get 502 for 6.7 s** | — | 0 s |
@@ -278,6 +281,20 @@ risk remains.
   Upgrading needs dump/restore or `pg_upgrade`, never just a new image
   tag.
 
+**Identity provider.**
+- *Down:* only sign-in stops. Sessions are this service's own and last up
+  to 12 h, so a provider outage shorter than that is invisible to anyone
+  already signed in (✅ `idp-stop` drill). Because sign-in redirects are
+  built from cached metadata, users are sent to a login page that fails;
+  the api's 30 s check is what notices (`identity_provider_up`,
+  `IdentityProviderDown`).
+- *Misconfigured* (a rotated client secret, a changed redirect URI,
+  clock skew): the provider answers, and every sign-in fails.
+  `SignInsFailing` fires, and the api log names the reason.
+- *Slow:* the back channel has a 5 s timeout (`OIDC_TIMEOUT_S`); a
+  sign-in then fails with "the sign-in service is unavailable" rather
+  than hanging.
+
 **Valkey.**
 - *Down or frozen:* requests pass unlimited (fail-open, ADR-0004;
   `RateLimiterFailingOpen`).
@@ -330,6 +347,7 @@ risk remains.
 | Postgres | writes and reads down | a managed database with a standby (RDS Multi-AZ) |
 | PgBouncer | database path down | a managed proxy (RDS Proxy) or one PgBouncer per api host |
 | Valkey | rate limiting off (fail-open) | acceptable; ElastiCache with a replica if limits become a security control |
+| the identity provider | new sign-ins; signed-in users continue | a managed provider (Entra ID, Okta) with its own availability; a self-hosted Keycloak needs its own cluster and database |
 
 ## Scalability bottlenecks, in the order they bite ✅
 

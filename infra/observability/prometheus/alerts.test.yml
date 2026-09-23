@@ -9,6 +9,53 @@ rule_files:
 evaluation_interval: 15s
 
 tests:
+  - name: An unreachable identity provider fires after two minutes, on any worker
+    interval: 30s
+    input_series:
+      - series: 'identity_provider_up{instance="api-1"}'
+        values: "1 1 0x10"
+      - series: 'identity_provider_up{instance="api-2"}'
+        values: "1x12"
+    alert_rule_test:
+      - eval_time: 1m30s
+        alertname: IdentityProviderDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: IdentityProviderDown
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "the identity provider does not answer: new sign-ins fail (signed-in users are unaffected)"
+              runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#identityproviderdown"
+
+  - name: Sign-ins failing fires only when none succeeds
+    interval: 1m
+    input_series:
+      # One failed callback a minute, and no successful one ever: the "ok"
+      # series does not exist, which the rule must treat as zero.
+      - series: 'auth_logins_total{outcome="login_failed"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SignInsFailing
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "every sign-in in the last 15 minutes failed"
+              runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#signinsfailing"
+
+  - name: A few failed sign-ins among successful ones are normal
+    interval: 1m
+    input_series:
+      - series: 'auth_logins_total{outcome="login_failed"}'
+        values: "0+1x30"
+      - series: 'auth_logins_total{outcome="ok"}'
+        values: "0+3x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SignInsFailing
+        exp_alerts: []
+
   - name: Redis down fires only after one minute
     interval: 15s
     input_series:

@@ -2,13 +2,14 @@
 the browser's EventSource can only GET)."""
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
 
 from app.config import Settings
+from app.db import DbSession
 from app.logs import request_id_var
-from app.models import Alert
+from app.queries import newest_alerts
 from app.ratelimit import rate_limit
 from app.schemas import ChatRequest
+from app.sessions import CurrentUser
 from app.sse import SSEResponse
 from app.triage import answer_events, build_messages
 
@@ -23,15 +24,17 @@ SSE_HEADERS = {
 
 
 @router.post("/chat/stream", dependencies=[Depends(rate_limit("chat", "chat_rate_limit"))])
-async def chat_stream(payload: ChatRequest, request: Request) -> SSEResponse:
+async def chat_stream(
+    payload: ChatRequest, request: Request, principal: CurrentUser, db: DbSession
+) -> SSEResponse:
     state = request.app.state
     settings: Settings = state.settings
-    # Context is loaded before the response starts: a database failure is
-    # still a clean JSON 503, and no connection is held while the model
-    # streams for tens of seconds.
-    async with state.sessionmaker() as session:
-        recent = select(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
-        alerts = list(await session.scalars(recent.limit(settings.chat_context_alerts)))
+    # The model sees exactly what the asker may see: their teams' alerts,
+    # read with the same query as the alert list. Loaded before the response
+    # starts, so a database failure is still a clean JSON 503; the session
+    # is closed when this function returns (DbSession's scope), so no
+    # connection is held while the model streams for tens of seconds.
+    alerts = await newest_alerts(db, principal.team_ids(), limit=settings.chat_context_alerts)
     events = answer_events(
         state.llm,
         build_messages(payload.message, alerts),

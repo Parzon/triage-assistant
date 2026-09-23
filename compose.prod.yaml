@@ -79,6 +79,17 @@ services:
           memory: 256m
     memswap_limit: 256m
 
+  # Only with COMPOSE_PROFILES=idp (the bundled identity provider). Browsers
+  # reach it through the edge, which exposes the realm's login endpoints
+  # only. Memory is limited in compose.yaml (measured: ~430 MiB in use).
+  keycloak:
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
   # The TLS edge (tools/edge, ADR-0012): the only service reachable from
   # outside. HTTPS with automatic certificates, HTTP redirected to HTTPS.
   # Profile "edge", on by default (COMPOSE_PROFILES in .env); leave it out

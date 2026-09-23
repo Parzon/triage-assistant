@@ -1,7 +1,7 @@
 """Application factory. Everything a request needs (engine, Redis client,
-limiter, settings) is created in the lifespan and hung on app.state, so
-tests build an app with their own settings and nothing is created at
-import time."""
+limiter, model and identity-provider clients, settings) is created in the
+lifespan and hung on app.state, so tests build an app with their own
+settings and nothing is created at import time."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -16,8 +16,9 @@ from app.errors import install_error_handlers
 from app.llm import OpenAICompatibleClient
 from app.metrics import watch_event_loop_lag
 from app.middleware import RequestContextMiddleware
+from app.oidc import OIDCClient, watch_identity_provider
 from app.ratelimit import RateLimiter
-from app.routes import alerts, chat, health
+from app.routes import alerts, auth, chat, health
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -40,11 +41,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # One client per process: it holds the HTTP connection pool to the
         # provider, so connections (and TLS handshakes) are reused.
         app.state.llm = OpenAICompatibleClient(settings)
+        # The identity provider is read lazily, at the first sign-in: the api
+        # starts (and serves existing sessions) while it is down.
+        app.state.oidc = OIDCClient(settings)
         watchers = [
             asyncio.create_task(watch_event_loop_lag()),
             asyncio.create_task(
                 watch_db_pool(app.state.engine, settings.db_pool_size + settings.db_max_overflow)
             ),
+            asyncio.create_task(watch_identity_provider(app.state.oidc)),
         ]
         try:
             yield
@@ -53,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 watcher.cancel()
             await asyncio.gather(*watchers, return_exceptions=True)
             await app.state.llm.aclose()
+            await app.state.oidc.aclose()
             await app.state.redis.aclose()
             await app.state.engine.dispose()
 
@@ -72,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(alerts.router)
     app.include_router(chat.router)
     return app

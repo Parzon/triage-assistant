@@ -8,6 +8,7 @@ the freeze begins: those in-flight requests are what the drill is about.
 """
 
 import collections
+import os
 import sys
 import threading
 import time
@@ -16,6 +17,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 URL = "http://web:8080/api/alerts?limit=5"
+# A signed-in user's session ("name=value"), minted by failure-drills.sh.
+HEADERS = {"Cookie": os.environ["SESSION_COOKIE"]}
 THREADS = 20
 duration = float(sys.argv[1])
 t0 = time.monotonic()
@@ -26,7 +29,8 @@ lock = threading.Lock()
 def one() -> None:
     start = time.monotonic()
     try:
-        with urllib.request.urlopen(URL, timeout=60) as response:  # noqa: S310
+        request = urllib.request.Request(URL, headers=HEADERS)  # noqa: S310
+        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
             status = str(response.status)
     except urllib.error.HTTPError as e:
         status = str(e.code)

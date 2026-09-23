@@ -12,7 +12,9 @@
 # Two kinds of drill:
 #   dependency faults  one probe of each user path while the fault is active:
 #                      health (liveness), ready (readiness, names the broken
-#                      dependency), read (GET /api/alerts), chat (a stream)
+#                      dependency), read (GET /api/alerts), chat (a stream),
+#                      sign-in (does /api/auth/login still send the browser
+#                      on to the identity provider?)
 #   in-flight faults   STREAMS slow streams are running when the fault hits,
 #                      and /api/health is probed 4x a second throughout: how
 #                      many streams finished, and how long new requests failed
@@ -54,11 +56,17 @@ if [ -n "$(docker ps -q -f name="^$PROJECT-edge-1$")" ]; then
 else
   BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
 fi
-web() { curl "${TLS_OPTS[@]}" "$@"; }
+# Probes act as a signed-in user (a session minted by app.cli), with the
+# Origin the api's CSRF check expects of state-changing requests.
+# shellcheck source=scripts/lib/session.sh
+. scripts/lib/session.sh
+ORIGIN=$(docker exec "$API" printenv PUBLIC_URL)
+SESSION=$(mint_session "$API" drills@example.com team:default:responder) || { echo "could not mint a session" >&2; exit 1; }
+web() { curl "${TLS_OPTS[@]}" -b "$SESSION" -H "Origin: $ORIGIN" "$@"; }
 
 healthy() {  # wait until every core container is healthy: each drill starts from a sound stack
   local c s start=$SECONDS
-  for c in db pgbouncer redis mock-llm api web; do
+  for c in db pgbouncer redis mock-llm api web $(docker ps -aq -f name="^$PROJECT-keycloak-1$" | sed 's/.*/keycloak/'); do
     until s=$(docker inspect -f '{{.State.Health.Status}}' "$(if [ $c = api ]; then api; else C "$c"; fi)" 2>/dev/null) \
         && [ "$s" = healthy ]; do
       [ $((SECONDS - start)) -gt 90 ] && { echo "$c is ${s:-missing}"; return 1; }
@@ -77,6 +85,20 @@ last_event() {  # the last SSE event of a saved stream; error events with their 
   echo "${ev:-none}"
 }
 
+signin() {  # can a browser start signing in: /api/auth/login, then the provider's login page?
+  local to code
+  to=$(web -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 "$BASE/api/auth/login")
+  case $to in
+    "302 "*auth_error=*) echo "refused:${to##*auth_error=}"; return ;;
+    "302 "*/protocol/openid-connect/auth*) ;;
+    *) echo "HTTP${to%% *}"; return ;;
+  esac
+  # The api redirects from cached provider metadata: only the login page
+  # itself shows whether the provider is up.
+  code=$(web -s -o /dev/null -w '%{http_code}' --max-time 10 "${to#* }")
+  if [ "$code" = 200 ]; then echo ok; else echo "login-page:HTTP$code"; fi
+}
+
 probe() {
   local health ready rd code t body
   health=$(web -s -o /dev/null -w '%{http_code}/%{time_total}s' --max-time 10 "$BASE/api/health")
@@ -85,7 +107,7 @@ probe() {
   body=$(mktemp)
   read -r code t < <(web -sN -o "$body" -w '%{http_code} %{time_total}' --max-time 150 -X POST "$BASE/api/chat/stream" \
     -H 'content-type: application/json' -d '{"message":"drill"}')
-  printf 'health %s · ready %s · read %s · chat %s %s/%ss' "$health" "$ready" "$rd" "$code" "$(last_event "$body")" "$t"
+  printf 'health %s · ready %s · read %s · chat %s %s/%ss · sign-in %s' "$health" "$ready" "$rd" "$code" "$(last_event "$body")" "$t" "$(signin)"
   rm -f "$body"
 }
 
@@ -155,7 +177,7 @@ freeze() {  # freeze <name> <service>: steady reads; <service> frozen from +8s t
   target=$(C "$2")
   echo ">> $(date -u +%T) $name" >&2
   ( sleep 8; docker pause "$target" >/dev/null; sleep 20; docker unpause "$target" >/dev/null ) &
-  seen=$(docker run --rm -i --network "${PROJECT}_default" python:3.13-slim python - 45 < scripts/drills/steady_reads.py)
+  seen=$(docker run --rm -i --network "${PROJECT}_default" -e SESSION_COOKIE="$SESSION" python:3.13-slim python - 45 < scripts/drills/steady_reads.py)
   wait
   sleep 3  # the pool gauge is sampled each second
   printf '| %s | reads: %s · pool connections held afterwards: %s | %s |\n' "$name" "$seen" "$(pool_in_use)" "$(recovered)"
@@ -221,6 +243,7 @@ run_drill() {
                        "docker network connect --alias api ${PROJECT}_default $API" ;;
     nginx-stop)      drill nginx-stop "docker stop $(C web)" "docker start $(C web)" ;;
     edge-stop)       drill edge-stop "docker stop $(C edge)" "docker start $(C edge)" ;;
+    idp-stop)        drill idp-stop "docker stop $(C keycloak)" "docker start $(C keycloak)" ;;
     worker-kill)     inflight worker-kill "$KILL_WORKER" ;;
     api-crash)       inflight api-crash "$CRASH" ;;
     deploy)          WINDOW=40 inflight deploy "$DEPLOY" ;;
@@ -230,32 +253,11 @@ run_drill() {
   esac
 }
 
-ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop edge-stop worker-kill api-crash deploy rollout oom"
+ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop edge-stop idp-stop worker-kill api-crash deploy rollout oom"
 echo "| drill | what a user sees while the fault is active | ready again after restore |"
 echo "|---|---|---|"
 for d in ${1:-$ALL}; do
   if ! why=$(healthy); then printf '| %s | NOT RUN: stack unhealthy (%s) | |\n' "$d" "$why"; continue; fi
   API=$(api)
-
-# Probe what users reach: HTTPS through the TLS edge when it runs (with its
-# local CA for SITE_ADDRESS=localhost, the system's trust store for a real
-# domain), nginx on loopback otherwise.
-envval() { sed -n "s/^$1=//p" .env 2>/dev/null; }
-SITE=${SITE_ADDRESS:-$(envval SITE_ADDRESS)}
-CA=$(mktemp)
-trap 'rm -f "$CA"' EXIT
-TLS_OPTS=()
-if [ -n "$(docker ps -q -f name="^$PROJECT-edge-1$")" ]; then
-  if [ "${SITE:-localhost}" = localhost ]; then
-    $COMPOSE cp edge:/data/caddy/pki/authorities/local/root.crt "$CA" >/dev/null 2>&1
-    TLS_OPTS=(--cacert "$CA")
-    BASE=${BASE:-https://localhost:${EDGE_HTTPS_PORT:-$(envval EDGE_HTTPS_PORT)}}
-  else
-    BASE=${BASE:-https://$SITE}
-  fi
-else
-  BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
-fi
-web() { curl "${TLS_OPTS[@]}" "$@"; }
   run_drill "$d"
 done

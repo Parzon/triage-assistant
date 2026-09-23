@@ -4,6 +4,7 @@
 // unfiltered newest-first list (the same query the chat uses for context).
 import http from 'k6/http'
 import { check } from 'k6'
+import { AUTH } from './session.js'
 
 const BASE = __ENV.BASE_URL || 'http://web:8080'
 
@@ -32,8 +33,8 @@ export const options = {
 }
 
 export default function () {
-  const critical = http.get(`${BASE}/api/alerts?severity=critical&limit=50`, { tags: { kind: 'critical' } })
+  const critical = http.get(`${BASE}/api/alerts?severity=critical&limit=50`, { headers: AUTH, tags: { kind: 'critical' } })
   check(critical, { 'critical list 200': (r) => r.status === 200 })
-  const recent = http.get(`${BASE}/api/alerts?limit=50`, { tags: { kind: 'recent' } })
+  const recent = http.get(`${BASE}/api/alerts?limit=50`, { headers: AUTH, tags: { kind: 'recent' } })
   check(recent, { 'recent list 200': (r) => r.status === 200 })
 }

@@ -8,12 +8,12 @@ VM is `docs/runbooks/demo-vm.md`; the decisions are in ADR-0011.
 
 | Environment | What for | What runs | Data | Created / reset by |
 |---|---|---|---|---|
-| **Laptop (dev)** | writing and debugging code | the dev stack: hot reload, debugger, mock LLM | seeded, disposable | `make up` / `make nuke` |
+| **Laptop (dev)** | writing and debugging code | the dev stack: hot reload, debugger, mock LLM, the bundled Keycloak (demo users) | seeded, disposable | `make up` / `make nuke` |
 | **Laptop (prod shape)** | "does it work like production?" before pushing: nginx, gunicorn, read-only containers; e2e, load tests, drills | the production images, built locally | seeded | `make prod-up` / `make prod-down` |
 | **Test stack** | integration tests | a throwaway compose project | created per run, deleted after | `make test-api` |
 | **CI** | the same checks on a clean machine, for every PR | GitHub-hosted runners: lint, tests, image check, e2e through the production stack | none kept | every push |
-| **Staging / demo VM** | shared, always-on, production-shaped: demos, pilots, real-provider testing, drills | released images from GHCR | demo data; never production data | `infra/vm/cloud-init.yaml`, then `make deploy` |
-| **Production** | users | the same images, on one VM or a managed platform (below) | real | the platform's deploy |
+| **Staging / demo VM** | shared, always-on, production-shaped: demos, pilots, real-provider testing, drills | released images from GHCR; the bundled Keycloak, or a test tenant of the organisation's provider | demo data; never production data | `infra/vm/cloud-init.yaml`, then `make deploy` |
+| **Production** | users | the same images, on one VM or a managed platform (below); **the organisation's identity provider**, never the bundled Keycloak | real | the platform's deploy |
 
 Answers to the usual questions:
 - **Do developers need a dev VM?** No: laptops run everything (the
@@ -38,7 +38,7 @@ changes:
 laptop ──PR──► CI (lint, tests, image check, e2e) ──squash──► main ──tag vX.Y.Z──► release workflow
                                                                               │ builds once, pushes
                                                                               ▼
-                                   ghcr.io/<owner>/triage-assistant-{api,web}:X.Y.Z
+                                   ghcr.io/<owner>/triage-assistant-{api,web,edge}:X.Y.Z
                                               │                           │
                                    make deploy tag=X.Y.Z        the same tag, later
                                               ▼                           ▼
@@ -59,9 +59,9 @@ laptop ──PR──► CI (lint, tests, image check, e2e) ──squash──�
 
 | Where | Secrets come from |
 |---|---|
-| laptop | `.env` from `.env.example` (placeholder passwords; fine locally) |
+| laptop | `.env` from `.env.example` (placeholder passwords, the demo users' included; fine locally) |
 | CI | `.env.example` as is (throwaway stacks) |
-| VM | `.env` with generated passwords (cloud-init: `openssl rand`), `chmod 600`, owned by the `deploy` user; the LLM key typed in once |
+| VM | `.env` with generated passwords (cloud-init: `openssl rand`), `chmod 600`, owned by the `deploy` user; the LLM key and the identity provider's client secret typed in once |
 | managed platform | a secret store (AWS Secrets Manager / SSM, Azure Key Vault, GCP Secret Manager) injected as environment variables into the task |
 
 Never in: the image, git, logs, or a ticket. A secret that reached any of
@@ -79,7 +79,14 @@ them is rotated, not just deleted.
   automatically.
 - **Roll back:** deploy the previous tag.
 - **Migrations are backward compatible** (expand, then contract), because
-  the old version keeps serving while they run (daily-work chapter).
+  the old version keeps serving while they run (daily-work chapter). The
+  teams migration (v0.2.0) is the worked example: measured under load,
+  the previous release kept serving with 0 errors (performance chapter).
+- **A breaking API change is a release note, not a surprise.** v0.2.0
+  made every endpoint require a session: any script or integration
+  calling the api needs one (`make session`, or a real sign-in), and
+  state-changing calls need `Origin`. Alertmanager's webhook kept its
+  bearer token.
 - **Backups:** `make backup`, copied off the host. A backup counts once
   you have restored it (`DUMP=... make fresh-host-test`).
 
@@ -97,6 +104,7 @@ have the same shapes.
 | PgBouncer | RDS Proxy, or keep PgBouncer as a sidecar | PgBouncer built into the flexible server | a sidecar | RDS Proxy "pins" sessions that use session state (the app uses none: transaction-scoped only). Re-run the database drills against whichever you choose |
 | Valkey | ElastiCache for Valkey | Azure Cache for Redis | Memorystore for Valkey | `REDIS_URL` (TLS: `rediss://`) |
 | mock LLM | the real provider (or Bedrock / Azure OpenAI / Vertex, all OpenAI-compatible or behind a gateway) | | | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| the bundled Keycloak | the organisation's identity provider (IAM Identity Center, Cognito, or the corporate Entra ID / Okta) | Entra ID | Cloud Identity / an IdP federated in | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_GROUPS_CLAIM`; `idp` out of `COMPOSE_PROFILES` (security chapter, "Connecting your organisation's provider") |
 | `migrate` service | a one-off task run before the service update (in the deploy pipeline) | a Container Apps job | a Cloud Run job | nothing: it's already a separate command |
 | Prometheus / Grafana / Alertmanager | Amazon Managed Prometheus + Managed Grafana, or CloudWatch | Azure Monitor managed Prometheus + Grafana | Managed Service for Prometheus | scrape via service discovery; cAdvisor and node-exporter give way to the platform's container metrics |
 | `.env` | Secrets Manager / SSM Parameter Store | Key Vault | Secret Manager | nothing in the code: they arrive as environment variables |
@@ -114,16 +122,17 @@ What they need, all of it in this repo:
 
 | They ask | Answer |
 |---|---|
-| What runs? | two images (api, web), one migration command, Postgres 17, Valkey 8, a model provider |
+| What runs? | three images (api, web, the TLS edge), one migration command, Postgres 17, Valkey 8, a model provider, an OIDC identity provider |
 | Ports | web 8080 (HTTP, non-root nginx); api 8010 (internal only) |
-| Health | `/api/health` (liveness: process up), `/api/ready` (readiness: database reachable; Valkey reported, not required), nginx `/healthz` |
-| Resources (measured) | api: 2 CPU / 1 GiB for ~1,000 reads/s or 500 streams; idle ~170 MiB. Postgres: 1 GiB. The rest in `compose.prod.yaml` |
+| Health | `/api/health` (liveness: process up), `/api/ready` (readiness: database reachable; Valkey and the identity provider reported, not required), nginx `/healthz` |
+| Resources (measured) | api: 2 CPU / 1 GiB for ~1,000 signed-in reads/s or 500 streams; idle ~170 MiB. Postgres: 1 GiB. The rest in `compose.prod.yaml` |
 | Scale on | CPU and `event_loop_lag_seconds` (api), active streams |
 | Configuration | the settings reference (daily-work chapter); secrets marked |
 | Logs | JSON lines on stdout, one request id across nginx and the api |
 | Metrics | Prometheus at `/metrics` on 8010 (multiprocess, summed across workers); alert rules and their tests in `infra/observability` |
 | Deploy order | migrations (backward compatible) → api (rolling, readiness-gated) → web |
 | Stop | SIGTERM; up to 120 s of graceful drain for streams; SIGKILL after 130 s |
-| Egress | the model provider's API over HTTPS; nothing else at runtime |
-| Backups | the database only (Valkey holds disposable rate-limit counters) |
+| Egress | the model provider's API, and the identity provider's (metadata, keys, the code exchange), over HTTPS; nothing else at runtime |
+| Identity | an OIDC confidential client: redirect URI `<PUBLIC_URL>/api/auth/callback`, post-logout `<PUBLIC_URL>/`; a claim carrying `team:<slug>:<role>` values (security chapter) |
+| Backups | the database only (Valkey holds disposable rate-limit counters). It holds sessions: a restore signs out whoever signed in after the dump |
 | Known limits | the failure-modes chapter (single points of failure, the one unbounded fault) |

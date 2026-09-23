@@ -8,6 +8,7 @@
 import http from 'k6/http'
 import { check } from 'k6'
 import { Trend } from 'k6/metrics'
+import { WRITE } from './session.js'
 
 const BASE = __ENV.BASE_URL || 'http://web:8080'
 const firstEvent = new Trend('time_to_first_event', true)
@@ -32,7 +33,7 @@ export const options = {
 
 export default function () {
   const res = http.post(`${BASE}/api/chat/stream`, JSON.stringify({ message: 'what is on fire?' }), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: WRITE,
     timeout: '180s',
   })
   firstEvent.add(res.timings.waiting)

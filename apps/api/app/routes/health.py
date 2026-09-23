@@ -9,8 +9,10 @@ exactly when the loop is blocked, and never waits for a worker thread.
 /ready (readiness): "should traffic be sent here right now?" Checks hard
 dependencies. Postgres is one; Redis is not - the rate limiter fails open,
 so a Redis outage is reported as "degraded" but keeps the instance ready.
-Marking every instance unready over a soft dependency turns a partial
-outage into a total one.
+Nor is the identity provider: signed-in users carry on without it. Its
+state comes from the background check (app/oidc.py), never a call per
+probe. Marking every instance unready over a soft dependency turns a
+partial outage into a total one.
 """
 
 import asyncio
@@ -37,11 +39,13 @@ async def ready(request: Request) -> JSONResponse:
         probe(_ping_database(request), timeout_s=2.0),
         probe(state.redis.ping(), timeout_s=0.25),
     )
+    idp = state.oidc.reachable
     body = {
         "status": "ready" if database else "not_ready",
         "checks": {
             "database": "ok" if database else "unavailable",
             "redis": "ok" if redis else "degraded",
+            "identity_provider": "unknown" if idp is None else "ok" if idp else "degraded",
         },
     }
     return JSONResponse(body, status_code=200 if database else 503)

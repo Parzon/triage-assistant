@@ -50,7 +50,16 @@ clumped (k6 `paced-users.js`). Know which shape your real traffic has.
   200 req/s.
 - **Raise the rate limits for the test**
   (`ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`), or
-  you're measuring the limiter's 429s. All load comes from one IP.
+  you're measuring the limiter's 429s. All load comes from one signed-in
+  user, and limits are per user.
+- **Load runs signed in.** Every data endpoint needs a session.
+  `make load`, `make load-tool` and `make load-compare` mint one with
+  `app.cli` (a real session row, no identity provider): a user in two of
+  the seeded teams (`team:payments:viewer`, `team:platform:viewer`), so
+  reads take the multi-team path. Each tool sends it as a `Cookie`
+  header. POSTs (chat) also send `Origin: <PUBLIC_URL>`, which the api's
+  CSRF check requires. By hand: `make session` prints a cookie
+  (`groups="org:admin"` for the global list).
 - **Test through nginx**, as users arrive, not against the api port.
 - **Turn off the tools' telemetry:** k6 `--no-usage-report`, Artillery
   `ARTILLERY_DISABLE_TELEMETRY=true`. k6 and Artillery phone home by
@@ -59,23 +68,29 @@ clumped (k6 `paced-users.js`). Know which shape your real traffic has.
 ## The tools
 
 All of them ran the same scenario: `GET /api/alerts?limit=50` through
-nginx at 200 req/s for 30 s, on the same host (✅ `make load-compare`).
+nginx, signed in, at 200 req/s for 20 s, on the same host (✅ `make
+load-compare RATE=200 DURATION=20`, v0.2.0):
 
 | Tool | Achieved | p50 / p95 / p99 | Tool CPU | Model |
 |---|---|---|---|---|
-| k6 2.3 | 200.0 req/s | 1.38 / 1.66 / 1.98 ms | 4.8% | open (`constant-arrival-rate`) |
-| vegeta | 200.0 | 1.48 / 1.74 / 2.02 ms | 5.4% | open (fixed rate) |
-| oha | 200.1 | 1.48 / 1.73 / 1.95 ms | 0.9% | open, with `--latency-correction` |
-| JMeter 5.6.3 | 199.7 | 2 / 2 / 2 ms (whole milliseconds only) | 3.6% | closed (threads + throughput timer) |
-| Artillery 2.0 | 200.0 | 2 / 3 / 4 ms (whole milliseconds only) | **534%** | open (arrival rate) |
-| Locust 2.46 | 205.9 | 130 / 170 / 190 ms | 2.8% | closed (users × `constant_throughput`) |
+| k6 2.3 | 200.0 req/s | 3.07 / 3.91 / 4.50 ms | 5.1% | open (`constant-arrival-rate`) |
+| vegeta | 200.0 | 3.22 / 4.13 / 4.63 ms | 6.0% | open (fixed rate) |
+| oha | 200.1 | 3.16 / 3.79 / 4.35 ms | 1.0% | open, with `--latency-correction` |
+| JMeter 5.6.3 | 199.3 | 3 / 5 / 5 ms (whole milliseconds only) | 6.9% | closed (threads + throughput timer) |
+| Artillery 2.0 | 200.0 | 5 / 7.9 / 8.9 ms | **527%** | open (arrival rate) |
+| Locust 2.46 | 207.9 | 170 / 300 / 330 ms | 3.2% | closed (users × `constant_throughput`) |
 
-The Locust row is not Locust being slow. It found a real problem the
-other tools' smooth arrivals did not trigger: connection churn in the
-database pool. After that fix, Locust measured p50 35 ms and p95 69 ms,
-and the rest is its arrivals clumping (performance chapter,
-bottleneck 3). The tools with only whole-millisecond resolution (JMeter,
-Artillery) cannot resolve a 1.5 ms service.
+Before sign-in the open-model tools measured ~1.5 ms: signing in
+doubled the cost of this request (performance chapter, bottleneck 4).
+
+The Locust row is not Locust being slow. Its 200 users, each pacing one
+request a second, arrive in clumps, and a burst of 200 requests queues on
+two workers. k6's `paced-users.js` (the same shape) measured p50 182 ms.
+The shape, not the tool. Before sign-in, Locust had also exposed
+connection churn in the database pool, which the smooth arrivals of the
+other tools never triggered (performance chapter, bottleneck 3). The
+tools with only whole-millisecond resolution (JMeter, Artillery) cannot
+resolve a millisecond-scale service.
 
 ### k6: the default choice
 

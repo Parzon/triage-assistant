@@ -98,6 +98,25 @@ db_pool_max = Gauge(
     multiprocess_mode="livesum",
 )
 
+auth_logins = Counter(
+    "auth_logins_total",
+    "Sign-in attempts that reached the callback, by outcome: ok, or why not "
+    "(access_denied, invalid_state, expired, login_failed, invalid_token, idp_unavailable).",
+    ["outcome"],
+)
+auth_rejections = Counter(
+    "auth_rejections_total",
+    "Requests refused before reaching a route: no_session, expired, cross_origin.",
+    ["reason"],
+)
+
+identity_provider_up = Gauge(
+    "identity_provider_up",
+    "1 if the identity provider answered the last check with trustworthy metadata "
+    "(sampled every 30s per worker); the lowest across workers.",
+    multiprocess_mode="livemin",
+)
+
 ratelimit_decisions = Counter(
     "ratelimit_decisions_total",
     "Rate limiter outcomes: allowed, rejected, or fail_open (Redis unreachable).",

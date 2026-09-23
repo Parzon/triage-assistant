@@ -1,7 +1,17 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Chat } from './Chat'
+
+function renderChat(client = new QueryClient()) {
+  render(
+    <QueryClientProvider client={client}>
+      <Chat />
+    </QueryClientProvider>,
+  )
+  return client
+}
 
 const encoder = new TextEncoder()
 
@@ -28,9 +38,9 @@ function controllableStream() {
   }
 }
 
-async function ask(question = 'what broke?') {
+async function ask(question = 'what broke?', client?: QueryClient) {
   const user = userEvent.setup()
-  render(<Chat />)
+  renderChat(client)
   await user.type(screen.getByLabelText('Question'), question)
   await user.click(screen.getByRole('button', { name: 'Ask' }))
   return user
@@ -111,6 +121,22 @@ describe('Chat', () => {
     expect(alert).toHaveTextContent('Try again in 12s.')
   })
 
+  it('a session that ended re-checks who is signed in', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { code: 'unauthenticated', message: 'sign in required', request_id: 'rq' } }), {
+          status: 401,
+        }),
+      ),
+    )
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    await ask('anything', client)
+    expect(await screen.findByRole('alert')).toHaveTextContent('sign in required')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] })
+  })
+
   it('reports an unreachable server plainly', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
     await ask()
@@ -120,7 +146,7 @@ describe('Chat', () => {
   it('does not send an empty question', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    render(<Chat />)
+    renderChat()
     expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
     expect(fetchMock).not.toHaveBeenCalled()
   })

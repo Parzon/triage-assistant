@@ -9,7 +9,9 @@ on this repo's host, 📘 = cloud guidance, not exercised here.
 ```
 browser ──:443 HTTPS──► edge (Caddy) ──http://web:8080──► nginx (web) ──http://api:8010──► api ──► PgBouncer ──► Postgres
           :80 → 308 ─┘   TLS, certificates,                  │ static files (React)     ├──► Valkey
-                         HTTP/3, retries                     └ /api/* → api             └──► the model provider (or mock-llm)
+                         HTTP/3, retries                     └ /api/* → api             ├──► the model provider (or mock-llm)
+                         │                                                               └──► Keycloak, back channel
+                         └ /auth/realms/triage/*, /auth/resources/* ──http://keycloak:8080──► Keycloak, front channel
 ```
 
 - **One bridge network per compose project**
@@ -129,6 +131,41 @@ Caddy (`tools/edge`, ADR-0012) terminates HTTPS in front of nginx.
   The official image's file capability on the binary had to be removed:
   under `no-new-privileges` the kernel refuses to run it.
 
+## Signing in: two channels to the identity provider ✅
+
+Sign-in talks to the identity provider on two paths:
+
+| Channel | Who | What | Bundled Keycloak |
+|---|---|---|---|
+| front | the browser, redirected | the login page, sign-out | `<PUBLIC_URL>/auth/...`: the edge in the production shape, the Vite proxy in dev |
+| back | the api, directly | the discovery document, signing keys, the code-for-token exchange | `http://keycloak:8080/auth/...` inside the Docker network |
+
+Both must lead to one issuer. A token names the issuer it came from.
+Keycloak would otherwise name whichever address a request arrived on,
+and the api would reject tokens as "issued by another provider".
+- `KC_HOSTNAME=<PUBLIC_URL>/auth` fixes the issuer and the browser-facing
+  URLs.
+- `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` answers the api's direct calls
+  with `keycloak:8080` addresses.
+- `OIDC_DISCOVERY_URL` tells the api where to read the metadata.
+
+✅ Measured: the discovery document fetched by the api names
+`http://localhost:5173/auth/realms/triage` as issuer and authorization
+endpoint, and `http://keycloak:8080/...` as token and key endpoints.
+
+With a real provider, both channels are its public HTTPS address. The api
+then needs outbound HTTPS to it: an egress rule, a proxy
+(`HTTPS_PROXY`), and the provider's CA in the image if a corporate CA
+signs it.
+
+**What the edge exposes.** Only the triage realm's user-facing paths
+(`/auth/realms/triage/*`) and the static resources its pages load
+(`/auth/resources/*`). Every other `/auth` path answers 404: the admin
+console, the admin REST API, the master realm where Keycloak's own
+administrator signs in. Keycloak's reverse-proxy guide lists these as
+the paths to keep private. The Vite dev proxy forwards all of `/auth`,
+so the admin console works in dev.
+
 ## Behind a load balancer instead of the edge
 
 The same images; the edge is simply not started. Remove `edge` from
@@ -149,6 +186,10 @@ The same images; the edge is simply not started. Remove `edge` from
   some proxies buffer by default; the symptom is answers that appear all
   at once. 📘
 - **TLS** terminates at the load balancer, with a managed certificate. 📘
+- **The bundled Keycloak is not routed** without the edge: nginx serves
+  the app, not `/auth`. Use the organisation's identity provider there,
+  or route `/auth/realms/triage/*` and `/auth/resources/*` to Keycloak at
+  the load balancer. 📘
 
 ## A cloud network for this stack 📘
 

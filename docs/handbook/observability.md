@@ -29,6 +29,9 @@ production one). Grafana, Prometheus and Alertmanager listen on
 | in flight | `http_requests_in_progress`, `llm_active_streams` | |
 | the model | `llm_requests_total{outcome}`, `llm_time_to_first_token_seconds`, `llm_stream_duration_seconds`, `llm_tokens_total{kind}` | outcome is `ok`, `cancelled` (the user left) or an `llm_*` error code; tokens × price = cost |
 | rate limiter | `ratelimit_decisions_total{scope, decision}` | `fail_open` = Valkey did not answer in time, request allowed |
+| sign-in | `auth_logins_total{outcome}` | callbacks from the identity provider: `ok`, `access_denied`, `invalid_state`, `expired`, `login_failed`, `invalid_token`, `idp_unavailable` |
+| access | `auth_rejections_total{reason}` | requests refused before any route: `no_session`, `expired`, `cross_origin` (a CSRF attempt, or a script without `Origin`) |
+| the identity provider | `identity_provider_up` | 1 if it answered the api's last check (every 30 s per worker); the lowest across workers (`livemin`) |
 | dependencies | `pg_up`, `pgbouncer_up`, `redis_up` + their exporters' metrics | |
 | host / containers | node-exporter, cAdvisor (`container_*`, including `container_oom_events_total`) | CPU, memory, disk, OOM kills |
 
@@ -75,6 +78,11 @@ the Python, run `make dashboard`, and review the JSON diff in the PR.
 produces. An edit made in the Grafana UI survives only until the next
 reload.
 
+The rows, top to bottom: traffic and errors (RED), the model, sign-in and
+access (the identity provider's state, sign-ins by outcome, refused
+requests by reason), dependencies (limiter, pools, PgBouncer, Postgres),
+containers and host.
+
 ![The service dashboard under load](../images/grafana-service-dashboard.png)
 
 What the first version of the dashboard got wrong: 4 of its 30 queries
@@ -94,7 +102,7 @@ showed "No data" on a healthy system.
 
 ## Alerts
 
-18 rules in `infra/observability/prometheus/alerts.yml`. Each alert says
+20 rules in `infra/observability/prometheus/alerts.yml`. Each alert says
 what users experience ("more than 5% of api requests fail"), not only
 which component is unhappy. `for:` is how long the condition must hold,
 so a blip pages nobody. Severity maps onto the app's alert severities.
@@ -113,6 +121,8 @@ so a blip pages nobody. Severity maps onto the app's alert severities.
 | `AppDatabasePoolExhausted` | the api's pools are > 90% in use | 2 min |
 | `LLMErrors` | > 10% of model calls fail | 5 min |
 | `LLMSlowFirstToken` | p95 time to first token > 10 s | 10 min |
+| `IdentityProviderDown` | the api's check of the provider fails: new sign-ins fail, signed-in users don't notice | 2 min |
+| `SignInsFailing` | ≥ 5 sign-ins failed in 15 min and none succeeded (a rotated secret, a changed redirect URI, clock skew) | 5 min |
 | `DiskWillFillIn6h`, `DiskAlmostFull` | the trend says full in 6 h / < 10% free | 15 / 5 min |
 | `ContainerNearMemoryLimit`, `ContainerOOMKilled` | > 90% of the limit / the kernel killed a process | 5 min / at once |
 
@@ -152,7 +162,10 @@ joins nginx and the api (debugging chapter). Log levels:
 - `error`: something failed for a user, with a traceback.
 
 What not to log: request bodies, alert text and chat questions (personal
-data), secrets, tokens. The chatty `httpx2` logger (one line per model
+data), secrets, tokens, cookies, authorization codes. The access log
+carries the user's id: enough to say who did what, without their name or
+email in every log store. A failed sign-in logs its reason
+(`"sign-in failed"`, with `code` and `reason`), never the token. The chatty `httpx2` logger (one line per model
 call) is set to WARNING.
 
 ## Not here yet 📘

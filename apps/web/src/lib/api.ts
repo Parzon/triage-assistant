@@ -103,15 +103,81 @@ export type Severity = 'info' | 'warning' | 'high' | 'critical'
 
 export interface Alert {
   id: number
+  team: string
   source: string
   severity: Severity
   message: string
   created_at: string
 }
 
-export async function fetchAlerts(limit = 20): Promise<Alert[]> {
-  const res = await fetch(`/api/alerts?limit=${limit}`)
+/** Newest first, from every team the user can see, or only `team`. */
+export async function fetchAlerts(limit = 20, team?: string): Promise<Alert[]> {
+  const params = new URLSearchParams({ limit: String(limit), ...(team ? { team } : {}) })
+  const res = await fetch(`/api/alerts?${params}`)
   if (!res.ok) throw await toApiError(res)
   const page: { items: Alert[] } = await res.json()
   return page.items
+}
+
+export type NewAlert = Pick<Alert, 'team' | 'source' | 'severity' | 'message'>
+
+export async function createAlert(alert: NewAlert): Promise<Alert> {
+  // The browser adds an Origin header to this POST; the api refuses
+  // state-changing requests without this site's (CSRF protection).
+  const res = await fetch('/api/alerts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(alert),
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+
+// --- Who is signed in -------------------------------------------------------
+// The session is an httpOnly cookie: this code never sees it, and never needs
+// to. It only asks the api who the cookie belongs to.
+
+export type Role = 'viewer' | 'responder' | 'admin'
+
+const RANK: Record<Role, number> = { viewer: 1, responder: 2, admin: 3 }
+
+/** Does `role` include everything `needed` may do? Roles are ranked. */
+export const atLeast = (role: Role, needed: Role) => RANK[role] >= RANK[needed]
+
+export interface Team {
+  slug: string
+  name: string
+  role: Role
+}
+
+export interface Me {
+  id: number
+  email: string | null
+  name: string | null
+  org_admin: boolean
+  /** Every team the user can see, with their role in it (an org admin: all). */
+  teams: Team[]
+}
+
+/** The signed-in user, or null when nobody is. */
+export async function fetchMe(): Promise<Me | null> {
+  const res = await fetch('/api/me')
+  if (res.status === 401) return null
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+
+/** Signing in is a page navigation, not a fetch: the identity provider shows
+ *  its own login page, then sends the browser back to `next`. */
+export function signInUrl(next = window.location.pathname): string {
+  return `/api/auth/login?next=${encodeURIComponent(next)}`
+}
+
+/** Ends the session here; resolves to the page that ends it at the identity
+ *  provider too (or "/" when it has none), for the browser to visit. */
+export async function signOut(): Promise<string> {
+  const res = await fetch('/api/auth/logout', { method: 'POST' })
+  if (!res.ok) throw await toApiError(res)
+  const body: { logout_url: string } = await res.json()
+  return body.logout_url
 }

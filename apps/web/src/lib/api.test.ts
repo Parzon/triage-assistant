@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, fetchAlerts, streamChat, toApiError, type ChatEvent } from './api'
+import {
+  ApiError,
+  atLeast,
+  createAlert,
+  fetchAlerts,
+  fetchMe,
+  signInUrl,
+  signOut,
+  streamChat,
+  toApiError,
+  type ChatEvent,
+} from './api'
 
 const sseBody = (text: string) =>
   new Response(text, { status: 200, headers: { 'content-type': 'text/event-stream' } })
@@ -90,5 +101,50 @@ describe('fetchAlerts', () => {
   it('throws ApiError on failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })))
     await expect(fetchAlerts()).rejects.toMatchObject({ status: 503 })
+  })
+})
+
+describe('who is signed in', () => {
+  it('fetchMe is null when nobody is (401), not an error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })))
+    expect(await fetchMe()).toBeNull()
+  })
+
+  it('fetchMe throws on other failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })))
+    await expect(fetchMe()).rejects.toMatchObject({ status: 503 })
+  })
+
+  it('signInUrl comes back to the given page', () => {
+    expect(signInUrl('/a b?c')).toBe('/api/auth/login?next=%2Fa%20b%3Fc')
+  })
+
+  it('signOut POSTs and returns where to go next', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ logout_url: '/' }))))
+    expect(await signOut()).toBe('/')
+  })
+
+  it('roles are ranked', () => {
+    expect(atLeast('admin', 'responder')).toBe(true)
+    expect(atLeast('responder', 'responder')).toBe(true)
+    expect(atLeast('viewer', 'responder')).toBe(false)
+  })
+})
+
+describe('createAlert', () => {
+  it('POSTs JSON and returns the stored alert', async () => {
+    const stored = { id: 3, team: 't', source: 's', severity: 'info', message: 'm', created_at: 'now' }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(stored), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await createAlert({ team: 't', source: 's', severity: 'info', message: 'm' })).toEqual(stored)
+    expect(fetchMock).toHaveBeenCalledWith('/api/alerts', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('throws the api error envelope', async () => {
+    const refusal = { error: { code: 'csrf_failed', message: 'cross-site request refused', request_id: 'r' } }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(refusal), { status: 403 })))
+    await expect(createAlert({ team: 't', source: 's', severity: 'info', message: 'm' })).rejects.toMatchObject({
+      code: 'csrf_failed',
+    })
   })
 })

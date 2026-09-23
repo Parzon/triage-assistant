@@ -9,6 +9,7 @@
   omission). JMeter 5.5+ also has an Open Model Thread Group
   ("rate(200/sec) random_arrivals(30 sec)") for true arrival-rate tests.
   Overrides: -Jthreads=50 -Jduration=30 -Jhost=web -Jport=8080
+  -Jcookie="name=value": the session to run as (make load-tool mints one).
 -->
 <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
   <hashTree>
@@ -41,6 +42,15 @@
             <savedValue>0.0</savedValue>
           </doubleProp>
         </ConstantThroughputTimer>
+        <hashTree/>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="signed-in session">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Cookie</stringProp>
+              <stringProp name="Header.value">${__P(cookie,)}</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
         <hashTree/>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /api/alerts">
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments">

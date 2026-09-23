@@ -123,6 +123,19 @@ add("timeseries", "Cancelled answers / min",
     [('60 * sum(rate(llm_requests_total{outcome="cancelled"}[5m])) or vector(0)', "cancelled")], 8, 7, 16, unit="short")
 y += 7
 
+row("Sign-in and access")
+add("stat", "Identity provider",
+    [("min(identity_provider_up)", "")], 4, 7, 0, unit="none",
+    thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 1}],
+    description="1 = the provider answered the api's last check (every 30s). 0 = new sign-ins fail; signed-in users are unaffected.")
+add("timeseries", "Sign-ins by outcome",
+    [("sum by (outcome) (increase(auth_logins_total[5m]))", "{{outcome}}")], 10, 7, 4, unit="short", stack=True,
+    description="Callbacks from the provider per 5 min. access_denied: the user cancelled or may not use the app. invalid_state / expired: a sign-in replayed or left too long. login_failed / invalid_token: the exchange or the token was refused - a burst after a change means a client secret, redirect URI or clock problem.")
+add("timeseries", "Refused requests by reason",
+    [("sum by (reason) (rate(auth_rejections_total[1m]))", "{{reason}}")], 10, 7, 14, unit="reqps", stack=True,
+    description="no_session: not signed in (a sign-in page loading). expired: sessions ending. cross_origin: a state-changing request from another site - someone attempting CSRF, or a script without the Origin header.")
+y += 7
+
 row("Dependencies")
 add("timeseries", "Rate limiter decisions",
     [("sum by (scope, decision) (rate(ratelimit_decisions_total[1m]))", "{{scope}} {{decision}}")], 6, 8, 0, unit="reqps",

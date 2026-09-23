@@ -23,6 +23,128 @@ not done.
 - 📘 On a managed platform: a secret store (Secrets Manager, Key Vault)
   with rotation, injected into the task environment.
 
+## Sign-in and access ✅
+
+Who may do what, how it is enforced, and how to connect your
+organisation's identity provider. Decision record: ADR-0013.
+
+### How signing in works
+
+```
+browser                    api (/api/auth/...)              identity provider
+   | GET /api/auth/login     |                                     |
+   |------------------------>| state, nonce, PKCE verifier stored  |
+   |<-- 302 to the provider  | (login_requests); state cookie set  |
+   |------------------------------------------------------------->| login page:
+   |<------------------------------------------------------------| password, MFA...
+   |      302 /api/auth/callback?code&state&iss                   |
+   |------------------------>| state == cookie? iss == ours?       |
+   |                         |-- code + verifier + client secret ->| (back channel)
+   |                         |<-- ID token ------------------------|
+   |                         | verify: signature, iss, aud, azp,   |
+   |                         | exp, nonce; sync teams; new session |
+   |<-- 302 next, session cookie                                   |
+```
+
+After that, every request carries one cookie, `__Host-triage_session`.
+The api looks it up (one query: session, user, memberships), tells
+Postgres who is asking (`set_config`, for row-level security), and runs
+the route.
+
+### Each attack and what stops it
+
+| Attack | Control | Where | Test |
+|---|---|---|---|
+| Stealing the session with an XSS bug | `HttpOnly`: scripts cannot read the cookie. No token is ever in the browser. | `app/sessions.py` | `test_auth_flow.py`: cookie flags |
+| Session on plain HTTP, or set by a subdomain | `Secure` and the `__Host-` prefix | same | same |
+| Another site POSTing with your cookie (CSRF) | `Origin` must equal `PUBLIC_URL` on every state-changing request; `SameSite=Lax` as a second layer | `check_same_origin` | `test_sessions.py`, e2e `access.spec.ts` |
+| Signing a victim in as the attacker (login CSRF) | `state` bound to a cookie set when *this browser* started signing in | `routes/auth.py` | `test_callback_from_another_browser_is_refused` |
+| A stolen authorization code | PKCE (S256): the code is useless without the verifier, which never left the api | `oidc.py` | `test_authorization_url_asks_for_a_code_with_pkce` |
+| A replayed code or callback | the sign-in row is deleted on first use | `finish_login` | `test_a_code_works_once` |
+| A replayed or injected ID token | `nonce`, `exp`, `aud`, `azp`, and a signature by the provider's published key | `oidc.verify` | 11 cases in `test_oidc.py` |
+| `alg: none`, or HMAC with a public key | algorithm allow-list (RS256, PS256, ES256), checked before any key is used | same | `test_unsigned_and_hmac_tokens_are_refused` |
+| Another provider's response (mix-up) | the discovery `issuer` and the callback's `iss` must equal `OIDC_ISSUER` | `oidc.metadata`, `callback` | `test_metadata_naming_another_issuer...`, `test_provider_errors_and_mix_ups...` |
+| Open redirect via `?next=` | only paths on this site (`//evil`, `/\evil`, `https://...` become `/`) | `safe_next` | `test_next_is_never_another_site` + unit |
+| Probing other teams' ids | invisible = 404, like missing | `require_role` | `test_other_teams_alerts_are_not_found_not_forbidden` |
+| A leaked database or backup | only SHA-256 of session tokens is stored | `UserSession` | — |
+| Brute-forcing sign-in | per-IP limit on `/auth/*` (30/min); the provider's own lockout (Keycloak: `bruteForceProtected`) | `rate_limit_by_ip` | `test_sign_in_is_limited_per_address` |
+| One user exhausting the service | rate limits per user, not per IP | `rate_limit` | `test_rate_limits_are_per_user_not_per_address` |
+| The assistant quoting another team's alerts | its context is read with the caller's visibility, the same query as the list | `queries.newest_alerts` | `test_the_assistant_only_sees_the_askers_alerts` |
+
+### Roles
+
+| | viewer | responder | admin | org admin |
+|---|---|---|---|---|
+| read the team's alerts, ask the assistant | ✓ | ✓ | ✓ | every team |
+| create alerts for the team | | ✓ | ✓ | every team |
+| delete the team's alerts, list its members | | | ✓ | every team |
+
+Ranked (`Role` is an `IntEnum`): a check is `role >= needed`, so adding a
+right to a role is one line. The UI hides what a role cannot do; the api
+enforces it. Hiding a button is never the control.
+
+### Where roles come from
+
+From the identity provider, at every sign-in: the claim named by
+`OIDC_GROUPS_CLAIM` (default `groups`) is read. Values:
+- `team:<slug>:<role>`: a role in a team. The slug is lowercase letters,
+  digits and dashes. The highest role wins if there are several.
+- `org:admin`: org admin.
+- Anything else is ignored.
+
+A team is created the first time a sign-in names it. Memberships are
+replaced every time: someone removed from a group loses the role at their
+next sign-in. **For immediate effect** (a leaver, a compromised account):
+`make revoke email=<address> ENV=prod` ends all their sessions now.
+
+### Connecting your organisation's provider
+
+1. Register a **confidential web application** with the provider:
+   - redirect URI `<PUBLIC_URL>/api/auth/callback`;
+   - post-logout redirect URI `<PUBLIC_URL>/`;
+   - authorization code flow with PKCE; client authentication by secret
+     (`client_secret_basic`).
+2. Make it send the roles claim, with values in the format above:
+
+   | Provider | How |
+   |---|---|
+   | Keycloak | groups named `team:payments:responder`, with a "Group Membership" mapper, *Full group path* off (a leading `/` is tolerated anyway). See the committed realm. |
+   | Okta | groups with those names, and a groups claim filter on the app (for example "starts with `team:`"). |
+   | Microsoft Entra ID | **app roles** with those values (`team:payments:responder`), assigned to groups; set `OIDC_GROUPS_CLAIM=roles`. Entra's `groups` claim carries object ids, not names. |
+   | Google Workspace | has no groups claim in its ID token. Put an IdP that has one in between (Keycloak, Okta, Entra), or add a lookup against the Directory API. |
+
+3. In `.env`: remove `idp` from `COMPOSE_PROFILES`, and set:
+   - `OIDC_ISSUER`: exactly the `iss` of the provider's tokens;
+   - `OIDC_DISCOVERY_URL=` (empty);
+   - `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`;
+   - `OIDC_GROUPS_CLAIM`, if it is not `groups`.
+4. Check: `make prod-up`, then `curl -s localhost:8088/api/ready` shows
+   `"identity_provider": "ok"`. Sign in, and `GET /api/me` lists your
+   teams.
+
+Gotchas:
+- **The issuer must match exactly**, trailing slash included. Entra's is
+  `https://login.microsoftonline.com/<tenant>/v2.0`; Okta's
+  `https://<org>.okta.com/oauth2/default` or `https://<org>.okta.com`,
+  depending on the authorization server.
+- **The api must reach the provider over HTTPS from inside its
+  container.** The production image trusts the system CAs. A provider
+  behind a corporate CA needs that CA added to the image.
+- **The api's clock must be right** (NTP): tokens are checked with 60 s
+  of leeway.
+- **Google does not support sign-out at the provider:** signing out ends
+  only this site's session.
+
+### Demo users (the bundled Keycloak)
+
+`alice` (payments responder, platform viewer), `bob` (platform admin),
+`carol` (org admin), `dave` (no team), all with `DEMO_USER_PASSWORD`.
+Keycloak's admin console is at `http://localhost:5173/auth/admin/` in dev
+(`admin` / `KEYCLOAK_ADMIN_PASSWORD`). The edge never exposes it, nor the
+master realm (measured: 404). On a demo reachable from the internet, set
+strong values for both passwords, or remove the demo users from the realm
+file.
+
 ## Least privilege
 
 **Database roles** (✅ verified by trying each forbidden operation):
@@ -58,8 +180,11 @@ query.
 
 ## Network exposure ✅
 
-- **Only nginx is published.** The api, database, pooler and Valkey have
-  no host ports. The dashboards listen on 127.0.0.1 (reach them through
+- **Only the edge is published** (nginx stays on the host's loopback).
+  The api, database, pooler, Valkey and Keycloak have no host ports. The
+  edge passes the bundled Keycloak's sign-in pages only
+  (`/auth/realms/triage/*`, `/auth/resources/*`); its admin console and
+  the master realm answer 404. The dashboards listen on 127.0.0.1 (reach them through
   an SSH tunnel), and so do the dev ports.
 - **Published ports bypass the host firewall** (networking chapter, with
   the NAT rules). Anything added with `ports:` is reachable, whatever
@@ -93,11 +218,12 @@ query.
   which nginx *overwrites* with the connecting address. A client cannot
   claim another IP (measured). Behind a load balancer, trust only the
   load balancer's subnet (networking chapter).
-- **Rate limits** per client IP: 60 alert requests and 10 chat requests
-  per minute by default. When Valkey is down they fail *open* (ADR-0004
-  weighs the three options), so during that outage there is no limit.
-  If rate limiting becomes a security control rather than a courtesy,
-  revisit that choice: fail closed for chat, which costs money.
+- **Rate limits** per signed-in user: 60 alert requests and 10 chat
+  requests per minute by default. Sign-in itself is limited per IP (30
+  per minute). When Valkey is down they fail *open* (ADR-0004 weighs the
+  three options), so during that outage there is no limit. If rate
+  limiting becomes a security control rather than a courtesy, revisit
+  that choice: fail closed for chat, which costs money.
 - **The Alertmanager webhook** needs a bearer token, compared in
   constant time (`hmac.compare_digest`). The token reaches Alertmanager
   as a mounted secret file, not an environment variable.
@@ -129,7 +255,8 @@ query.
   cap (120 s), and a cost-per-hour dashboard panel. 📘 Add a
   provider-side budget alert.
 - **Logs.** Questions and answers are not logged: only lengths, timings,
-  outcomes and the request id.
+  outcomes and the request id. Access log lines carry the user's id
+  (who did what), never their email or name.
 
 ## Supply chain
 
@@ -159,9 +286,10 @@ query.
 
 - [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and `HSTS_MAX_AGE=31536000` once HTTPS works
 - [ ] `DOCS_ENABLED=false` if the API should not be advertised
-- [ ] Authentication: there is none. Anyone who can reach the site can
-      read alerts and ask questions. Put it behind SSO (an identity-aware
-      proxy, or OIDC in the app) before any real data goes in.
+- [ ] Your organisation's identity provider connected (above), the
+      bundled Keycloak's profile removed
+- [ ] Row-level security enforced in Postgres (ADR-0014), a second
+      barrier behind the app's own checks
 - [ ] Rate limiting that fails closed for chat, if abuse matters more
       than availability
 - [ ] Image and secret scanning in CI

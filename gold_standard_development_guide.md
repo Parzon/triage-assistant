@@ -1,8 +1,9 @@
 # Gold standard: building and running an AI service here
 
-This repository is a small, complete AI service: alerts in Postgres, an
-assistant that streams answers from any OpenAI-compatible model, a React
-UI. It is also the reference for how every such service here is built,
+This repository is a small, complete AI service: alerts in Postgres,
+owned by teams; sign-in with the organisation's identity provider; an
+assistant that streams answers from any OpenAI-compatible model, about
+the alerts the asker may see; a React UI. It is also the reference for how every such service here is built,
 tested, shipped, watched and repaired. This file is the map. The details
 live in the handbook chapters it links to.
 
@@ -28,12 +29,16 @@ needs a real cloud account). Where the two differ, trust ✅.
 ```
                    ┌──────────────── one host (VM or laptop), one compose project ────────────────┐
 browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; :80 redirects to HTTPS          │
-                   │   ▼ http://web:8080                                                          │
+                   │   ├─ /auth/realms/triage/* ─► Keycloak (the bundled identity provider)       │
+                   │   ▼ everything else: http://web:8080                                         │
                    │ nginx (web)  static React build, /api/* → api, JSON errors, security headers │
                    │   ▼ http://api:8010                                                          │
                    │ api  gunicorn → N uvicorn workers (N = CPU limit), FastAPI                   │
-                   │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17 (alerts)          │
+                   │   │  every request: session cookie → user and teams (one query)              │
+                   │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17                    │
+                   │   │     alerts (owned by teams), users, memberships, sessions                │
                    │   ├─► Valkey :6379 (rate-limit counters; if down, requests pass: fail-open)  │
+                   │   ├─► the identity provider's back channel (code exchange, keys; Keycloak)   │
                    │   └─► the model: any OpenAI-compatible API (mock-llm locally), SSE to user   │
                    │                                                                              │
                    │ Prometheus ◄─ scrapes api, exporters, cAdvisor ─► Grafana; Alertmanager ─►   │
@@ -41,14 +46,25 @@ browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; 
                    └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Three request paths matter:
-- **Read alerts:** edge (TLS) → nginx → api → PgBouncer → Postgres (~2 ms
-  at 500 req/s).
-- **Ask the assistant:** edge and nginx (no buffering) → api loads recent alerts →
-  streams the model's answer as Server-Sent Events, with a heartbeat
-  every 15 s. Stop in the browser cancels the model call.
+In production the organisation's identity provider (Entra ID, Okta,
+Keycloak...) replaces the bundled Keycloak: `OIDC_*` settings, no code
+change ([security](docs/handbook/security.md)).
+
+Four request paths matter:
+- **Sign in:** the browser goes to `/api/auth/login`, then to the identity
+  provider's page. The provider sends it back to `/api/auth/callback`. The
+  api exchanges the code over its back channel, verifies the ID token,
+  copies the user's teams and roles from its groups claim, and sets a
+  session cookie.
+- **Read alerts:** edge (TLS) → nginx → api (session → user → teams) →
+  PgBouncer → Postgres. Only the caller's teams' alerts, ~4 ms at
+  500 req/s.
+- **Ask the assistant:** edge and nginx (no buffering) → api loads the
+  asker's visible alerts → streams the model's answer as Server-Sent
+  Events, with a heartbeat every 15 s. Stop in the browser cancels the
+  model call.
 - **Alert webhook:** Alertmanager → api (bearer token) → a row in
-  Postgres.
+  Postgres, in the team its `team` label names.
 
 The same images run everywhere. Only configuration changes: `.env` on a
 host, a secret store on a platform.
@@ -58,7 +74,7 @@ apps/api/        FastAPI service (Python 3.13, uv): app/, tests/{unit,integratio
 apps/web/        React + Vite UI (Node 24); nginx config for production
 tools/           mock-llm (a provider stand-in with failure modes), py-spy and load-tool images
 tests/           e2e (Playwright through production nginx), load (k6, Locust, vegeta, JMeter, Artillery)
-infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, vm (cloud-init)
+infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
 scripts/         deploy, backup, restore, failure drills, fresh-host test, SQL helpers, debug scripts
 docs/            handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ rfc/ design-docs/ (templates)
 compose*.yaml    base / dev (auto-merged) / prod shape / test / debug overlays
@@ -74,7 +90,9 @@ Makefile         every command; `make` lists them
    triage-assistant`
 3. `make setup` creates `.env` from `.env.example` and builds the images.
 4. `make up && make ps`: every service `(healthy)`. Open
-   http://localhost:5173 and ask the assistant about an alert.
+   http://localhost:5173, sign in as `alice` (password: `DEMO_USER_PASSWORD`
+   in `.env`), and ask the assistant about an alert. `bob`, `carol` (org
+   admin) and `dave` (in no team) show the other roles.
 5. `make check`: lint, types, all tests, as CI runs them (~40 s).
 6. Pick an issue. `git switch -c fix/<issue>-<what>`. Change code with hot
    reload running. Add tests for the success and the failure paths.
@@ -140,6 +158,11 @@ Each rule exists because breaking it cost something measurable here.
 17. **Write the decision down.** An ADR for any "why is it like this?",
     a runbook for any procedure needed under pressure, a line in the
     gotcha list below for any trap.
+18. **Access is decided on the server, from the identity provider, in one
+    place.** Every data route takes the caller's `Principal`. Reads go
+    through the shared visibility query. What a caller cannot see is a 404.
+    The model is only ever given what the asker may see. Hiding a button
+    is never the control. ([security](docs/handbook/security.md), ADR-0013)
 
 ## The handbook
 
@@ -155,7 +178,7 @@ Each rule exists because breaking it cost something measurable here.
 | [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
 | [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
 | [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
-| [Security](docs/handbook/security.md) | secrets, least privilege, exposure, supply chain, LLM-specific risks |
+| [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md) | an alert fired; setting up or operating a server |
 
@@ -334,8 +357,10 @@ something bites.
 - **A forgotten `breakpoint()` hangs a production worker** until gunicorn
   kills it: `PYTHONBREAKPOINT=0` in images.
 - **prometheus_client reads `PROMETHEUS_MULTIPROC_DIR` at import**: the
-  directory must exist first, and the variable must never be `""`.
-  ([observability](docs/handbook/observability.md))
+  directory must exist first, and the variable must never be `""`. An
+  empty value still turns multiprocess mode on (it checks presence). A
+  one-off CLI in the server's container must remove the variable before
+  its imports. ([observability](docs/handbook/observability.md))
 - **The openai SDK depends on `httpx2`, not `httpx`.** Importing `httpx`
   worked only because it was a dev dependency, and the production image
   crashed.
@@ -372,6 +397,21 @@ something bites.
 - **Pre-ping adds round trips per checkout**, and can double the wait
   during a frozen database: one run took 10.6 s instead of 5.3 s, most
   likely two PgBouncer queue waits in a row.
+- **`team_id = ANY(:teams) ORDER BY created_at DESC LIMIT n` lets the
+  planner walk the global time index and filter**: 13 ms (103k rows
+  discarded) when one of a user's teams was large but quiet, growing with
+  the table. A LATERAL join reads each team through its own index:
+  0.06 ms, bounded. ([performance](docs/handbook/performance.md))
+- **Adding a validated foreign key blocks writes for the whole scan**:
+  add it `NOT VALID`, then `VALIDATE CONSTRAINT` in its own transaction.
+- **An unnamed constraint cannot be dropped by a downgrade** that Alembic
+  generated: name every constraint.
+- **FastAPI's `yield` dependencies close after a streamed response has
+  been *sent***: a request-scoped database session held its connection
+  for the whole answer. `Depends(..., scope="function")`.
+- **Coverage reports lines after an `await session...` as never run**:
+  SQLAlchemy's asyncio layer switches greenlets. `concurrency =
+  ["greenlet", "thread"]`.
 - **A connection closed mid-query is a generic `DBAPIError`**, not an
   `OperationalError`: classify by SQLSTATE (08*, 57P01-3, 53300).
 - **PgBouncer's defaults suit batch jobs, not a web app**:
@@ -391,6 +431,55 @@ something bites.
   DB time on an idle database.
 - **Docker's default 64 MB `/dev/shm` is too small for parallel
   queries**: `shm_size: 256mb`.
+
+### Sign-in and access
+- **`SameSite=Strict` breaks sign-in with a real identity provider**: the
+  provider sends the browser back from another site, and a Strict cookie
+  stays behind. The bundled Keycloak, on the app's own origin, would not
+  show it. Lax, pinned by a test. ([security](docs/handbook/security.md))
+- **Keycloak in Docker has two addresses**: browsers use the public one,
+  the api uses `keycloak:8080`, and tokens must name one issuer.
+  `KC_HOSTNAME` (a full URL) plus `KC_HOSTNAME_BACKCHANNEL_DYNAMIC`, and
+  `OIDC_DISCOVERY_URL` for the api.
+- **Keycloak publishes an encryption key in the same key set**
+  (`use: enc`, RSA-OAEP), which PyJWT cannot load. Keep `use: sig` keys
+  only.
+- **A cached provider hides its own outage**: sign-in redirects came from
+  cached metadata, so no request failed while the provider was down. A
+  30 s check, `/ready` and an alert (`IdentityProviderDown`).
+- **Authentication doubled the CPU of the cheapest request.** A query per
+  table and a transaction of its own made p95 1.07 s at 1,000 req/s.
+  One query, in the request's transaction: 19.7 ms.
+  ([performance](docs/handbook/performance.md))
+- **Deleting a `__Host-` cookie needs `Secure` too**: browsers ignore a
+  `Set-Cookie` for that prefix without it.
+- **RFC 6749 form-encodes the client id and secret before base64**
+  (`client_secret_basic`): a secret with `+` or `%` fails against strict
+  providers otherwise.
+- **Entra ID's `groups` claim holds object ids, not names**: use app
+  roles (`OIDC_GROUPS_CLAIM=roles`). Google has no groups claim, and no
+  sign-out endpoint.
+- **An email is not an identity**: emails change and get reassigned. Key
+  users on `(issuer, subject)`.
+- **Setting the tenant with a session-level `SET` through PgBouncer leaks
+  it to the next client** on that server connection: `set_config(...,
+  true)`, local to the transaction, tested.
+- **A compose `${VAR:?message}` is checked for every service, including
+  ones whose profile is off**: it would force demo passwords on
+  deployments without the bundled Keycloak. The check lives in the
+  Keycloak container's command.
+- **Keycloak's image has no curl or wget**: its healthcheck speaks HTTP
+  with bash's `/dev/tcp`, on the management port (9000), under the same
+  `/auth` prefix.
+- **Keycloak imports a realm only when it doesn't exist**: after editing
+  the realm file, recreate the container (its database lives inside it).
+- **make echoes recipes, secrets included**: pass them to `docker run` as
+  `-e NAME` (the value from the environment), never `-e NAME=value`.
+- **Chrome logs a 401 response as a console error**: a "no console
+  errors" browser test must run signed in.
+- **Importing a helper from a Playwright setup file registers its setup
+  tests again** in the importing spec: shared constants go in their own
+  module.
 
 ### Valkey / Redis
 - **redis-py's socket timeouts must be set explicitly**, with a bounded
@@ -446,8 +535,12 @@ something bites.
   with the admin bypass (`gh pr merge --admin`).
 - **Browser tests must reach the site the way users do**: Playwright on
   the host network, opening `https://localhost:<edge port>`, and the mock
-  reached by its container IP. The identity provider's URL must be the
-  same for the browser and the api.
+  reached by its container IP. The browser and the api reach the
+  identity provider at different URLs; its tokens must still name one
+  issuer (`KC_HOSTNAME`).
+- **Sign in once per test run, not per test**: a Playwright setup project
+  signs the demo users in through the real login page and saves their
+  cookies (`storageState`).
 - **Images from a public repository's workflow are public on GHCR**:
   anyone can pull them without a token.
 - **CI runs as UID 1001, which has no account in the node image**, so
@@ -473,7 +566,12 @@ something bites.
   with it coordinated omission: use arrival-rate executors.
   ([load testing](docs/handbook/load-testing.md))
 - **Arrival shape matters as much as rate**: the same 100 req/s gave
-  1.5 ms evenly spread, 29 ms in clumps.
+  1.5 ms evenly spread, 29 ms in clumps. After sign-in doubled the
+  per-request cost, 200 users pacing 1 req/s in step saw p50 182 ms,
+  against 3 ms for the same rate spread out.
+- **Every tool needs the session**: a cookie header from `make session`
+  (k6 `SESSION_COOKIE`, JMeter `-Jcookie`, vegeta's targets file), and
+  `Origin` on POSTs.
 - **A saturated load generator measures itself**: Artillery needed 534%
   CPU for 200 req/s.
 - **k6 and Artillery phone home by default.**
@@ -495,6 +593,10 @@ something bites.
   hardware**: a missing index, invisible until 2 M rows.
 
 ### Shell, Git, host
+- **In a YAML folded block (`>-`), a more-indented line keeps its
+  newline**: cloud-init's secret loop, continued on an indented line,
+  became two shell commands (`for ... in <newline>`). Parse the YAML and
+  run the resulting command once (`yaml.safe_load`).
 - **`! cmd` is exempt from `set -e`**: test explicitly with `if`.
 - **`mv src existing-dir` moves into it** instead of renaming.
 - **`sudo` needs a terminal for its password, and a password pasted into
@@ -524,6 +626,7 @@ Measured with `make drills`; the full matrix is in
 | Valkey (down or frozen) | nothing, but rate limits are off | 0 s |
 | PgBouncer or Postgres (down or frozen) | JSON 503 within 5–10 s; nothing hangs, nothing leaks | 1–2 s |
 | the model provider (down, 429, 500, hang, drop) | a typed error in the chat stream; everything else works | 0 s |
+| the identity provider | signed-in users: nothing. New sign-ins fail on the provider's page. `IdentityProviderDown` fires | 0 s |
 | one api worker (killed, OOM) | its in-flight requests cut; a new worker starts | 0 s |
 | the api container (crash) | in-flight streams cut, ~0.5 s of 502 | < 1 s |
 | a deploy | nothing with `make deploy` (0.3 s at the nginx swap); 6.7 s of 502 with a plain recreate | — |
@@ -531,8 +634,8 @@ Measured with `make drills`; the full matrix is in
 
 ## Bottlenecks, in the order they bite
 
-A missing index → pool churn → api CPU (~500 reads/s per core; 500
-streams per 2 CPUs, the SDK's per-chunk cost) → event-loop saturation
+A missing index → pool churn → api CPU (~530 signed-in reads/s per core,
+~920 before sign-in; 500 streams per 2 CPUs, the SDK's per-chunk cost) → event-loop saturation
 turning into timeouts elsewhere → connection budgets (~12 replicas) →
 the provider's quota. Details and numbers:
 [performance](docs/handbook/performance.md).
@@ -551,6 +654,8 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - performance defaults (0009)
 - database timeouts (0010)
 - releases and deploys (0011)
+- HTTPS at the edge (0012)
+- sign-in and team access (0013)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -558,9 +663,10 @@ A merged ADR is never edited: a new one supersedes it.
 
 What a real launch still needs. Each item is a known gap, not an
 oversight:
-- **Sign-in and team permissions**: in progress (OIDC SSO, team-owned
-  alerts, ranked roles, row-level security; issues #33, #34). Until then,
-  anyone who reaches the site can read everything.
+- **Row-level security** (issue #34): Postgres enforcing team isolation
+  itself, behind the app's checks. The expand half shipped with sign-in.
+- **Credentials for machine clients** (OAuth client credentials), and
+  back-channel logout from the identity provider.
 - **Outside-in monitoring**: an uptime check, and a dead man's switch for
   Prometheus itself. Nothing notices when the VM or the edge is down.
 - **A second host.** One VM has single points of failure (listed in

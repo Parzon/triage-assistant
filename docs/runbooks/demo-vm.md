@@ -75,18 +75,33 @@ if ufw says otherwise. See the networking chapter.
 
 ## 3. Configure `.env`
 
-Every secret must differ from `.env.example` (cloud-init already
-generated the database passwords, the Grafana password and the webhook
-token). The rest:
+Every secret must differ from `.env.example`. cloud-init already
+generated:
+- the database passwords, the Grafana password and the webhook token;
+- the identity provider's client secret, the Keycloak administrator's
+  password and the demo users' password.
+
+The rest:
 
 | Setting | Demo without a model provider | With a provider |
 |---|---|---|
-| `COMPOSE_PROFILES` | `mock` | empty (`mock` off) |
+| `COMPOSE_PROFILES` | `mock,edge,idp` | `edge,idp` (`mock` off) |
+| `PUBLIC_URL` | `https://<domain>` (the same name as `SITE_ADDRESS`) | same |
 | `LLM_BASE_URL` | leave | the provider's OpenAI-compatible URL |
 | `LLM_API_KEY` | leave | the key (never committed) |
 | `LLM_MODEL` | leave | the model name |
 | `HTTP_PORT` | `80` | `80` |
 | `IMAGE_PREFIX` | `ghcr.io/<owner>/triage-assistant` to run released images, or leave `triage-assistant` to build on the VM | same |
+
+**Who signs in.** With `idp` in the profiles, the bundled Keycloak serves
+the demo users: `alice` (payments responder, platform viewer), `bob`
+(platform admin), `carol` (org admin), `dave` (in no team). Their
+password is `DEMO_USER_PASSWORD`: `grep DEMO_USER_PASSWORD .env`. For a
+pilot with real people, connect the organisation's provider instead:
+remove `idp`, and set `OIDC_ISSUER`, `OIDC_DISCOVERY_URL=` (empty),
+`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (security chapter, "Connecting your
+organisation's provider"). The provider's administrators need the
+redirect URI `https://<domain>/api/auth/callback`.
 
 ## 4. First start
 
@@ -111,9 +126,9 @@ make prod-up
 Then check (✅ the same checks the fresh-host test makes):
 
 ```
-curl -s https://<domain>/api/ready   # {"status":"ready","checks":{"database":"ok","redis":"ok"}}
+curl -s https://<domain>/api/ready   # {"status":"ready","checks":{"database":"ok","redis":"ok","identity_provider":"ok"}}
 curl -sI http://<domain>/ | head -1  # 308: plain HTTP is redirected to HTTPS
-open https://<domain>/               # the UI; ask the assistant something
+open https://<domain>/               # Sign in (alice), then ask the assistant something
 ```
 
 ## 5. HTTPS
@@ -280,8 +295,10 @@ before `make deploy` to check a release where it's about to run.
 
 - [ ] `make ps ENV=prod`: every container up and healthy (`make logs ENV=prod S=api` if not)
 - [ ] `curl https://<name>/api/ready` returns 200
-- [ ] Ask the assistant a question in the UI: the answer streams in
-- [ ] Recent alerts show in the panel
+- [ ] Sign in as `alice`, ask the assistant a question: the answer streams in
+- [ ] Recent alerts show in the panel, with their teams; `carol` (org
+      admin) sees every team's, `dave` sees none
+- [ ] `/api/ready` says `"identity_provider": "ok"`
 - [ ] Grafana's dashboard has data (through the tunnel)
 - [ ] A backup from today exists, off the host
 - [ ] The failure story is ready if asked: `docs/handbook/failure-modes.md`

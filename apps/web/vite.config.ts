@@ -19,6 +19,12 @@ export default defineConfig({
         xfwd: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // The bundled identity provider (Keycloak, served under /auth), on
+      // this same origin - as the TLS edge does in production shape.
+      '/auth': {
+        target: 'http://keycloak:8080',
+        xfwd: true,
+      },
     },
   },
   test: {

@@ -7,13 +7,18 @@ any OpenAI-compatible model, React + Vite frontend (`apps/web`), all run
 with Docker Compose. The AI-specific logic is `apps/api/app/triage.py`
 (prompt + streaming); the provider seam is `apps/api/app/llm.py`.
 Locally the model is `tools/mock-llm` (OpenAI-compatible, tunable
-latency and failure modes). See `docs/adr/0001-standard-project-shape.md`
+latency and failure modes). Sign-in is OIDC against the organisation's
+identity provider (locally the `keycloak` service, demo users alice, bob,
+carol, dave): `app/oidc.py` (protocol), `app/sessions.py` (cookie →
+principal), `app/access.py` (roles: viewer < responder < admin per team,
+org admin). ADR-0013. See `docs/adr/0001-standard-project-shape.md`
 for the reasoning behind this repo's shape — it's the template every
 project this team builds should follow.
 
 ## Development environment
 `make setup && make up` brings up `api` + `pgbouncer` + `db` + `redis`
-(Valkey) + `web` with hot reload; `.env` (created from `.env.example`)
+(Valkey) + `web` with hot reload, plus `mock-llm` and `keycloak` (the
+`mock` and `idp` profiles); `.env` (created from `.env.example`)
 provides local settings. Compose is split in three: `compose.yaml` (base),
 `compose.override.yaml` (dev, merged automatically), `compose.prod.yaml`
 (production shape, `make prod-up`). Toolchains live in the containers:
@@ -32,7 +37,10 @@ Run `make` to list every target. The ones you need most:
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
-- Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge)
+- Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge;
+  signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)
+- Sessions for scripts: `make session [groups="team:default:admin org:admin"]` prints a
+  cookie; `make revoke email=...` ends a user's sessions (add `ENV=prod`)
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
   `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
@@ -99,6 +107,23 @@ issue (`Closes #N`). Squash merge only. See `CONTRIBUTING.md`.
 Never commit secrets. `.env` is gitignored; `.env.example` is the
 template. Any new third-party dependency needs a one-line justification
 in the PR description.
+
+Access control, for every change that touches data:
+- Every data route takes `principal: CurrentUser` and filters by
+  `principal.team_ids()`, or reuses `app/queries.py`. Writes check
+  `require_role(...)`. A team or id from the request body is never
+  trusted without that check.
+- What the caller cannot see is a 404, never a 403 that confirms it
+  exists.
+- The model's context comes from the same visibility query as the list:
+  never give the assistant data the asker could not read.
+- Never log tokens, cookies, authorization codes or alert text; log the
+  user's id, not their email.
+- Tests: `sign_in_as("team:<slug>:<role>")` for a signed-in client;
+  cover 401, 404 for another team, 403 for a role too low, and
+  `csrf_failed` for writes (`tests/integration/test_access.py`).
+- Scripts calling the api need a session: `make session` (and `Origin:
+  <PUBLIC_URL>` on POSTs).
 
 ## What agents should NOT do
 - Don't modify `infra/` without being explicitly asked.

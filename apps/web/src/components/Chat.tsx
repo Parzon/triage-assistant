@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, streamChat } from '../lib/api'
 
@@ -27,6 +28,7 @@ const STATUS_TEXT: Record<Status, string> = {
 }
 
 export function Chat() {
+  const queryClient = useQueryClient()
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [status, setStatus] = useState<Status>('idle')
@@ -68,6 +70,8 @@ export function Chat() {
       } else if (err instanceof ApiError) {
         setFailure({ code: err.code, message: err.message, requestId: err.requestId, retryAfterS: err.retryAfterS })
         setStatus('error')
+        // The session ended: re-ask who is signed in (shows the sign-in page).
+        if (err.status === 401) void queryClient.invalidateQueries({ queryKey: ['me'] })
       } else {
         setFailure({ code: 'network_error', message: 'Could not reach the server.' })
         setStatus('error')
