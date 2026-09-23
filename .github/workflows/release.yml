@@ -1,14 +1,17 @@
 name: Release
 
 # A version tag on main publishes both production images to GitHub's
-# container registry:
+# container registry, for linux/amd64 and linux/arm64 (Apple Silicon,
+# AWS Graviton) under one tag:
 #   git tag -a v1.4.0 -m "v1.4.0" && git push origin v1.4.0
 #   -> ghcr.io/<owner>/triage-assistant-api:1.4.0, :1.4, :sha-<commit>
 #      ghcr.io/<owner>/triage-assistant-web:  the same tags
-# A host then runs it with `make deploy tag=1.4.0` (docs/runbooks/demo-vm.md).
+# Then it pulls what it published, on both architectures, and runs the
+# stack from those images before writing the release notes. A host deploys
+# it with `make deploy tag=1.4.0` (docs/runbooks/demo-vm.md).
 #
-# Pull requests that touch the release path run the same build without
-# logging in or pushing, so a broken release is found before the tag.
+# Pull requests that change the images' inputs run the same builds, on both
+# architectures, without logging in or pushing.
 
 on:
   push:
@@ -18,6 +21,11 @@ on:
     paths:
       - .github/workflows/release.yml
       - apps/*/Dockerfile
+      - apps/api/pyproject.toml
+      - apps/api/uv.lock
+      - apps/web/package.json
+      - apps/web/package-lock.json
+      - scripts/smoke-release.sh
 
 permissions:
   contents: read
@@ -41,10 +49,77 @@ jobs:
       - name: Production api image - non-root, no dev tools, every module imports
         run: make image-check
 
-  images:
+  # One native build per image and architecture: no emulation, so an arm64
+  # build is as fast and as faithful as an amd64 one. Each pushes by digest;
+  # `merge` joins the digests under the release tags.
+  build:
     needs: verify
-    # Runs for a PR too (verify is skipped there; build without pushing).
     if: always() && (needs.verify.result == 'success' || github.event_name == 'pull_request')
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [api, web]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Registry paths must be lowercase; GitHub owner names need not be.
+      - name: Names
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-${{ matrix.image }}" >> "$GITHUB_ENV"
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        with:
+          context: apps/${{ matrix.image }}
+          target: production
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # A tag push publishes by digest; a PR only builds.
+          outputs: ${{ github.event_name == 'push' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+          # What went into the image, stored next to it in the registry:
+          # the build's provenance and a software bill of materials.
+          provenance: ${{ github.event_name == 'push' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name == 'push' }}
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=${{ matrix.image }}-${{ env.PLATFORM_PAIR }},mode=max
+      - name: Keep the digest for the merge job
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          name: digests-${{ matrix.image }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -53,11 +128,19 @@ jobs:
       matrix:
         image: [api, web]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # Registry paths must be lowercase; GitHub owner names need not be.
-      - name: Image name
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+      - name: Names
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-${{ matrix.image }}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
@@ -66,28 +149,41 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+      - name: One tag, both architectures
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          tags=()
+          while read -r tag; do tags+=(-t "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+      - name: Show what the tag now points at
+        run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
+
+  # Test what was published, not what was built: pull the release tag on
+  # each architecture and run the whole stack from it.
+  smoke:
+    needs: merge
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: apps/${{ matrix.image }}
-          target: production
-          push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # What went into the image, stored next to it in the registry:
-          # the build's provenance and a software bill of materials.
-          provenance: mode=max
-          sbom: true
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+      - name: Run the stack from the published images
+        run: scripts/smoke-release.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant" "${GITHUB_REF_NAME#v}"
 
   notes:
-    needs: images
+    needs: smoke
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:

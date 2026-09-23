@@ -201,16 +201,26 @@ git tag -a v1.1.0 -m "v1.1.0" && git push origin v1.1.0
 ```
 
 The Release workflow (`.github/workflows/release.yml`):
-- checks that the tag points at a commit on main;
-- runs the image checks;
-- builds both production images with provenance and an SBOM;
-- pushes `1.1.0`, `1.1` and `sha-<commit>` to
-  `ghcr.io/<owner>/triage-assistant-{api,web}`;
-- creates a GitHub release with notes generated from the merged PRs.
+1. Checks that the tag points at a commit on main, and runs the image
+   checks.
+2. Builds both production images for **linux/amd64 and linux/arm64** on
+   native runners (no emulation), with provenance and an SBOM.
+3. Pushes them under one multi-architecture tag: `1.1.0`, `1.1` and
+   `sha-<commit>` in `ghcr.io/<owner>/triage-assistant-{api,web}`. An
+   Intel VM, a Graviton VM and an Apple Silicon laptop each pull their
+   native image.
+4. **Pulls what it published**, on an amd64 and an arm64 runner, and runs
+   the whole stack from those images (`scripts/smoke-release.sh`):
+   readiness, the UI, a write and a read, a streamed answer.
+5. Only then creates the GitHub release, with notes generated from the
+   merged PRs.
 
-Pull requests that change the workflow or a Dockerfile run the same build
-without pushing. 📘 No tag has been pushed yet, so the first real
-publish is still ahead.
+Pull requests that change the images' inputs (the workflow, a Dockerfile,
+a lockfile) run the same four builds without pushing. So an arm64 break
+shows up in review, not at release time.
+
+`scripts/smoke-release.sh <prefix> <tag>` also works on any host: run it
+before `make deploy` to check a release where it's about to run.
 
 ## 9. Watching it
 
