@@ -1,0 +1,21 @@
+# Debug overlay: the dev api under debugpy, for breakpoints from VS Code.
+#   make debug-up     then Run and Debug -> "Attach to api (make debug-up)"
+#   make debug-down   back to the normal hot-reload dev server
+#
+# No --reload here: the reloader runs the app in a child process, which is
+# not the process the debugger attached to. Restart (make debug-up) after
+# code changes.
+#
+# Never in production: an open debugpy port is remote code execution for
+# anyone who can reach it. Published on 127.0.0.1 only.
+services:
+  api:
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678",
+              "-m", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8010"]
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      # asyncio debug mode: logs any callback that holds the event loop for
+      # more than 100ms ("Executing <Task ...> took 1.3 seconds") and every
+      # coroutine that was created but never awaited, with where it was made.
+      PYTHONASYNCIODEBUG: "1"

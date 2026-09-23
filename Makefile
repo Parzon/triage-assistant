@@ -16,8 +16,9 @@ AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check lint fmt typecheck test test-api test-web test-fast e2e check \
-        image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        migrate migration mock obs-up obs-down obs-check dashboard lint fmt typecheck test test-api test-web test-fast e2e check \
+        debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
+        drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
         deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
@@ -86,6 +87,12 @@ obs-check: ## Validate Prometheus config, unit-test alert rules, validate Alertm
 	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/p:ro" -w /p prom/prometheus:v3.14.0 test rules alerts.test.yml
 	docker run --rm --entrypoint amtool -v "$(OBS)/alertmanager:/c:ro" prom/alertmanager:v0.34.1 check-config /c/alertmanager.yml
 	@python3 -c 'import json, glob; [json.load(open(f)) for f in glob.glob("$(OBS)/grafana/dashboards/*.json")]; print("dashboards: valid JSON")'
+	@python3 $(OBS)/grafana/build_dashboard.py | diff -q - $(OBS)/grafana/dashboards/service.json >/dev/null \
+	  || { echo "service.json is not what build_dashboard.py generates: run make dashboard"; exit 1; }
+	@echo "dashboards: service.json matches its generator"
+
+dashboard: ## Regenerate the Grafana dashboard from infra/observability/grafana/build_dashboard.py
+	python3 $(OBS)/grafana/build_dashboard.py > $(OBS)/grafana/dashboards/service.json
 
 # --- Mock LLM ----------------------------------------------------------------------
 # The mock is not published on the host; this talks to it from inside the
@@ -153,6 +160,57 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
 	docker run --rm --read-only --tmpfs /tmp --entrypoint python $(IMG) -c "import app.main, app.triage, app.llm, app.routes.chat, app.metrics"
 	@echo "production image: non-root, no dev tools, all modules import"
+
+# --- Debugging toolkit ------------------------------------------------------------
+# ENV=prod points a target at the production-shaped stack instead of dev.
+STACK = $(if $(filter prod,$(ENV)),$(PROD),$(DEV))
+API_C = $(if $(filter prod,$(ENV)),triage-assistant-prod-api-1,triage-assistant-api-1)
+NETSHOOT := nicolaka/netshoot:v0.14
+
+# `-f` disables the automatic compose.override.yaml merge: list it explicitly.
+debug-up: ## api under debugpy on 127.0.0.1:5678 (VS Code: "Attach to api"), asyncio debug mode on
+	$(DEV) -f compose.yaml -f compose.override.yaml -f compose.debug.yaml up -d api
+	@echo "debugpy listening on 127.0.0.1:5678 - attach from VS Code (Run and Debug)"
+
+debug-down: ## Back to the normal hot-reload api
+	$(DEV) up -d api
+
+netshoot: ## Shell inside the api container's network namespace (curl, dig, ss, tcpdump...)
+	docker run --rm -it --network container:$(API_C) $(NETSHOOT)
+
+SECS ?= 20
+tcpdump: ## Capture api traffic for SECS seconds -> .captures/api.pcap (open in Wireshark)
+	@mkdir -p .captures && chmod 777 .captures
+	docker run --rm --network container:$(API_C) --cap-add NET_ADMIN --cap-add NET_RAW \
+	  -v "$(CURDIR)/.captures:/cap" $(NETSHOOT) timeout $(SECS) tcpdump -i eth0 -s 0 -w /cap/api.pcap 'tcp port 8010' || true
+	@echo "wrote .captures/api.pcap"
+
+strace: ## Syscall summary of one api worker for SECS seconds (what is it asking the kernel for?)
+	@pid=$$(docker top $(API_C) -o pid,args | awk '/uvicorn|gunicorn/ {p=$$1} END {print p}'); \
+	  echo "tracing host pid $$pid"; \
+	  docker run --rm --pid=host --cap-add SYS_PTRACE $(NETSHOOT) timeout $(SECS) strace -c -f -p $$pid || true
+
+trace: ## Every log line of one request across nginx and the api: make trace id=<X-Request-ID>
+	@test -n "$(id)" || { echo 'usage: make trace id=<request id>'; exit 2; }
+	@$(STACK) logs --no-log-prefix --no-color web api 2>/dev/null | grep -F '$(id)' | jq -Rc 'fromjson? // .'
+
+gunicorn: ## gunicorn control socket (prod image): make gunicorn c="show workers" | "show stats" | "worker add 1"
+	docker exec triage-assistant-prod-api-1 gunicornc -s /tmp/gunicorn.ctl -c "$(or $(c),show workers)"
+
+db-activity: ## Postgres: every connection and what it is doing now [ENV=prod]
+	$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/activity.sql
+
+db-locks: ## Postgres: blocked queries and who blocks them [ENV=prod]
+	$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/locks.sql
+
+db-top-queries: ## Postgres: most expensive queries (pg_stat_statements) [ENV=prod]
+	$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/top-queries.sql
+
+redis-slowlog: ## Valkey: slowest recent commands and latency [ENV=prod]
+	$(STACK) exec -T redis sh -c 'valkey-cli SLOWLOG GET 10; valkey-cli INFO commandstats | head -12'
+
+drills: ## Failure drills on the prod stack, one fault at a time: make drills [d="redis-hang db-stop"]
+	@scripts/failure-drills.sh "$(d)"
 
 # --- Performance lab ------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through

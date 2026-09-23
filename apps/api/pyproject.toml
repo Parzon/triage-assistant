@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "debugpy>=1.8",
     "httpx>=0.28.1",
     "mypy>=2.3.1",
     "pytest>=9.1.1",

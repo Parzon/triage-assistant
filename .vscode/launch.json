@@ -1,0 +1,19 @@
+{
+  // Shared debug configurations. Local-only tweaks belong in your user
+  // settings, not here.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // make debug-up first: the api then runs under debugpy on 127.0.0.1:5678.
+      "name": "Attach to api (make debug-up)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "127.0.0.1", "port": 5678 },
+      // Files on your machine (apps/api) are /api inside the container;
+      // without this mapping breakpoints show as "unverified" and never hit.
+      "pathMappings": [{ "localRoot": "${workspaceFolder}/apps/api", "remoteRoot": "/api" }],
+      // false = you can also step into FastAPI, SQLAlchemy, the openai SDK.
+      "justMyCode": false
+    }
+  ]
+}

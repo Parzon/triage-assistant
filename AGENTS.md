@@ -37,9 +37,20 @@ Run `make` to list every target. The ones you need most:
   `make load-compare` (same scenario through six tools), `make load-tool TOOL=locust`.
   Profile a live worker: `make py-spy-dump` / `py-spy-top` / `py-spy-record`.
 - Monitoring: `make obs-up` (Prometheus :9090, Grafana :3000, Alertmanager
-  :9093 on localhost); `make obs-check` validates configs and unit-tests the
-  alert rules (`infra/observability/prometheus/alerts.test.yml`). New metric
-  labels must be bounded (route templates, never raw paths or user input).
+  :9093 on localhost); `make obs-check` validates configs, unit-tests the
+  alert rules (`infra/observability/prometheus/alerts.test.yml`) and checks
+  the dashboard JSON matches its generator. Dashboard changes go in
+  `infra/observability/grafana/build_dashboard.py`, then `make dashboard`.
+  New metric labels must be bounded (route templates, never raw paths or
+  user input).
+- Debugging: `make debug-up` (breakpoints from VS Code, `.vscode/launch.json`),
+  `make trace id=<request id>` (one request across nginx and the api),
+  `make db-activity` / `db-locks` / `db-top-queries`, `make netshoot`,
+  `make tcpdump`, `make strace` (add `ENV=prod` for the production stack).
+- Failure drills: `make drills` injects each fault into the production stack
+  (rate limits raised, as for load tests) and records what users see;
+  `make drills d="db-freeze deploy"` runs a selection. Run the database
+  drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010).
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults

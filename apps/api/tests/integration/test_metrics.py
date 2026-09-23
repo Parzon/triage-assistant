@@ -2,10 +2,15 @@
 default registry is used; multiprocess mode is exercised by the production
 image (see the observability chapter for the side-by-side)."""
 
+import asyncio
 import re
 
+from fastapi import FastAPI
 from httpx import AsyncClient
+from prometheus_client import REGISTRY
+from sqlalchemy import text
 
+from app.db import watch_db_pool
 from tests.integration.conftest import ClientFactory, MockLLM
 
 
@@ -41,6 +46,23 @@ async def test_llm_and_ratelimit_metrics_after_a_chat(
     assert sample(text, "llm_tokens_total", kind="completion") > 0
     assert sample(text, "llm_time_to_first_token_seconds_count") >= 1
     assert sample(text, "ratelimit_decisions_total", scope="chat", decision="allowed") >= 1
+
+
+async def test_pool_gauge_counts_connections_in_use(app: FastAPI) -> None:
+    def in_use() -> float | None:
+        return REGISTRY.get_sample_value("db_pool_connections_in_use")
+
+    watcher = asyncio.create_task(watch_db_pool(app.state.engine, capacity=5, interval_s=0.01))
+    try:
+        async with app.state.engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            await asyncio.sleep(0.05)
+            assert in_use() == 1
+        await asyncio.sleep(0.05)
+        assert in_use() == 0
+        assert REGISTRY.get_sample_value("db_pool_connections_max") == 5
+    finally:
+        watcher.cancel()
 
 
 def _or_zero(text: str, name: str = "http_requests_total", **labels: str) -> float:

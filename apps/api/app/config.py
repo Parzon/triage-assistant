@@ -39,9 +39,6 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(0, ge=0)
     db_pool_timeout_s: float = Field(5.0, gt=0)
     db_connect_timeout_s: float = Field(5.0, gt=0)
-    # Client-side cap per query. The server-side cap is statement_timeout on
-    # the app's database role (transaction pooling ignores session SETs).
-    db_command_timeout_s: float = Field(10.0, gt=0)
 
     redis_url: SecretStr
     # Budget for one rate-limit round trip; past it the limiter fails open.
