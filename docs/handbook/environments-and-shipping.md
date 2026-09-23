@@ -77,7 +77,10 @@ them is rotated, not just deleted.
   requests during the api swap (measured), ~0.3 s of refused connections
   when nginx is replaced. A new api that never gets healthy is removed
   automatically.
-- **Roll back:** deploy the previous tag.
+- **Roll back:** deploy the previous tag. The code rolls back, the schema
+  never does (ADR-0015): the previous tag runs on the newer schema, which
+  expand/contract makes safe back to the release before a contract
+  migration.
 - **Migrations are backward compatible** (expand, then contract), because
   the old version keeps serving while they run (daily-work chapter). The
   teams migration (v0.2.0) is the worked example: measured under load,
