@@ -218,10 +218,11 @@ DEPLOY="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' 
 
 # The same new release, rolled out by scripts/deploy.sh instead: the new api
 # starts next to the old one, which then drains. Tags the running images as
-# a "release", so nothing is pulled.
+# a local "release", so nothing is pulled - under the local prefix, whatever
+# .env says (a host running GHCR releases has a registry prefix there).
 ROLLOUT="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \$API | grep -E '^(ALERTS|CHAT)_RATE_LIMIT='); \
   for s in api web edge; do docker tag \$(docker inspect -f '{{.Config.Image}}' \$(docker ps -q --filter label=com.docker.compose.project=$PROJECT --filter label=com.docker.compose.service=\$s | head -1)) triage-assistant-\$s:drill-\$\$; done; \
-  PULL=0 RECORD_TAG=0 scripts/deploy.sh drill-\$\$"
+  IMAGE_PREFIX=triage-assistant PULL=0 RECORD_TAG=0 scripts/deploy.sh drill-\$\$"
 
 run_drill() {
   case $1 in

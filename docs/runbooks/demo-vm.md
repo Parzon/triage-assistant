@@ -200,14 +200,23 @@ make deploy tag=1.1.0
   old one. It waits until the new one is healthy and nginx has resolved
   it, then drains the old one. Zero failed or slow requests during the
   api swap, and all in-flight streams finished.
-- **The one gap:** nginx itself is replaced last. It refused connections
-  for ~0.3 s, because one container owns port 80. Only a load balancer in
-  front of two nginx containers removes that.
+- **Through the TLS edge, nginx's replacement costs nothing:** the edge
+  holds requests while nginx restarts. Deploying v0.2.0 from GHCR under
+  steady signed-in load: 134,917 requests (reads and streamed answers),
+  **0 failed**; the slowest waited 1.5 s.
+- **The one gap left: replacing the edge itself.** It owns ports 80/443,
+  so for **~2 s** new connections are refused and in-flight ones cut
+  (measured under the same load). `make deploy` replaces it only when its
+  image's content changed: a release that touches `tools/edge`, or a CI
+  build without its layer cache. Only a load balancer in front of two
+  hosts removes that.
 - If the new api never becomes healthy, it's removed, and the old one
   keeps serving.
 
 `make deploy` records the tag in `.env` (`IMAGE_TAG`). Every later
-compose command then uses the same images. Without that, the next
+compose command then uses the same images. On a host that runs releases
+(`IMAGE_PREFIX=ghcr.io/...` in `.env`), `make prod-up` refuses to run: it
+would build the checkout and label it with the release's name. Without that, the next
 `docker compose up` quietly switched back to the default tag: measured,
 when `make restore` did exactly that.
 
