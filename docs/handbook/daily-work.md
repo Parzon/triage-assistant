@@ -160,6 +160,29 @@ serving while they run (ADR-0011):
 - **Migrations connect as the owner role, directly to Postgres** (not
   through PgBouncer). The app's role can read and write rows, but cannot
   change the schema.
+- **Foreign keys on big tables** are added `NOT VALID` (instant: new rows
+  only), then `VALIDATE CONSTRAINT` in its own transaction, which scans
+  without blocking writes. The teams migration (`3713e56869fa`) has all
+  three patterns: a column with a default, a foreign key validated
+  separately, a concurrent index. It ran on 2 M rows in 1.5 s under load
+  with 0 failed requests.
+- **Name every constraint.** Alembic cannot generate a downgrade that
+  drops an unnamed one.
+
+**A new table that holds team data** (anything a team owns):
+1. A `team_id` column, NOT NULL, with a foreign key to `teams`.
+2. In the same migration, row-level security, with the policies of
+   `ce83ff21ab01` as the model: `ENABLE ROW LEVEL SECURITY`, then one
+   policy per command that reads `app.read_team_ids` /
+   `app.write_team_ids` / `app.admin_team_ids` through
+   `tenant_team_ids()`. Commands the app never runs get no policy.
+3. Routes: `principal: CurrentUser`, reads filtered by
+   `principal.team_ids()`, writes checked with `require_role`. The app
+   answers first; the policies are the backstop.
+4. Tests at both levels. Through the api: 401, 404 for another team, 403
+   for a role too low. At the database, as the app role: no context sees
+   nothing, a viewer sees their team, a write without the role is refused
+   (`test_row_level_security.py`).
 
 ## Add a metric, a dashboard panel, an alert
 

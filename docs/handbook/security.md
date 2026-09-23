@@ -135,6 +135,25 @@ Gotchas:
 - **Google does not support sign-out at the provider:** signing out ends
   only this site's session.
 
+### Row-level security: the second barrier ✅
+
+The app's checks are one line per query; Postgres enforces the same rule
+underneath (ADR-0014). The api tells Postgres who is asking in every
+transaction, and policies on `alerts` use it:
+- **SELECT:** the caller's teams (any role), or an org admin, or the
+  Alertmanager service.
+- **INSERT:** teams where the caller is a responder or above.
+- **DELETE:** teams where they are an admin.
+- **UPDATE:** nobody.
+
+**No context means no rows:** a query that forgot to say who is asking
+sees nothing and changes nothing. The owner role (migrations, seeding,
+backups) is not subject to the policies; the app role is.
+
+✅ `test_row_level_security.py` goes around the app and shows Postgres
+refusing. One test runs the org admin's "every team" read for a viewer
+(the bug this exists for), and gets only the viewer's team back.
+
 ### Demo users (the bundled Keycloak)
 
 `alice` (payments responder, platform viewer), `bob` (platform admin),
@@ -288,8 +307,6 @@ query.
 - [ ] `DOCS_ENABLED=false` if the API should not be advertised
 - [ ] Your organisation's identity provider connected (above), the
       bundled Keycloak's profile removed
-- [ ] Row-level security enforced in Postgres (ADR-0014), a second
-      barrier behind the app's own checks
 - [ ] Rate limiting that fails closed for chat, if abuse matters more
       than availability
 - [ ] Image and secret scanning in CI

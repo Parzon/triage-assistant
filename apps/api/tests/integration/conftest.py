@@ -50,6 +50,9 @@ def settings() -> Settings:
 
 async def reset_data(app: FastAPI) -> None:
     async with app.state.engine.begin() as conn:
+        # As an org admin: under row-level security, a DELETE by the app role
+        # without saying who is asking removes nothing, silently.
+        await conn.execute(text("SELECT set_config('app.org_admin', 'on', true)"))
         for table in ("alerts", "sessions", "login_requests", "memberships", "users"):
             await conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608 - fixed names
         await conn.execute(text("DELETE FROM teams WHERE slug <> 'default'"))

@@ -38,7 +38,9 @@ teams ─┬─< memberships >── users ──< sessions         login_reques
 - **memberships:** the user's role per team, replaced at every sign-in.
 - **users:** identified by `(issuer, subject)`.
 - **sessions:** the SHA-256 of each cookie's token.
-- **alerts:** each owned by one team.
+- **alerts:** each owned by one team, with row-level security: Postgres
+  shows the app role only the rows of the teams the transaction names
+  (ADR-0014).
 
 It's a **modular monolith**:
 - One process type, one deploy, one database.
@@ -127,3 +129,4 @@ The ADRs in `docs/adr/`, one line each:
 - **0012:** HTTPS terminates at a Caddy edge.
 - **0013:** sign-in with the organisation's identity provider (OIDC,
   server-side sessions); teams own alerts, with ranked roles.
+- **0014:** Postgres enforces team isolation (row-level security).

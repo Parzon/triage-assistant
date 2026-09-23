@@ -264,6 +264,14 @@ Measured through the api: a user in two of three seeded teams (333k
 alerts each), at 500 req/s, p95 7.7 ms for the list and 9.6 ms for the
 severity-filtered one (`make load s=alerts-read RATE=250`).
 
+**Row-level security** (ADR-0014) adds its policy as a filter on the rows
+a query fetches. A page of a two-team read still walks the team index:
+0.53 ms, on 1 M rows, as the app role with a caller set. The policies
+read their settings through scalar subqueries, which Postgres evaluates
+once per query (an InitPlan). Written as plain function calls they are
+evaluated per row: a count over 1 M rows (666 k visible) took 100 ms
+that way, 44 ms with the subqueries.
+
 **The migration that added teams** ran on the 2 M-row table while the
 previous release served reads and writes:
 - a column with a default (instant on Postgres 11+);
