@@ -52,12 +52,21 @@ def _digest(token: str) -> bytes:
 # development cannot use it (session_cookie_secure=false).
 
 
+# Cookies are scoped by host, not port: two services on one host with the
+# same cookie names sign each other out. scripts/new-project.sh renames it.
+COOKIE_PREFIX = "triage"
+
+
 def session_cookie(settings: Settings) -> str:
-    return "__Host-triage_session" if settings.session_cookie_secure else "triage_session"
+    return _cookie_name(f"{COOKIE_PREFIX}_session", settings)
 
 
 def login_cookie(settings: Settings) -> str:
-    return "__Host-triage_login" if settings.session_cookie_secure else "triage_login"
+    return _cookie_name(f"{COOKIE_PREFIX}_login", settings)
+
+
+def _cookie_name(name: str, settings: Settings) -> str:
+    return f"__Host-{name}" if settings.session_cookie_secure else name
 
 
 def set_cookie(response: Response, settings: Settings, name: str, value: str, max_age: int) -> None:

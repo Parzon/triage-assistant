@@ -6,6 +6,8 @@ them. People sign in with the organisation's identity provider (OIDC) and
 see only their teams' alerts; so does the assistant answering them. It is also
 the team's reference template for taking an AI idea to a production-shaped
 service — see [`gold_standard_development_guide.md`](gold_standard_development_guide.md).
+The project on one page: [`docs/overview.md`](docs/overview.md). Starting
+a new service from it: [using this template](docs/handbook/using-this-template.md).
 
 ## Quickstart
 

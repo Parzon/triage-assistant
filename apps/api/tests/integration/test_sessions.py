@@ -10,7 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 
 from app.cli import main, mint_session
-from app.sessions import TOUCH_INTERVAL_S
+from app.sessions import TOUCH_INTERVAL_S, session_cookie
 from tests.integration.conftest import ClientFactory, SignIn
 
 ALERT = {"team": "default", "source": "s", "severity": "info", "message": "m"}
@@ -25,7 +25,7 @@ async def test_no_session_is_a_401(anonymous: ClientFactory) -> None:
 
 async def test_unknown_session_is_a_401(anonymous: ClientFactory, app: FastAPI) -> None:
     async with anonymous() as client:
-        client.cookies.set("__Host-triage_session", "forged-or-long-gone")
+        client.cookies.set(session_cookie(app.state.settings), "forged-or-long-gone")
         assert (await client.get("/alerts")).status_code == 401
 
 
@@ -94,12 +94,13 @@ async def test_state_changes_need_this_sites_origin(client: AsyncClient) -> None
     assert (await client.get("/alerts")).status_code == 200
 
 
-async def test_logout_ends_the_session(client: AsyncClient) -> None:
+async def test_logout_ends_the_session(app: FastAPI, client: AsyncClient) -> None:
     response = await client.post("/auth/logout")
     assert response.status_code == 200
     assert response.json()["logout_url"]  # the IdP's, or "/"
     cookie = response.headers["set-cookie"]
-    assert cookie.startswith('__Host-triage_session=""') or "Max-Age=0" in cookie
+    name = session_cookie(app.state.settings)
+    assert cookie.startswith(f'{name}=""') or "Max-Age=0" in cookie
     assert "Secure" in cookie
     assert (await client.get("/alerts")).status_code == 401
 
@@ -124,7 +125,7 @@ async def test_cli_minted_sessions_work_like_signed_in_ones(
 ) -> None:
     cookie = await mint_session("script@example.com", ["team:default:responder"], hours=0.1)
     name, token = cookie.split("=", 1)
-    assert name == "__Host-triage_session"
+    assert name == session_cookie(app.state.settings)
     async with anonymous() as client:
         client.cookies.set(name, token)
         assert (await client.post("/alerts", json=ALERT)).status_code == 201
