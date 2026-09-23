@@ -1,0 +1,47 @@
+# ACME rehearsal (make acme-test, scripts/acme-test.sh): the production edge
+# image obtains a certificate the way it will from Let's Encrypt - an HTTP-01
+# challenge answered on port 80 - but from Pebble, Let's Encrypt's own test
+# CA. The edge runs with the production hardening (non-root, read-only,
+# no capabilities); only where the certificate comes from differs.
+name: triage-assistant-acme
+
+services:
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:2.10.1
+    command: ["-config", "/test/config/acme-test.json", "-strict"]
+    environment:
+      PEBBLE_VA_NOSLEEP: "1"   # validate at once, without Pebble's random delays
+    volumes:
+      # httpPort 80: the challenge goes to the edge's real port 80.
+      - ./pebble-config.json:/test/config/acme-test.json:ro
+
+  # What the edge proxies to (web:8080, as in production).
+  web:
+    image: nginxinc/nginx-unprivileged:1.30-alpine
+
+  edge:
+    image: ${EDGE_IMAGE:-triage-assistant-edge:local}
+    environment:
+      SITE_ADDRESS: edge.test
+      ACME_CA: https://pebble:14000/dir
+      # Pebble's API has its own test certificate; Go (Caddy) trusts the
+      # roots in this file.
+      SSL_CERT_FILE: /pebble/pebble.minica.pem
+    volumes:
+      - ${PEBBLE_TLS_ROOT:?}:/pebble/pebble.minica.pem:ro
+      - edge-data:/data
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /config
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      default:
+        aliases: [edge.test]   # the name Pebble resolves for the challenge
+    depends_on: [pebble, web]
+
+volumes:
+  edge-data:

@@ -92,7 +92,7 @@ have the same shapes.
 | Here | AWS | Azure | GCP | What changes in this repo |
 |---|---|---|---|---|
 | api container (gunicorn) | ECS on Fargate (or EKS) | Container Apps / AKS | Cloud Run / GKE | `IMAGE_PREFIX` → the cloud registry. One task per 1–2 vCPU with `WEB_CONCURRENCY` = the task's vCPUs. The read-only root filesystem needs a writable `/tmp` volume (metrics files, the control socket) |
-| nginx (web) | ALB for routing and TLS; static files on S3 + CloudFront, or keep the nginx container | Application Gateway / Front Door | HTTPS LB + Cloud CDN | the SSE location's rules (no buffering, idle timeout > 15 s) move to the load balancer and CDN config |
+| the TLS edge (Caddy) + nginx (web) | ALB for TLS and routing (edge profile off); static files on S3 + CloudFront, or keep the nginx container | Application Gateway / Front Door | HTTPS LB + Cloud CDN | drop `edge` from `COMPOSE_PROFILES` and publish nginx; the SSE rules (no buffering, idle timeout > 15 s) move to the load balancer and CDN config |
 | Postgres | RDS or Aurora PostgreSQL, Multi-AZ | Azure Database for PostgreSQL (flexible) | Cloud SQL | `DATABASE_URL`, `MIGRATIONS_DATABASE_URL`; the roles script (`infra/postgres/initdb`) run once as a migration or by hand; backups become the service's snapshots plus point-in-time recovery |
 | PgBouncer | RDS Proxy, or keep PgBouncer as a sidecar | PgBouncer built into the flexible server | a sidecar | RDS Proxy "pins" sessions that use session state (the app uses none: transaction-scoped only). Re-run the database drills against whichever you choose |
 | Valkey | ElastiCache for Valkey | Azure Cache for Redis | Memorystore for Valkey | `REDIS_URL` (TLS: `rediss://`) |

@@ -10,11 +10,13 @@ layer caught in this repo. All numbers are from the current `main`.
 | api unit | nothing (pure Python) | part of 99 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets |
 | api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, mock LLM | part of 99 | `make test-api` (~28 s) | every endpoint's success and failure paths through the real drivers, pools and SQL |
 | web unit/component | jsdom (Vitest + React Testing Library) | 25 | `make test-web` | UI states, the SSE parser, error handling in the API client |
-| end-to-end | the **production** stack in a real browser (Playwright, Chromium) | 5 | `make prod-up && make e2e` | the parts only a real browser and nginx show: incremental streaming through nginx, Stop cancelling the model call, CSP |
+| end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 5 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
 | image | the production image | 1 check | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem |
 | load | the production stack | on demand | `make load`, `make load-compare` | capacity, latency under load (performance chapter) |
 | failure drills | the production stack | 21 drills | `make drills` | what users see when each dependency fails, and that it recovers (failure-modes chapter) |
-| fresh host | a clean Docker host (DinD) | 1 run | `make fresh-host-test` | the committed tree comes up from `.env.example` alone |
+| fresh host | a clean Docker host (DinD) | 1 run | `make fresh-host-test` | the committed tree comes up from `.env.example` alone, serving HTTPS |
+| release smoke | the *published* images, amd64 and arm64 | every release | `scripts/smoke-release.sh <prefix> <tag>` | what was pushed runs: HTTPS with a verified chain, write, read, a streamed answer |
+| ACME rehearsal | the edge image against Pebble (Let's Encrypt's test CA) | on demand | `make acme-test` | automatic certificates: obtained over HTTP-01, served, kept across a restart |
 
 `make test` runs the api and web suites exactly as CI does. `make check`
 also runs lint and types. Run it before every push.

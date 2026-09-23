@@ -29,6 +29,9 @@ There are three kinds of drill (`scripts/failure-drills.sh`):
 | in-flight fault | 6 slow streams (~10 s each) are running when the fault hits, and `/api/health` is probed 4× a second throughout |
 | freeze under load | 20 client threads read continuously while a dependency is frozen for 20 s; afterwards, the api's database pools must hold 0 connections |
 
+Probes go where users go: HTTPS through the TLS edge (with the edge's
+local CA), or nginx on loopback when the edge is not running.
+
 Faults are injected with plain Docker:
 - `docker stop` for "down".
 - `docker pause` for "frozen": SIGSTOP; the process is alive, its TCP
@@ -73,11 +76,12 @@ Grafana.
 | LLM hangs | stream stays open (heartbeat every 15 s), then `llm_timeout` at 60 s | `LLMSlowFirstToken`, `LLMErrors` | 0 s |
 | LLM drops mid-answer | partial answer, then `llm_unavailable` (0.8 s) | `LLMErrors` | 0 s |
 | api cut from the network | JSON 504 `upstream_unavailable` after 2 s. A request that nginx sends on an **existing keep-alive connection** waits the full 30 s read timeout instead | `ApiDown` (Prometheus can't scrape it) | 0 s |
-| nginx stopped | connection refused: the site is down | **nothing in the stack** (see gaps) | 1 s |
+| nginx stopped | the TLS edge holds each request for 5 s (it may be a restart), then answers `/api` with the JSON `upstream_unavailable` (502) | **nothing in the stack** (see gaps) | 1 s |
+| the TLS edge stopped | connection refused: the site is down (the edge owns ports 80/443) | **nothing in the stack** (see gaps) | 1 s |
 | one gunicorn worker killed | streams on that worker cut (3 of 6); other requests unaffected; a new worker starts | nothing (by design: normal) | 0 s |
 | api crashes (PID 1 SIGKILL) | every in-flight stream cut; 502 for ~0.5 s; the restart policy brings it back | `ApiDown` only if it stays down 1 min | 0 s |
 | deploy (`up --force-recreate api`) | in-flight streams **finish** (graceful drain); **new requests get 502 for 6.7 s** | — | 0 s |
-| rolling deploy (`make deploy`) | in-flight streams finish; **no failed or slow request during the api swap**; ~0.3 s of refused connections while nginx itself is replaced | — | 0 s |
+| rolling deploy (`make deploy`), through the TLS edge | in-flight streams finish; **no failed request in three runs**: the edge holds requests while nginx is replaced (worst case one request waited 2.0 s) | — | 0 s |
 | a broken release (`make deploy` of an image that never gets healthy) | nothing: the new api is removed after 90 s, and the old one never stopped (1,018 of 1,018 requests OK) | the deploy fails loudly (exit 1) | — |
 | memory limit below the working set | workers and then PID 1 OOM-killed in a loop (one run: 8 container restarts in 30 s); all streams cut; site down until the limit is fixed | `ContainerOOMKilled` (verified firing) | 3 s |
 
@@ -320,7 +324,8 @@ risk remains.
 | SPOF | Effect | What removes it |
 |---|---|---|
 | the VM | everything | a second VM or a managed platform (ECS/Kubernetes) across availability zones |
-| nginx | site down; ~0.3 s of refused connections on every deploy | a cloud load balancer in front of ≥2 instances |
+| the TLS edge | site down; replacing it (only when its image changes) drops connections for a moment | a cloud load balancer in front of ≥2 instances, with TLS there |
+| nginx | behind the edge: 502 JSON after 5 s while down; its replacement during deploys is absorbed by the edge | ≥2 web replicas behind a load balancer |
 | api container | a crash cuts in-flight requests (restarted in < 1 s); deploys no longer (`make deploy`) | a second replica on another host |
 | Postgres | writes and reads down | a managed database with a standby (RDS Multi-AZ) |
 | PgBouncer | database path down | a managed proxy (RDS Proxy) or one PgBouncer per api host |

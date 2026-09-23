@@ -27,8 +27,9 @@ needs a real cloud account). Where the two differ, trust ✅.
 
 ```
                    ┌──────────────── one host (VM or laptop), one compose project ────────────────┐
-browser ──:80────► │ nginx (web)  static React build, /api/* → api, JSON errors, security headers │
-                   │   │                                                                          │
+browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; :80 redirects to HTTPS          │
+                   │   ▼ http://web:8080                                                          │
+                   │ nginx (web)  static React build, /api/* → api, JSON errors, security headers │
                    │   ▼ http://api:8010                                                          │
                    │ api  gunicorn → N uvicorn workers (N = CPU limit), FastAPI                   │
                    │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17 (alerts)          │
@@ -41,9 +42,9 @@ browser ──:80────► │ nginx (web)  static React build, /api/* →
 ```
 
 Three request paths matter:
-- **Read alerts:** nginx → api → PgBouncer → Postgres (~2 ms at 500
-  req/s).
-- **Ask the assistant:** nginx (no buffering) → api loads recent alerts →
+- **Read alerts:** edge (TLS) → nginx → api → PgBouncer → Postgres (~2 ms
+  at 500 req/s).
+- **Ask the assistant:** edge and nginx (no buffering) → api loads recent alerts →
   streams the model's answer as Server-Sent Events, with a heartbeat
   every 15 s. Stop in the browser cancels the model call.
 - **Alert webhook:** Alertmanager → api (bearer token) → a row in
@@ -165,6 +166,14 @@ each; the linked chapter has the evidence. Add to this list whenever
 something bites.
 
 ### Docker and Compose
+- **The Dev Containers CLI attaches to an already running compose
+  container without building its features**: a user added by a feature
+  didn't exist ("unable to find user dev"). Put the user in the image
+  itself (the dev image's `dev` user, with your UID).
+  ([dev environment](docs/handbook/dev-environment.md))
+- **After the dev container switched to a non-root user, mypy died with
+  "INTERNAL ERROR"**: its old cache was root-owned. `make fix-perms`
+  once.
 - **`docker compose up --build` after a dependency change still runs the
   old dependencies.** The anonymous `.venv`/`node_modules` volume
   survives. Use `make rebuild` (`--renew-anon-volumes`).
@@ -236,7 +245,28 @@ something bites.
 - **"port is already allocated"** is usually a forgotten stack: `docker
   ps`, `ss -ltnp`.
 
-### nginx and the network
+### The edge, nginx and the network
+- **The official Caddy image won't start with `no-new-privileges`**: its
+  binary carries a file capability, and the kernel refuses to run it
+  (EPERM). Remove the capability; bind 80/443 as non-root through the
+  `net.ipv4.ip_unprivileged_port_start` sysctl.
+  ([networking](docs/handbook/networking.md))
+- **Behind two proxies, every user had the edge's address**: one rate
+  limit for all. The edge overwrites the client's `X-Forwarded-For`;
+  nginx trusts it only from private ranges (`realip`).
+- **HSTS on `localhost` forces HTTPS on every local port**, the Vite dev
+  server included: `HSTS_MAX_AGE=0` locally, a year only for a real
+  domain.
+- **With remapped host ports, Caddy's redirect and `alt-svc` name 443**:
+  it knows its container ports, not the host's. It's right on a VM using
+  80/443.
+- **Replacing nginx refused connections for ~0.3 s** until the edge
+  retried the upstream (`lb_try_duration 5s`): a rolling deploy then
+  failed nothing.
+- **Let's Encrypt stopped sending expiry emails (2025)**: monitor
+  certificate expiry yourself.
+- **Pebble's release `v2.10.1` is image tag `2.10.1`**: GitHub release
+  names and image tags don't always match.
 - **nginx buffers responses**: SSE arrived all at once. Set
   `proxy_buffering off` on the stream location, and send
   `X-Accel-Buffering: no`. ([networking](docs/handbook/networking.md))
@@ -411,6 +441,15 @@ something bites.
   --data-urlencode`.
 
 ### Testing and CI
+- **Required approvals block a solo owner**: GitHub never lets you
+  approve your own PR. Until a second engineer exists, the owner merges
+  with the admin bypass (`gh pr merge --admin`).
+- **Browser tests must reach the site the way users do**: Playwright on
+  the host network, opening `https://localhost:<edge port>`, and the mock
+  reached by its container IP. The identity provider's URL must be the
+  same for the browser and the api.
+- **Images from a public repository's workflow are public on GHCR**:
+  anyone can pull them without a token.
 - **CI runs as UID 1001, which has no account in the node image**, so
   `HOME=/` broke Vitest. `AS_ME` sets `HOME=/tmp`.
   ([testing](docs/handbook/testing.md))
@@ -519,16 +558,17 @@ A merged ADR is never edited: a new one supersedes it.
 
 What a real launch still needs. Each item is a known gap, not an
 oversight:
-- **Authentication**: there is none. Put the service behind SSO before
-  any real data goes in.
-- **HTTPS** in front: four options in the VM runbook.
+- **Sign-in and team permissions**: in progress (OIDC SSO, team-owned
+  alerts, ranked roles, row-level security; issues #33, #34). Until then,
+  anyone who reaches the site can read everything.
 - **Outside-in monitoring**: an uptime check, and a dead man's switch for
-  Prometheus itself. Nothing notices when the VM or nginx is down.
+  Prometheus itself. Nothing notices when the VM or the edge is down.
 - **A second host.** One VM has single points of failure (listed in
   failure modes).
-- **The first real release** (`git tag v0.1.0`). The workflow's build is
-  verified on PRs; the push hasn't happened yet.
-- **Image and secret scanning** in CI.
+- **Let's Encrypt for real**: rehearsed against Pebble (`make
+  acme-test`); a real domain is the step left.
+- **Image and secret scanning** in CI (GitHub's secret scanning with push
+  protection is on).
 - **Tracing (OpenTelemetry) and central logs**, once there is more than
   one service or host.
 

@@ -15,7 +15,7 @@ test.afterEach(async ({ request }) => {
   await request.post(`${MOCK_ADMIN}/reset`)
 })
 
-test('the answer streams in through nginx, verbatim', async ({ page, request }) => {
+test('the answer streams in through the TLS edge and nginx, verbatim', async ({ page, request }) => {
   await mock(request, { ttft_ms: 300, tokens_per_s: 20 }) // ~2.5s answer
   await page.goto('/')
   await page.getByLabel('Question').fill('what is on fire?')

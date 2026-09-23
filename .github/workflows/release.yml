@@ -1,11 +1,12 @@
 name: Release
 
-# A version tag on main publishes both production images to GitHub's
-# container registry, for linux/amd64 and linux/arm64 (Apple Silicon,
-# AWS Graviton) under one tag:
+# A version tag on main publishes the production images (api, web and the
+# TLS edge) to GitHub's container registry, for linux/amd64 and linux/arm64
+# (Apple Silicon, AWS Graviton) under one tag:
 #   git tag -a v1.4.0 -m "v1.4.0" && git push origin v1.4.0
 #   -> ghcr.io/<owner>/triage-assistant-api:1.4.0, :1.4, :sha-<commit>
 #      ghcr.io/<owner>/triage-assistant-web:  the same tags
+#      ghcr.io/<owner>/triage-assistant-edge: the same tags
 # Then it pulls what it published, on both architectures, and runs the
 # stack from those images before writing the release notes. A host deploys
 # it with `make deploy tag=1.4.0` (docs/runbooks/demo-vm.md).
@@ -21,6 +22,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - apps/*/Dockerfile
+      - tools/edge/**
       - apps/api/pyproject.toml
       - apps/api/uv.lock
       - apps/web/package.json
@@ -58,7 +60,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        image: [api, web]
+        image: [api, web, edge]
         platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
@@ -91,8 +93,10 @@ jobs:
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: build
         with:
-          context: apps/${{ matrix.image }}
-          target: production
+          # The edge is a single-stage image in tools/edge; the others are
+          # the production stage of apps/<image>.
+          context: ${{ matrix.image == 'edge' && 'tools/edge' || format('apps/{0}', matrix.image) }}
+          target: ${{ matrix.image != 'edge' && 'production' || '' }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           # A tag push publishes by digest; a PR only builds.
@@ -126,7 +130,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        image: [api, web]
+        image: [api, web, edge]
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

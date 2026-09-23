@@ -41,7 +41,7 @@ healthy() {  # healthy <container> <seconds>: 0 once healthy, 1 if unhealthy or 
 
 if [ "${PULL:-1}" = 1 ]; then
   step "pull $IMAGE_TAG"
-  "${COMPOSE[@]}" pull --quiet api web migrate
+  "${COMPOSE[@]}" pull --quiet api web migrate edge
 fi
 
 step "migrate"
@@ -73,8 +73,26 @@ fi
 "${COMPOSE[@]}" up -d --no-deps --no-recreate --scale api=1 api
 
 step "replace nginx"
+# The edge holds requests and retries while nginx restarts (lb_try_duration
+# in tools/edge/Caddyfile): measured, no request failed through the edge.
 "${COMPOSE[@]}" up -d --no-deps web
 healthy "$(containers web)" 30 || { echo "nginx is not healthy: make prod-logs S=web" >&2; exit 1; }
+
+# The edge owns the published ports: replacing it drops connections for a
+# moment. Only when its content changed - layers are content-addressed, so a
+# rebuilt but identical image (every release retags it) is left running.
+edge=$(containers edge)
+if [ -n "$edge" ]; then
+  running=$(docker image inspect -f '{{json .RootFS.Layers}}' "$(docker inspect -f '{{.Image}}' "$edge")")
+  wanted=$(docker image inspect -f '{{json .RootFS.Layers}}' "${IMAGE_PREFIX:-triage-assistant}-edge:$TAG" 2>/dev/null || true)
+  if [ -n "$wanted" ] && [ "$running" != "$wanted" ]; then
+    step "replace the edge (its image changed)"
+    "${COMPOSE[@]}" up -d --no-deps edge
+    healthy "$(containers edge)" 30 || { echo "the edge is not healthy: make prod-logs S=edge" >&2; exit 1; }
+  else
+    step "the edge is unchanged: left running"
+  fi
+fi
 
 # Every later compose command (make prod-up, make restore, a reboot's
 # restart) must run the same images: record the tag where compose reads it.

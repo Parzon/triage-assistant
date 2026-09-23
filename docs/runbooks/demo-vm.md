@@ -111,26 +111,65 @@ make prod-up
 Then check (✅ the same checks the fresh-host test makes):
 
 ```
-curl -s localhost/api/ready          # {"status":"ready","checks":{"database":"ok","redis":"ok"}}
-open http://<vm>/                    # the UI; ask the assistant something
+curl -s https://<domain>/api/ready   # {"status":"ready","checks":{"database":"ok","redis":"ok"}}
+curl -sI http://<domain>/ | head -1  # 308: plain HTTP is redirected to HTTPS
+open https://<domain>/               # the UI; ask the assistant something
 ```
 
 ## 5. HTTPS
 
-The stack speaks HTTP on port 80. Pick one way to put TLS in front of it:
+HTTPS is built in (ADR-0012). The TLS edge (Caddy, `tools/edge`) is the
+only thing the stack publishes: HTTPS on 443, and HTTP on 80 answering
+with a redirect to HTTPS. nginx listens on the VM's loopback only.
 
-| Option | Needs | Good for |
-|---|---|---|
-| **Cloud load balancer + managed certificate** (AWS ALB + ACM, Azure Application Gateway, GCP HTTPS LB) | the VM in that cloud; DNS | anything customer-facing. Set the LB's idle timeout above 15 s (the SSE heartbeat) or long answers get cut; ALB's default of 60 s works |
-| **Caddy on the VM** (automatic Let's Encrypt) | a public DNS name, ports 80 + 443 open to the internet | a quick public demo. Run Caddy on 443 → `localhost:80`, and move nginx's `HTTP_BIND` to 127.0.0.1 |
-| **Cloudflare Tunnel / Tailscale Funnel** | an account; no inbound ports at all | a VM inside a corporate network that cannot accept inbound traffic |
-| **Self-signed certificate** | nothing | internal only; browsers warn |
+**With a domain (the normal case):**
 
-📘 None of these is exercised in this repo. Whichever you choose, the
-proxy in front must not buffer `text/event-stream`, and must pass
-`X-Forwarded-For`. Then set up nginx's `realip` module (the comment in
-`apps/web/nginx/snippets/proxy.conf`), or every user shares the proxy's
-IP address, and so one rate limit.
+```
+# .env
+SITE_ADDRESS=triage-demo.example.com    # DNS A/AAAA record -> this VM
+HSTS_MAX_AGE=31536000                   # once HTTPS works: browsers then refuse plain HTTP
+# first setup only, to avoid Let's Encrypt's rate limits while you experiment:
+# ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory
+make prod-up        # or make deploy tag=X.Y.Z
+curl -sI https://triage-demo.example.com/ | head -1        # HTTP/2 200
+```
+
+Caddy obtains the certificate from Let's Encrypt the first time the domain
+is requested, and renews it on its own (~30 days before expiry). It keeps
+it in the `edge-data` volume. Needs: ports 80 and 443 reachable from the
+internet (the ACME challenge arrives on 80), and DNS pointing at the VM
+before the first start.
+
+- ✅ **Rehearsed here:** `make acme-test` has the same hardened edge image
+  obtain a certificate over ACME HTTP-01 from Pebble, Let's Encrypt's own
+  test CA. It serves the certificate with a verified chain, and doesn't
+  ask again after a restart.
+- 📘 **Not here:** the real Let's Encrypt, which needs a public domain.
+- Let's Encrypt stopped sending expiry emails in 2025, so watch expiry
+  yourself: an uptime check that alerts on certificates close to expiry
+  (section 9).
+
+**Without a public domain** (an internal demo): leave
+`SITE_ADDRESS=localhost`, or set an internal name. Caddy then issues from
+its own local CA. Browsers warn until that CA is trusted:
+
+```
+docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml \
+  cp edge:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+# then import caddy-root.crt as a trusted root on the demo laptop
+```
+
+**Behind a cloud load balancer** (ALB + ACM, Azure Application Gateway,
+GCP HTTPS LB): the load balancer terminates TLS. Remove `edge` from
+`COMPOSE_PROFILES`, and publish nginx: `HTTP_BIND=0.0.0.0`,
+`HTTP_PORT=80`, with the security group allowing only the load balancer.
+Set the load balancer's idle timeout above 15 s (the SSE heartbeat); ALB's
+default 60 s works. nginx takes the client address from the load
+balancer's `X-Forwarded-For` (trusted from private ranges only).
+
+**No inbound ports at all** (a VM inside a corporate network): a
+Cloudflare Tunnel or Tailscale Funnel reaches out from the VM. 📘 Not
+exercised here.
 
 ## 6. Deploy a new version
 

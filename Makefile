@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        backup restore acme-test fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
@@ -145,10 +145,18 @@ test-fast: ## api unit tests only: no database, seconds
 
 # The browser joins the production stack's network: it reaches the site as
 # http://web:8080 and can drive the mock LLM's admin API.
-e2e: ## Browser tests (Playwright) against the running production stack: make prod-up first
-	docker run --rm --network triage-assistant-prod_default --shm-size=1g $(AS_ME) \
+# The browser runs on the host network and opens https://localhost:<edge
+# port>, like a user: through the TLS edge, nginx, the api. The edge's local
+# CA is not in the browser's trust store, so certificate errors are ignored
+# (E2E_IGNORE_HTTPS_ERRORS) - for this local CA only. The mock's admin API is
+# reached at its container IP. Docker Desktop: enable host networking
+# (Settings > Resources > Network), or rely on CI.
+EDGE_HTTPS_PORT ?= $(or $(shell sed -n 's/^EDGE_HTTPS_PORT=//p' .env 2>/dev/null),443)
+e2e: ## Browser tests (Playwright) through the TLS edge of the running production stack: make prod-up first
+	docker run --rm --network host --shm-size=1g $(AS_ME) \
 	  -e npm_config_cache=/tmp/npm \
-	  -e E2E_BASE_URL=http://web:8080 -e MOCK_ADMIN_URL=http://mock-llm:8020/_admin \
+	  -e E2E_BASE_URL=https://localhost:$(EDGE_HTTPS_PORT) -e E2E_IGNORE_HTTPS_ERRORS=1 \
+	  -e MOCK_ADMIN_URL=http://$$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $$($(PROD) ps -q mock-llm)):8020/_admin \
 	  -v "$(CURDIR)/tests/e2e:/e2e" -w /e2e mcr.microsoft.com/playwright:v1.63.0-noble \
 	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'
 
@@ -224,6 +232,9 @@ backup: ## Dump the database to backups/ (keeps the newest 14) [ENV=prod]
 restore: ## Replace the database with a dump: make restore file=backups/<dump> [ENV=prod]
 	@test -n "$(file)" || { echo 'usage: make restore file=backups/<dump>'; exit 2; }
 	@STACK="$(STACK)" scripts/restore.sh "$(file)"
+
+acme-test: ## Rehearse automatic HTTPS certificates: the edge image gets one over ACME from Pebble (Let's Encrypt's test CA)
+	@scripts/acme-test.sh
 
 fresh-host-test: ## The committed tree on a clean Docker host (DinD): prod-up + every user path [DUMP=backups/x.dump]
 	@scripts/fresh-host-test.sh

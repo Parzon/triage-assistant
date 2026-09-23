@@ -7,10 +7,9 @@ on this repo's host, 📘 = cloud guidance, not exercised here.
 ## Inside the stack ✅
 
 ```
-browser ──:80──► nginx (web) ──http://api:8010──► api ──pgbouncer:5432──► PgBouncer ──db:5432──► Postgres
-                    │                               ├──redis:6379──► Valkey
-                    │                               └──LLM_BASE_URL──► the model provider (or mock-llm:8020)
-                    └── static files (the React build)
+browser ──:443 HTTPS──► edge (Caddy) ──http://web:8080──► nginx (web) ──http://api:8010──► api ──► PgBouncer ──► Postgres
+          :80 → 308 ─┘   TLS, certificates,                  │ static files (React)     ├──► Valkey
+                         HTTP/3, retries                     └ /api/* → api             └──► the model provider (or mock-llm)
 ```
 
 - **One bridge network per compose project**
@@ -28,9 +27,11 @@ browser ──:80──► nginx (web) ──http://api:8010──► api ──
   Two short-lived containers started one after the other get the same
   IP. That made a rate-limit test look like a single global limit until
   the clients ran concurrently.
-- **Only nginx is published** in the production shape. The api,
-  PgBouncer, Postgres and Valkey have no host ports at all: nothing
-  outside the Docker network can reach them.
+- **Only the TLS edge is published** in the production shape (80 and
+  443). nginx is published on the host's loopback only (`HTTP_PORT`,
+  for drills, load tests and debugging). The api, PgBouncer, Postgres and
+  Valkey have no host ports at all: nothing outside the Docker network
+  can reach them.
 
 ## Published ports bypass the host firewall ✅
 
@@ -76,7 +77,7 @@ Where the client IP comes from:
 | `proxy_read_timeout` 30 s (`/api/`), 120 s (the stream) | the longest silence nginx waits for; the stream sends a heartbeat every 15 s |
 | `proxy_connect_timeout 2s` | how long a dead upstream costs a request. When the api's address vanished (network cut, container gone), requests failed in 2.0 s |
 | upstream `keepalive 16`, `keepalive_timeout 60s` < gunicorn's 75 s | the proxy closes idle connections first. If the backend closes one that nginx is about to reuse, nginx does not retry a POST: 502 |
-| `proxy_set_header X-Forwarded-For $remote_addr` (overwrite, not append) | a client cannot forge its IP to escape the rate limit (measured: spoofing another client's IP had no effect) |
+| `proxy_set_header X-Forwarded-For $remote_addr` (overwrite, not append), after `realip` | the api gets exactly one address: the real client, taken from a trusted proxy's header, or the connection itself. A client cannot forge its IP to escape the rate limit (measured, both directly and through the edge) |
 | `error_page 502 504 @api_error` | when nginx answers for the api, it answers in the api's JSON error format, with the request id |
 | `redirect_slashes=False` in the api | behind a proxy that strips `/api`, Starlette built redirects to `/alerts` on the wrong host and port. `/alerts/` is now a 404, not a broken redirect |
 
@@ -88,25 +89,66 @@ Measured once, and worth knowing:
 - **`$host` drops the port.** For absolute URLs behind a non-default
   port, use `$http_host`.
 
-## Behind a load balancer or a second proxy 📘
+## The TLS edge ✅
 
-- **The client IP.** nginx sees the load balancer's address. Enable the
-  realip module with `set_real_ip_from <LB subnet>` and `real_ip_header
-  X-Forwarded-For` (the comment in `snippets/proxy.conf`). Only then is
-  `$remote_addr` the real client, and the rate limit per user again.
-  Trust only the load balancer's subnet: trusting any source makes the
-  header forgeable.
+Caddy (`tools/edge`, ADR-0012) terminates HTTPS in front of nginx.
+
+- **Certificates:**
+  - `SITE_ADDRESS` set to a domain: Let's Encrypt over ACME, obtained on
+    first use and renewed by Caddy.
+  - `localhost`: Caddy's local CA, with 12-hour leaf certificates.
+  - `make acme-test` rehearses the ACME exchange against Pebble, Let's
+    Encrypt's test CA.
+- **Measured here:**
+  - TLS 1.3 and HTTP/2; plain HTTP answered with `308` to HTTPS; HTTP/3
+    advertised (`alt-svc`).
+  - SSE unbuffered through both proxies (`flush_interval -1`): 50 events
+    spread over 1.3 s, first token at 0.34 s.
+- **Client addresses through two proxies.** Caddy replaces whatever
+  `X-Forwarded-For` a client sends. nginx takes the client from Caddy's
+  header (`set_real_ip_from` the private ranges, `real_ip_recursive
+  on`). Measured: a request sent with `X-Forwarded-For: 6.6.6.6` reached
+  nginx and the api as the real client. Before this, the api would have
+  seen Caddy's address for every user, and so one rate limit for
+  everyone.
+- **nginx restarts are absorbed.** `lb_try_duration 5s`: a request that
+  cannot reach nginx is held and retried. A rolling deploy through the
+  edge failed zero requests; the worst case was one request held 2.0 s.
+- **When nginx stays down,** the edge answers `/api` requests with the
+  api's JSON error shape (`upstream_unavailable`), after the 5 s it
+  waited.
+- **HSTS** (`HSTS_MAX_AGE`) is 0 for `localhost`: it would force HTTPS on
+  every other local port. Use a year for a real domain.
+- **Remapped host ports:** Caddy knows its container ports (80/443), so
+  with remapped host ports (this box uses 8081/8443 because 80 is taken)
+  its redirect and `alt-svc` name 443. On a VM using 80/443 they are
+  right.
+- **Non-root on 80/443:** the edge runs as UID 10001 with no
+  capabilities. Binding low ports inside its own network namespace comes
+  from the `net.ipv4.ip_unprivileged_port_start=0` sysctl compose sets.
+  The official image's file capability on the binary had to be removed:
+  under `no-new-privileges` the kernel refuses to run it.
+
+## Behind a load balancer instead of the edge
+
+The same images; the edge is simply not started. Remove `edge` from
+`COMPOSE_PROFILES`, and publish nginx with `HTTP_BIND=0.0.0.0`,
+`HTTP_PORT=80`, reachable only from the load balancer's security group.
+
+- **The client IP.** nginx trusts `X-Forwarded-For` from private ranges
+  (✅ the same realip settings as behind the edge). Load balancers
+  *append* the client address; `real_ip_recursive on` takes the
+  rightmost untrusted address, which is the load balancer's view of the
+  client, not anything the client wrote.
 - **Idle timeouts versus streaming.** A load balancer closes connections
-  idle longer than its idle timeout. AWS ALB defaults to 60 s, other
-  load balancers and corporate proxies use as little as 30 s. The SSE
+  idle longer than its idle timeout. AWS ALB defaults to 60 s; other load
+  balancers and corporate proxies use as little as 30 s. The SSE
   heartbeat (every 15 s) keeps an answer's connection alive under any of
-  them. Keep `SSE_HEARTBEAT_S` below the smallest idle timeout in the
-  path.
+  them. 📘
 - **No buffering of `text/event-stream`** anywhere in the path. CDNs and
   some proxies buffer by default; the symptom is answers that appear all
-  at once.
-- **TLS** terminates at the load balancer (a managed certificate), or at
-  Caddy or nginx on the host (the runbook lists the options).
+  at once. 📘
+- **TLS** terminates at the load balancer, with a managed certificate. 📘
 
 ## A cloud network for this stack 📘
 
