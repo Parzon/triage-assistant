@@ -1,0 +1,21 @@
+name: Feature or change
+description: Something new, or a change to how something works
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who has it, and what it costs them today. Not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: For anything large or hard to reverse, write an RFC (docs/rfc/) and link it here.
+  - type: textarea
+    id: done
+    attributes:
+      label: How we will know it works
+      description: A number, a test, an observable behaviour.

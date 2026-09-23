@@ -13,13 +13,16 @@ TEST := docker compose -p triage-assistant-test -f compose.yaml -f compose.overr
 # that has no account in the image (CI runners are 1001; only 1000 happens to
 # match the node image's user) gets HOME=/, and tools that write there fail.
 AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
+# The dev images' non-root user gets your UID/GID (apps/api/Dockerfile, dev).
+export DEV_UID := $(shell id -u)
+export DEV_GID := $(shell id -g)
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
-        deps-api deps-web prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
+        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -113,7 +116,7 @@ lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, 
 	$(DEV) run --rm --no-deps web npm run lint
 
 shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
-	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh
+	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/git-hooks/*
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
@@ -325,6 +328,10 @@ prod-logs: ## Follow production logs: all, or S=api
 	$(PROD) logs -f --tail=100 $(S)
 
 # --- Housekeeping ------------------------------------------------------------
+
+hooks: ## Run lint, types and unit tests before every git push (per clone)
+	git config core.hooksPath scripts/git-hooks
+	@echo "installed: scripts/git-hooks/pre-push (skip once with git push --no-verify)"
 
 fix-perms: ## Linux: hand files created by root in containers back to your user
 	docker run --rm -v "$(CURDIR):/w" alpine chown -R "$$(id -u):$$(id -g)" /w

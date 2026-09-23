@@ -1,0 +1,22 @@
+# Who must review what. With branch protection's "require review from Code
+# Owners", a PR touching a path needs an approval from its owners.
+# Replace the handles with teams once they exist (@your-org/backend, ...):
+# a team scales, a person is a bottleneck. Later lines win.
+
+*                      @Parzon
+
+# The api and its data model
+/apps/api/             @Parzon
+/apps/api/migrations/  @Parzon
+
+# The UI
+/apps/web/             @Parzon
+
+# How it runs: compose, monitoring, VM bootstrap, CI and releases
+/compose*.yaml         @Parzon
+/infra/                @Parzon
+/.github/              @Parzon
+/scripts/              @Parzon
+
+# Decisions are reviewed by whoever owns the architecture
+/docs/adr/             @Parzon

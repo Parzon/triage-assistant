@@ -34,7 +34,18 @@ ENV PATH="/api/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1 \
     PYTHONPYCACHEPREFIX=/tmp/pycache
+# The dev server runs as `dev`, whose UID is yours (make passes DEV_UID and
+# DEV_GID): files it or your tools write into the bind-mounted source stay
+# owned by you on Linux, and a dev container (.devcontainer/api) attaches as
+# the same user. A GID that already exists (macOS's 20 is Debian's
+# "dialout") is reused rather than recreated.
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+RUN if [ "$DEV_UID" = 0 ]; then DEV_UID=1000 DEV_GID=1000; fi \
+ && (getent group "$DEV_GID" >/dev/null || groupadd --gid "$DEV_GID" dev) \
+ && useradd --uid "$DEV_UID" --gid "$DEV_GID" --create-home --shell /bin/bash dev
 COPY . .
+USER dev
 EXPOSE 8010
 CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8010", "--reload"]
 
