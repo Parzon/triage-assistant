@@ -24,7 +24,7 @@ whole production stack up from a checkout (`make fresh-host-test`).
 
 Not needed, and deliberately so: Python, Node, uv, npm, psql, a local
 Postgres. Tool versions live in the images:
-- `ghcr.io/astral-sh/uv:0.12.17` with Python 3.13 for the api
+- `ghcr.io/astral-sh/uv:0.12.18` with Python 3.13 for the api
 - `node:24` for the web
 - `postgres:17`, `valkey/valkey:8.1-alpine`
 - `quay.io/keycloak/keycloak:26.7.4`, the bundled identity provider
@@ -92,6 +92,43 @@ Use WSL2, then work *inside* it:
 Line endings are handled: `.gitattributes` forces LF. Without it, a
 Windows checkout turns shell scripts into CRLF, and containers fail with
 `/usr/bin/env: 'bash\r': No such file or directory`.
+
+## The same workflow on every system
+
+The commands are identical everywhere: `make up`, `make check`, `make
+e2e`. What differs is underneath them.
+
+| | Linux ✅ | macOS 📘 | Windows 📘 |
+|---|---|---|---|
+| Docker | Docker Engine, native | a Linux VM: Docker Desktop, Colima, OrbStack or Rancher Desktop | WSL2, with Docker Desktop or Docker Engine inside it |
+| Where to clone | anywhere | anywhere | inside WSL (`~/code`), never `/mnt/c` |
+| Run `make` from | any shell | Terminal (make 3.81 ships with the Xcode command-line tools) | the WSL shell only |
+| Files written by containers | your UID (`AS_ME`); `make fix-perms` if not | yours: the VM maps ownership | your WSL user's |
+| File names | case-sensitive | **case-insensitive** by default | case-sensitive inside WSL |
+| Bind-mount speed | native | slower: dependencies stay in volumes inside the VM | native inside WSL, slow from `/mnt/c` |
+| A GPU for Ollama | NVIDIA driver + Container Toolkit | the Ollama app natively (containers cannot use Apple's GPU) | the NVIDIA driver for WSL |
+| Editor | VS Code or JetBrains, with dev containers | the same | VS Code with the WSL extension, then dev containers |
+
+Traps that only show up across systems:
+- **Case-insensitive file names (macOS).**
+  - An import that gets a file name's case wrong (`./chat` for
+    `Chat.tsx`) works on a Mac, then fails in Linux CI.
+  - A rename that only changes case is invisible to git there: use
+    `git mv Chat.tsx chat.tsx`.
+- **Reserved ports (Windows).** Hyper-V and WinNAT reserve port ranges,
+  so a bind to 8010 or 5173 can fail with nothing listening. See them
+  with `netsh interface ipv4 show excludedportrange protocol=tcp`.
+  Choose other ports in `.env` (`API_PORT`, `WEB_PORT`).
+- **The WSL2 clock can drift** after the laptop sleeps. The bundled
+  Keycloak shares the VM's clock, so development sign-in is unaffected.
+  Against an external identity provider, a skew over 60 s fails the
+  token time checks. Fix it with `wsl --shutdown`, or `sudo hwclock -s`.
+- **Line endings.** `.gitattributes` forces LF (the Windows section
+  above). Editors that ignore it still show CRLF diffs: set VS Code's
+  `files.eol` to `\n`.
+- **Scripts** start with `#!/usr/bin/env bash` and run on bash 3.2 when
+  developers run them: macOS's default shell is zsh, and its bash is
+  3.2.
 
 ## Corporate networks 📘
 

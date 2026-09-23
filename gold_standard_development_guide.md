@@ -17,11 +17,14 @@ needs a real cloud account). Where the two differ, trust ✅.
 
 | You are… | Read, in order |
 |---|---|
+| deciding about the project (not reading code) | [the overview](docs/overview.md) → [PRD-0001](docs/prd/0001-triage-assistant.md) → [ARD-0001](docs/ard/0001-triage-assistant.md) |
+| starting a new service from this template | [using this template](docs/handbook/using-this-template.md) → [code style](docs/handbook/code-style.md) → [tech stack](docs/handbook/tech-stack.md) → the rules below |
 | a new developer | Day one (below) → [dev environment](docs/handbook/dev-environment.md) → [daily work](docs/handbook/daily-work.md) → [testing](docs/handbook/testing.md) → the gotchas below |
 | reviewing a PR | the rules and the gotchas below; [testing](docs/handbook/testing.md) (what each endpoint needs) |
 | on call | [alert runbook](docs/runbooks/alerts.md) → [debugging](docs/handbook/debugging.md) → [failure modes](docs/handbook/failure-modes.md) |
 | preparing a demo or a server | [the VM runbook](docs/runbooks/demo-vm.md) (includes the request to send IT) |
-| on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
+| on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [infrastructure Q&A](docs/handbook/infrastructure-qa.md) (reproducibility, scale) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
+| taking it to production | [going to production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) |
 | changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
 | deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
 
@@ -71,13 +74,13 @@ The same images run everywhere. Only configuration changes: `.env` on a
 host, a secret store on a platform.
 
 ```
-apps/api/        FastAPI service (Python 3.13, uv): app/, tests/{unit,integration}, migrations/
+apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals), tests/{unit,integration}, migrations/
 apps/web/        React + Vite UI (Node 24); nginx config for production
 tools/           mock-llm (a provider stand-in with failure modes), py-spy and load-tool images
 tests/           e2e (Playwright through production nginx), load (k6, Locust, vegeta, JMeter, Artillery)
 infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
 scripts/         deploy, backup, restore, failure drills, fresh-host test, SQL helpers, debug scripts
-docs/            handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ rfc/ design-docs/ (templates)
+docs/            overview.md, handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ ard/ rfc/ rfq/ design-docs/ (templates + this project's own)
 compose*.yaml    base / dev (auto-merged) / prod shape / test / debug overlays
 Makefile         every command; `make` lists them
 ```
@@ -177,6 +180,9 @@ Each rule exists because breaking it cost something measurable here.
 
 | Chapter | Read it when |
 |---|---|
+| [Using this template](docs/handbook/using-this-template.md) | starting a new service from this repo: rename, settings, package visibility, replacing the domain |
+| [Code style](docs/handbook/code-style.md) | writing code here: functions or classes, errors, async, tests, rules for AI engineering teams and AI coding agents |
+| [Tech stack](docs/handbook/tech-stack.md) | every technology: why it, what else, its version, its trap (Playwright's three packages included) |
 | [Development environment](docs/handbook/dev-environment.md) | setting up a machine: Linux, macOS, Windows, Apple Silicon, corporate proxies |
 | [Daily work](docs/handbook/daily-work.md) | adding a dependency, an endpoint, a setting, a migration, a metric; the Git workflow; **every setting, in one table** |
 | [Testing](docs/handbook/testing.md) | writing tests; what each layer proves; which layer caught which real bug |
@@ -190,6 +196,8 @@ Each rule exists because breaking it cost something measurable here.
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
+| [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
+| [Infrastructure Q&A](docs/handbook/infrastructure-qa.md) | an infrastructure team's questions: reproducibility, scale, limits, backups, Kubernetes |
 | Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md) | an alert fired; setting up or operating a server |
 
 ## Gotchas: the complete list
@@ -768,9 +776,12 @@ oversight:
 | Question | Document |
 |---|---|
 | What is this, how do I run it? | `README.md` |
+| What is it, in one page, for a decision-maker? | `docs/overview.md` |
 | How do I contribute? | `CONTRIBUTING.md` |
 | How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others) |
 | How is it built and run, and why, in depth? | this file and `docs/handbook/` |
 | Why was X decided? | `docs/adr/` |
 | What do I do when Y happens? | `docs/runbooks/` |
 | What are we building next, and should we? | `docs/prd/`, `docs/rfc/`, `docs/design-docs/` (templates in each) |
+| Is the architecture fit to go live? | `docs/ard/` (the architecture review) |
+| What do we ask vendors to quote? | `docs/rfq/` |
