@@ -17,7 +17,7 @@ T0=$SECONDS
 docker rm -f -v "$NAME" >/dev/null 2>&1 || true
 # /var/lib/docker as a volume: the inner Docker's overlay2 cannot sit on the
 # outer one's.
-docker run -d --privileged --name "$NAME" -v /var/lib/docker docker:28-dind >/dev/null
+docker run -d -q --privileged --name "$NAME" -v /var/lib/docker docker:28-dind >/dev/null
 trap 'docker rm -f -v "$NAME" >/dev/null' EXIT
 until docker exec "$NAME" docker info >/dev/null 2>&1; do sleep 1; done
 docker exec "$NAME" apk add --no-cache -q bash make curl

@@ -1,0 +1,106 @@
+#cloud-config
+# First-boot setup for a single demo/staging VM (Ubuntu 24.04 LTS). Paste as
+# "user data" when creating the VM (AWS, Azure, GCP, Hetzner, OpenStack and
+# most private clouds accept it), or run the same steps by hand:
+# docs/runbooks/demo-vm.md walks through both, and what to do next.
+#
+# Replace the SSH key below before use. Everything else is generic.
+#
+# What it sets up:
+# - Docker Engine + compose plugin from Docker's apt repository (Ubuntu's
+#   own docker.io package lags behind and ships no compose v2 plugin)
+# - a `deploy` user that runs the stack. Membership of the docker group is
+#   root-equivalent: treat that SSH key like root's.
+# - firewall: only 22, 80, 443 in. Docker's published ports bypass ufw
+#   (DNAT happens before ufw's rules): compose.prod.yaml publishes only
+#   nginx, and the dashboards on 127.0.0.1.
+# - Docker daemon defaults: log rotation for any container, live-restore
+#   (containers keep running while dockerd itself restarts or upgrades)
+# - automatic security updates
+# - container lifecycle events (start, die, oom, health) kept in journald:
+#   `docker events` itself only remembers the last 256 events
+# - the repository in /srv/triage-assistant with a generated .env
+
+users:
+  - default
+  - name: deploy
+    groups: [docker]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA...REPLACE-WITH-YOUR-PUBLIC-KEY you@example.com
+
+ssh_pwauth: false
+disable_root: true
+
+package_update: true
+package_upgrade: true
+
+apt:
+  sources:
+    docker.list:
+      source: "deb [arch=amd64] https://download.docker.com/linux/ubuntu $RELEASE stable"
+      # Docker's release signing key (fingerprint 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88)
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  - make
+  - git
+  - curl
+  - jq
+  - ufw
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {"max-size": "10m", "max-file": "3"},
+        "live-restore": true
+      }
+  - path: /etc/systemd/system/docker-events.service
+    content: |
+      [Unit]
+      Description=Container lifecycle events into the journal (journalctl -u docker-events)
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      ExecStart=/usr/bin/docker events --format "{{json .}}" --filter type=container --filter event=start --filter event=die --filter event=oom --filter event=kill --filter event=health_status
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+runcmd:
+  - systemctl restart docker
+  - systemctl enable --now docker-events.service
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  - install -d -o deploy -g deploy /srv/triage-assistant
+  - sudo -u deploy git clone https://github.com/Parzon/triage-assistant.git /srv/triage-assistant
+  # Real secrets instead of the template's placeholders; the LLM key stays
+  # for the operator to set (or keep COMPOSE_PROFILES=mock for a demo
+  # without a provider).
+  - >-
+    sudo -u deploy sh -c 'cd /srv/triage-assistant && cp .env.example .env && chmod 600 .env &&
+    for v in POSTGRES_PASSWORD APP_DB_PASSWORD MONITOR_DB_PASSWORD GRAFANA_ADMIN_PASSWORD ALERTMANAGER_WEBHOOK_TOKEN;
+    do sed -i "s|^$v=.*|$v=$(openssl rand -hex 24)|" .env; done'
+
+final_message: "triage-assistant host ready after $UPTIME s. Next: docs/runbooks/demo-vm.md, step 3."

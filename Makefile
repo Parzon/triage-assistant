@@ -16,7 +16,7 @@ AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check dashboard lint fmt typecheck test test-api test-web test-fast e2e check \
+        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
         deps-api deps-web prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
@@ -42,11 +42,11 @@ down: ## Stop the dev stack (volumes, i.e. the database, are kept)
 nuke: ## Stop the dev stack AND delete its volumes (wipes the local database)
 	$(DEV) down --volumes --remove-orphans
 
-ps: ## Container status and health
-	$(DEV) ps
+ps: ## Container status and health [ENV=prod]
+	$(STACK) ps
 
-logs: ## Follow logs: all services, or S=api
-	$(DEV) logs -f --tail=100 $(S)
+logs: ## Follow logs: all services, or S=api [ENV=prod]
+	$(STACK) logs -f --tail=100 $(S)
 
 sh: ## Shell in a running container: make sh S=web (default api)
 	$(DEV) exec $(or $(S),api) sh
@@ -107,10 +107,13 @@ mock: ## Mock LLM: show config+stats; change: c='{"fail_mode":"http_429"}' / c='
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: ## ruff (lint + format check) for the api, oxlint for the web
+lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
 	$(DEV) run --rm --no-deps web npm run lint
+
+shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
+	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .

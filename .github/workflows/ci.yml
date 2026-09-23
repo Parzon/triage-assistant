@@ -39,6 +39,9 @@ jobs:
       - name: Observability config (Prometheus config, alert rule unit tests, Alertmanager config)
         working-directory: .
         run: make obs-check
+      - name: Shell scripts (deploy, restore, drills)
+        working-directory: .
+        run: make shellcheck
 
   test-api:
     runs-on: ubuntu-24.04

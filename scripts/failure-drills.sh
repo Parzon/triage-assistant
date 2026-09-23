@@ -21,7 +21,7 @@
 #                      caught mid-flight got, and whether any database
 #                      connection is still held once it is over (a leak)
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
 PROJECT=triage-assistant-prod
