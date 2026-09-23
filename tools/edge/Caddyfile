@@ -1,0 +1,53 @@
+# The TLS edge. Settings come from the environment (compose.prod.yaml):
+#   SITE_ADDRESS  a domain whose DNS points at this host: Caddy obtains a
+#                 Let's Encrypt certificate and renews it on its own (ports
+#                 80 and 443 must be reachable from the internet).
+#                 "localhost" (the default): a certificate from Caddy's own
+#                 local CA, for testing - browsers warn until you trust it.
+#   HSTS_MAX_AGE  how long browsers must use HTTPS only, in seconds. 0 (the
+#                 default) for localhost - HSTS on "localhost" would force
+#                 HTTPS on every other local port too, the Vite dev server
+#                 included. 31536000 once a real domain works over HTTPS.
+#   ACME_CA       the ACME directory certificates come from. Default: Let's
+#                 Encrypt. Its staging directory
+#                 (https://acme-staging-v02.api.letsencrypt.org/directory)
+#                 is for a first setup that must not hit rate limits;
+#                 `make acme-test` points it at Pebble, a local test CA.
+{
+	# The local CA stays inside the container; nothing is installed into
+	# a trust store (it could not be, as a non-root user).
+	skip_install_trust
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+}
+
+{$SITE_ADDRESS:localhost} {
+	# Everything goes to nginx: the React build, /api, the SSE stream.
+	reverse_proxy web:8080 {
+		# Pass every chunk on the moment it arrives: answers stream as SSE.
+		flush_interval -1
+		# While nginx is being replaced (make deploy), hold a request for up
+		# to 5s and retry, instead of failing it. Only requests that could
+		# not reach nginx at all are retried, so nothing is sent twice.
+		lb_try_duration 5s
+		lb_try_interval 250ms
+	}
+	header {
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:0}; includeSubDomains"
+		-Server
+	}
+	# When nginx itself cannot answer (down longer than lb_try_duration),
+	# the edge answers - in the api's error format for /api, like nginx does
+	# when the api is down, so clients parse one shape.
+	handle_errors 502 503 504 {
+		@api path /api/*
+		handle @api {
+			header Content-Type application/json
+			respond `{"error":{"code":"upstream_unavailable","message":"the service is unavailable, retry shortly","request_id":"{http.request.uuid}"}}` {err.status_code}
+		}
+		respond "The service is unavailable, retry shortly." {err.status_code}
+	}
+	log {
+		output stdout
+		format json
+	}
+}

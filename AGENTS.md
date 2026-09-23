@@ -26,11 +26,13 @@ Run `make` to list every target. The ones you need most:
 - Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
 - After any dependency change: `make rebuild` — NOT `docker compose up
   --build`, which keeps the old `.venv`/`node_modules` anonymous volume
-- Production-shaped stack locally: `make prod-up` (nginx on `HTTP_PORT`)
+- Production-shaped stack locally: `make prod-up` (HTTPS through the TLS
+  edge on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`). `make
+  acme-test` rehearses automatic certificates against Pebble.
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
-- Browser tests: `make prod-up && make e2e` (Playwright through nginx)
+- Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge)
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
   `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
@@ -47,7 +49,7 @@ Run `make` to list every target. The ones you need most:
   `make trace id=<request id>` (one request across nginx and the api),
   `make db-activity` / `db-locks` / `db-top-queries`, `make netshoot`,
   `make tcpdump`, `make strace` (add `ENV=prod` for the production stack).
-- Releases and hosts: a `vX.Y.Z` tag on main publishes both images to GHCR
+- Releases and hosts: a `vX.Y.Z` tag on main publishes the api, web and edge images (amd64 + arm64) to GHCR
   (`.github/workflows/release.yml`); a host runs `make deploy tag=X.Y.Z`
   (rolling: the new api is healthy before the old one drains). `make
   backup` / `make restore file=...` (add `ENV=prod`); `make fresh-host-test`

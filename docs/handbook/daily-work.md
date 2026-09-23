@@ -17,7 +17,7 @@ Makefile to see the real `docker compose` command.
 | lint, format, types | `make lint`, `make fmt`, `make typecheck` |
 | all tests as CI runs them | `make test`; unit only: `make test-fast` |
 | everything CI checks, before a push | `make check` |
-| the production-shaped stack | `make prod-up` (nginx on `HTTP_PORT`) |
+| the production-shaped stack | `make prod-up` (HTTPS on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`) |
 | start from an empty database | `make nuke && make up` (deletes the dev volume) |
 | sample data | `make seed n=10000` |
 
@@ -264,6 +264,10 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `COMPOSE_PROFILES` | `mock` runs the mock LLM; add `observability` for the monitoring stack |
 | `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT` | monitoring (bound to 127.0.0.1) |
 | `BIND_ADDR`, `API_PORT`, `WEB_PORT` | dev ports (127.0.0.1 by default) |
-| `HTTP_BIND`, `HTTP_PORT` | where the production nginx listens |
+| `HTTP_BIND`, `HTTP_PORT` | nginx over plain HTTP: loopback `8088` behind the TLS edge; `0.0.0.0`/`80` behind a cloud load balancer (edge profile off) |
+| `SITE_ADDRESS` | the TLS edge's name: a domain gets a Let's Encrypt certificate automatically; `localhost` uses Caddy's local CA |
+| `EDGE_BIND`, `EDGE_HTTP_PORT`, `EDGE_HTTPS_PORT` | where the edge publishes HTTP (redirect) and HTTPS; 80/443 on a VM |
+| `HSTS_MAX_AGE` | seconds browsers must use HTTPS only: 0 for localhost, 31536000 for a real domain |
+| `ACME_CA` | the ACME directory (default Let's Encrypt; its staging directory for a first setup; Pebble in `make acme-test`) |
 | `API_CPUS` | the api's CPU limit (and so its worker count) |
 | `IMAGE_PREFIX`, `IMAGE_TAG` | which images the production stack runs; `make deploy` records `IMAGE_TAG` |

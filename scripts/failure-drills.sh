@@ -23,7 +23,6 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
 PROJECT=triage-assistant-prod
 COMPOSE="docker compose -p $PROJECT -f compose.yaml -f compose.prod.yaml"
 NETSHOOT=nicolaka/netshoot:v0.14
@@ -35,6 +34,27 @@ api() {
     --filter "label=com.docker.compose.service=api" | head -1
 }
 API=$(api)
+
+# Probe what users reach: HTTPS through the TLS edge when it runs (with its
+# local CA for SITE_ADDRESS=localhost, the system's trust store for a real
+# domain), nginx on loopback otherwise.
+envval() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+SITE=${SITE_ADDRESS:-$(envval SITE_ADDRESS)}
+CA=$(mktemp)
+trap 'rm -f "$CA"' EXIT
+TLS_OPTS=()
+if [ -n "$(docker ps -q -f name="^$PROJECT-edge-1$")" ]; then
+  if [ "${SITE:-localhost}" = localhost ]; then
+    $COMPOSE cp edge:/data/caddy/pki/authorities/local/root.crt "$CA" >/dev/null 2>&1
+    TLS_OPTS=(--cacert "$CA")
+    BASE=${BASE:-https://localhost:${EDGE_HTTPS_PORT:-$(envval EDGE_HTTPS_PORT)}}
+  else
+    BASE=${BASE:-https://$SITE}
+  fi
+else
+  BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
+fi
+web() { curl "${TLS_OPTS[@]}" "$@"; }
 
 healthy() {  # wait until every core container is healthy: each drill starts from a sound stack
   local c s start=$SECONDS
@@ -59,11 +79,11 @@ last_event() {  # the last SSE event of a saved stream; error events with their 
 
 probe() {
   local health ready rd code t body
-  health=$(curl -s -o /dev/null -w '%{http_code}/%{time_total}s' --max-time 10 "$BASE/api/health")
-  ready=$(curl -s -w ' %{http_code}' --max-time 10 "$BASE/api/ready" | sed -E 's/.*"database": ?"([a-z_]+)", ?"redis": ?"([a-z_]+)".* ([0-9]+)$/\3 db=\1 redis=\2/')
-  rd=$(curl -s -o /dev/null -w '%{http_code}/%{time_total}s' --max-time 20 "$BASE/api/alerts?limit=5")
+  health=$(web -s -o /dev/null -w '%{http_code}/%{time_total}s' --max-time 10 "$BASE/api/health")
+  ready=$(web -s -w ' %{http_code}' --max-time 10 "$BASE/api/ready" | sed -E 's/.*"database": ?"([a-z_]+)", ?"redis": ?"([a-z_]+)".* ([0-9]+)$/\3 db=\1 redis=\2/')
+  rd=$(web -s -o /dev/null -w '%{http_code}/%{time_total}s' --max-time 20 "$BASE/api/alerts?limit=5")
   body=$(mktemp)
-  read -r code t < <(curl -sN -o "$body" -w '%{http_code} %{time_total}' --max-time 150 -X POST "$BASE/api/chat/stream" \
+  read -r code t < <(web -sN -o "$body" -w '%{http_code} %{time_total}' --max-time 150 -X POST "$BASE/api/chat/stream" \
     -H 'content-type: application/json' -d '{"message":"drill"}')
   printf 'health %s · ready %s · read %s · chat %s %s/%ss' "$health" "$ready" "$rd" "$code" "$(last_event "$body")" "$t"
   rm -f "$body"
@@ -71,7 +91,7 @@ probe() {
 
 recovered() {  # seconds until /api/ready answers 200 again
   local start=$SECONDS
-  until [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$BASE/api/ready")" = "200" ]; do
+  until [ "$(web -s -o /dev/null -w '%{http_code}' --max-time 3 "$BASE/api/ready")" = "200" ]; do
     sleep 0.5; [ $((SECONDS - start)) -gt 180 ] && { echo ">180s"; return; }
   done
   echo "$((SECONDS - start))s"
@@ -95,13 +115,13 @@ inflight() {  # inflight <name> <inject> [restore]
   echo ">> $(date -u +%T) $name" >&2
   mock config '{"tokens_per_s": 5}'   # ~50-token replies: streams of ~10s
   for i in $(seq 1 "${STREAMS:-6}"); do
-    ( curl -sN --max-time 150 -o "$dir/s$i" -w '%{http_code}' -X POST "$BASE/api/chat/stream" \
+    ( web -sN --max-time 150 -o "$dir/s$i" -w '%{http_code}' -X POST "$BASE/api/chat/stream" \
         -H 'content-type: application/json' -d '{"message":"drill"}' > "$dir/s$i.code"
       echo $? > "$dir/s$i.rc" ) &
   done
   ( end=$((SECONDS + ${WINDOW:-30}))
     while [ $SECONDS -lt $end ]; do
-      printf '%s %s\n' "$(date +%s.%N)" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$BASE/api/health")"
+      printf '%s %s\n' "$(date +%s.%N)" "$(web -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 8 "$BASE/api/health")"
       sleep 0.25
     done > "$dir/probe" ) &
   sleep 3
@@ -116,11 +136,13 @@ inflight() {  # inflight <name> <inject> [restore]
     elif [ "$ev" = "done" ] || [ "${ev%%:*}" = "error" ]; then echo "$ev"
     else echo "cut(curl$rc)"; fi
   done | sort | uniq -c | awk '{printf "%s%s×%s", (NR>1?", ":""), $1, $2}')
-  local outage; outage=$(awk '$2!="200"{if(!f)f=$1; l=$1; n++; c[$2]++} END{
+  local outage slowest
+  outage=$(awk '$2!="200"{if(!f)f=$1; l=$1; n++; c[$2]++} END{
       if(!n){print "none"; exit}
       s=""; for(k in c) s=s (s?", ":"") c[k] "×" (k=="000"?"refused/timeout":k)
       printf "%.1fs (%d of %d probes: %s)", l-f+0.25, n, NR, s}' "$dir/probe")
-  printf '| %s | streams in flight: %s · new requests failing for: %s | %s |\n' "$name" "$streams" "$outage" "$rec"
+  slowest=$(awk '$2=="200" && $3>m {m=$3} END {printf "%.2fs", m}' "$dir/probe")
+  printf '| %s | streams in flight: %s · new requests failing for: %s · slowest success %s | %s |\n' "$name" "$streams" "$outage" "$slowest" "$rec"
   rm -rf "$dir"
 }
 
@@ -176,7 +198,7 @@ DEPLOY="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' 
 # starts next to the old one, which then drains. Tags the running images as
 # a "release", so nothing is pulled.
 ROLLOUT="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \$API | grep -E '^(ALERTS|CHAT)_RATE_LIMIT='); \
-  for s in api web; do docker tag \$(docker inspect -f '{{.Config.Image}}' \$(docker ps -q --filter label=com.docker.compose.project=$PROJECT --filter label=com.docker.compose.service=\$s | head -1)) triage-assistant-\$s:drill-\$\$; done; \
+  for s in api web edge; do docker tag \$(docker inspect -f '{{.Config.Image}}' \$(docker ps -q --filter label=com.docker.compose.project=$PROJECT --filter label=com.docker.compose.service=\$s | head -1)) triage-assistant-\$s:drill-\$\$; done; \
   PULL=0 RECORD_TAG=0 scripts/deploy.sh drill-\$\$"
 
 run_drill() {
@@ -198,6 +220,7 @@ run_drill() {
     network-cut)     drill network-cut "docker network disconnect ${PROJECT}_default $API" \
                        "docker network connect --alias api ${PROJECT}_default $API" ;;
     nginx-stop)      drill nginx-stop "docker stop $(C web)" "docker start $(C web)" ;;
+    edge-stop)       drill edge-stop "docker stop $(C edge)" "docker start $(C edge)" ;;
     worker-kill)     inflight worker-kill "$KILL_WORKER" ;;
     api-crash)       inflight api-crash "$CRASH" ;;
     deploy)          WINDOW=40 inflight deploy "$DEPLOY" ;;
@@ -207,11 +230,32 @@ run_drill() {
   esac
 }
 
-ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop worker-kill api-crash deploy rollout oom"
+ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop edge-stop worker-kill api-crash deploy rollout oom"
 echo "| drill | what a user sees while the fault is active | ready again after restore |"
 echo "|---|---|---|"
 for d in ${1:-$ALL}; do
   if ! why=$(healthy); then printf '| %s | NOT RUN: stack unhealthy (%s) | |\n' "$d" "$why"; continue; fi
   API=$(api)
+
+# Probe what users reach: HTTPS through the TLS edge when it runs (with its
+# local CA for SITE_ADDRESS=localhost, the system's trust store for a real
+# domain), nginx on loopback otherwise.
+envval() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+SITE=${SITE_ADDRESS:-$(envval SITE_ADDRESS)}
+CA=$(mktemp)
+trap 'rm -f "$CA"' EXIT
+TLS_OPTS=()
+if [ -n "$(docker ps -q -f name="^$PROJECT-edge-1$")" ]; then
+  if [ "${SITE:-localhost}" = localhost ]; then
+    $COMPOSE cp edge:/data/caddy/pki/authorities/local/root.crt "$CA" >/dev/null 2>&1
+    TLS_OPTS=(--cacert "$CA")
+    BASE=${BASE:-https://localhost:${EDGE_HTTPS_PORT:-$(envval EDGE_HTTPS_PORT)}}
+  else
+    BASE=${BASE:-https://$SITE}
+  fi
+else
+  BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
+fi
+web() { curl "${TLS_OPTS[@]}" "$@"; }
   run_drill "$d"
 done

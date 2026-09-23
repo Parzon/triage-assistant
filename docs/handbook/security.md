@@ -76,6 +76,12 @@ query.
 
 ## HTTP ✅
 
+- **HTTPS everywhere** (ADR-0012):
+  - the TLS edge terminates TLS 1.3 with automatic certificates, and
+    redirects plain HTTP;
+  - HSTS is set for real domains;
+  - the edge overwrites any client-sent `X-Forwarded-For`;
+  - nginx and the api are not reachable from outside.
 - **Security headers** on every page (`snippets/security-headers.conf`):
   - a Content Security Policy (`default-src 'self'`, no inline scripts,
     `frame-ancestors 'none'`); the e2e suite fails on any CSP violation;
@@ -151,7 +157,7 @@ query.
 
 ## Before real users 📘
 
-- [ ] HTTPS in front (runbook, section 5), and HSTS once it's permanent
+- [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and `HSTS_MAX_AGE=31536000` once HTTPS works
 - [ ] `DOCS_ENABLED=false` if the API should not be advertised
 - [ ] Authentication: there is none. Anyone who can reach the site can
       read alerts and ask questions. Put it behind SSO (an identity-aware

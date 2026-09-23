@@ -31,14 +31,18 @@ step "checkout of $(git rev-parse --short HEAD) + .env.example"
 inside 'make prod-up >/tmp/prod-up.log 2>&1' || { inside 'tail -40 /tmp/prod-up.log'; exit 1; }
 step "make prod-up done"
 
-inside 'for i in $(seq 90); do [ "$(curl -s -o /dev/null -w "%{http_code}" localhost/api/ready)" = 200 ] && exit 0; sleep 2; done; exit 1'
-step "ready: $(inside 'curl -s localhost/api/ready')"
-inside 'curl -sf localhost/healthz >/dev/null && curl -sf localhost/ | grep -q "<div id=\"root\">"'
-step "nginx serves the app"
-created=$(inside "curl -sf -X POST localhost/api/alerts -H 'content-type: application/json' -d '{\"source\":\"fresh-host\",\"severity\":\"high\",\"message\":\"it works\"}'")
-inside 'curl -sf "localhost/api/alerts?limit=5"' | grep -q '"fresh-host"'
-step "write + read through nginx: $created"
-inside "curl -sfN -X POST localhost/api/chat/stream -H 'content-type: application/json' -d '{\"message\":\"hello\"}'" | grep -q '^event: done'
+# The edge's certificate comes from its local CA (SITE_ADDRESS=localhost):
+# -k here; smoke-release.sh shows verifying it against that CA.
+inside 'for i in $(seq 90); do [ "$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/api/ready)" = 200 ] && exit 0; sleep 2; done; exit 1'
+step "ready over HTTPS: $(inside 'curl -sk https://localhost/api/ready')"
+[ "$(inside 'curl -s -o /dev/null -w "%{http_code}" http://localhost/')" = 308 ]
+step "plain HTTP is redirected to HTTPS"
+inside 'curl -sfk https://localhost/ | grep -q "<div id=\"root\">"'
+step "the edge and nginx serve the app"
+created=$(inside "curl -sfk -X POST https://localhost/api/alerts -H 'content-type: application/json' -d '{\"source\":\"fresh-host\",\"severity\":\"high\",\"message\":\"it works\"}'")
+inside 'curl -sfk "https://localhost/api/alerts?limit=5"' | grep -q '"fresh-host"'
+step "write + read: $created"
+inside "curl -sfkN -X POST https://localhost/api/chat/stream -H 'content-type: application/json' -d '{\"message\":\"hello\"}'" | grep -q '^event: done'
 step "chat streams to the end"
 
 if [ -n "${DUMP:-}" ]; then
