@@ -77,6 +77,8 @@ Grafana.
 | one gunicorn worker killed | streams on that worker cut (3 of 6); other requests unaffected; a new worker starts | nothing (by design: normal) | 0 s |
 | api crashes (PID 1 SIGKILL) | every in-flight stream cut; 502 for ~0.5 s; the restart policy brings it back | `ApiDown` only if it stays down 1 min | 0 s |
 | deploy (`up --force-recreate api`) | in-flight streams **finish** (graceful drain); **new requests get 502 for 6.7 s** | — | 0 s |
+| rolling deploy (`make deploy`) | in-flight streams finish; **no failed or slow request during the api swap**; ~0.3 s of refused connections while nginx itself is replaced | — | 0 s |
+| a broken release (`make deploy` of an image that never gets healthy) | nothing: the new api is removed after 90 s, and the old one never stopped (1,018 of 1,018 requests OK) | the deploy fails loudly (exit 1) | — |
 | memory limit below the working set | workers and then PID 1 OOM-killed in a loop (one run: 8 container restarts in 30 s); all streams cut; site down until the limit is fixed | `ContainerOOMKilled` (verified firing) | 3 s |
 
 ## What the drills found, and changed
@@ -185,7 +187,19 @@ In-flight streams survived, but new requests got 502 for 6.7 s, which is
 the length of the longest in-flight stream plus boot time. With a
 2-minute answer in flight, that's 2 minutes of 502s. The only way to have
 neither cut streams nor refused requests is two instances with traffic
-moved between them; see the shipping chapter for the rolling deploy.
+moved between them.
+
+`make deploy` (`scripts/deploy.sh`, ADR-0011) does that on one host:
+1. Start the new api next to the old one.
+2. Wait until it is healthy, and for nginx to resolve it (`resolve`,
+   `valid=10s`).
+3. Stop the old one, which drains.
+
+Measured at 10 probes a second: zero failed or slow requests while the
+api was swapped. Replacing nginx at the end refused connections for
+~0.3 s, because one container owns the published port. After a rolling
+deploy the api container is `api-2`, `api-3`, and so on: tooling must
+look it up (`docker compose ps -q api`), never assume `api-1`.
 
 ### Bind mounts pin the directory, not the path
 
@@ -306,8 +320,8 @@ risk remains.
 | SPOF | Effect | What removes it |
 |---|---|---|
 | the VM | everything | a second VM or a managed platform (ECS/Kubernetes) across availability zones |
-| nginx | site down | a cloud load balancer in front of ≥2 instances |
-| api container | deploys drop to 502 for the drain time | two replicas + rolling deploy (shipping chapter) |
+| nginx | site down; ~0.3 s of refused connections on every deploy | a cloud load balancer in front of ≥2 instances |
+| api container | a crash cuts in-flight requests (restarted in < 1 s); deploys no longer (`make deploy`) | a second replica on another host |
 | Postgres | writes and reads down | a managed database with a standby (RDS Multi-AZ) |
 | PgBouncer | database path down | a managed proxy (RDS Proxy) or one PgBouncer per api host |
 | Valkey | rate limiting off (fail-open) | acceptable; ElastiCache with a replica if limits become a security control |

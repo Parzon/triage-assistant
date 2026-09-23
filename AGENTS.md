@@ -47,6 +47,13 @@ Run `make` to list every target. The ones you need most:
   `make trace id=<request id>` (one request across nginx and the api),
   `make db-activity` / `db-locks` / `db-top-queries`, `make netshoot`,
   `make tcpdump`, `make strace` (add `ENV=prod` for the production stack).
+- Releases and hosts: a `vX.Y.Z` tag on main publishes both images to GHCR
+  (`.github/workflows/release.yml`); a host runs `make deploy tag=X.Y.Z`
+  (rolling: the new api is healthy before the old one drains). `make
+  backup` / `make restore file=...` (add `ENV=prod`); `make fresh-host-test`
+  proves the committed tree comes up on a clean Docker host. Runbook:
+  `docs/runbooks/demo-vm.md`. Never hardcode a container name: after a
+  rolling deploy the api is `api-2`, `api-3`... - use `docker compose ps -q api`.
 - Failure drills: `make drills` injects each fault into the production stack
   (rate limits raised, as for load tests) and records what users see;
   `make drills d="db-freeze deploy"` runs a selection. Run the database

@@ -64,6 +64,18 @@ services:
           memory: 256m
     memswap_limit: 256m
 
+  # Only with COMPOSE_PROFILES=mock (demos without a provider). Idle: ~50MiB.
+  mock-llm:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    memswap_limit: 256m
+
   pgbouncer:
     deploy:
       resources:

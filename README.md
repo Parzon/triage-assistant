@@ -20,6 +20,9 @@ open http://localhost:5173
 
 `make` lists every other command.
 
+On a server: `docs/runbooks/demo-vm.md` (what to ask IT for, bootstrap
+with `infra/vm/cloud-init.yaml`, deploy, backups, HTTPS).
+
 ## Structure
 
 ```

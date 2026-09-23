@@ -16,10 +16,10 @@ AS_ME := --user "$$(id -u):$$(id -g)" -e HOME=/tmp
 S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check dashboard lint fmt typecheck test test-api test-web test-fast e2e check \
+        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
-        deps-api deps-web prod-build prod-up prod-down prod-ps prod-logs fix-perms
+        backup restore fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        deps-api deps-web prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -42,11 +42,11 @@ down: ## Stop the dev stack (volumes, i.e. the database, are kept)
 nuke: ## Stop the dev stack AND delete its volumes (wipes the local database)
 	$(DEV) down --volumes --remove-orphans
 
-ps: ## Container status and health
-	$(DEV) ps
+ps: ## Container status and health [ENV=prod]
+	$(STACK) ps
 
-logs: ## Follow logs: all services, or S=api
-	$(DEV) logs -f --tail=100 $(S)
+logs: ## Follow logs: all services, or S=api [ENV=prod]
+	$(STACK) logs -f --tail=100 $(S)
 
 sh: ## Shell in a running container: make sh S=web (default api)
 	$(DEV) exec $(or $(S),api) sh
@@ -107,10 +107,13 @@ mock: ## Mock LLM: show config+stats; change: c='{"fail_mode":"http_429"}' / c='
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: ## ruff (lint + format check) for the api, oxlint for the web
+lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
 	$(DEV) run --rm --no-deps web npm run lint
+
+shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
+	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
@@ -164,7 +167,10 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 # --- Debugging toolkit ------------------------------------------------------------
 # ENV=prod points a target at the production-shaped stack instead of dev.
 STACK = $(if $(filter prod,$(ENV)),$(PROD),$(DEV))
-API_C = $(if $(filter prod,$(ENV)),triage-assistant-prod-api-1,triage-assistant-api-1)
+# The running api container, looked up through compose: after a rolling
+# deploy (make deploy) it is api-2, not api-1 - never hardcode the name.
+API_C = $(shell $(STACK) ps -q api | head -1)
+PROD_API = $(shell $(PROD) ps -q api | head -1)
 NETSHOOT := nicolaka/netshoot:v0.14
 
 # `-f` disables the automatic compose.override.yaml merge: list it explicitly.
@@ -195,7 +201,7 @@ trace: ## Every log line of one request across nginx and the api: make trace id=
 	@$(STACK) logs --no-log-prefix --no-color web api 2>/dev/null | grep -F '$(id)' | jq -Rc 'fromjson? // .'
 
 gunicorn: ## gunicorn control socket (prod image): make gunicorn c="show workers" | "show stats" | "worker add 1"
-	docker exec triage-assistant-prod-api-1 gunicornc -s /tmp/gunicorn.ctl -c "$(or $(c),show workers)"
+	docker exec $(PROD_API) gunicornc -s /tmp/gunicorn.ctl -c "$(or $(c),show workers)"
 
 db-activity: ## Postgres: every connection and what it is doing now [ENV=prod]
 	$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/activity.sql
@@ -208,6 +214,16 @@ db-top-queries: ## Postgres: most expensive queries (pg_stat_statements) [ENV=pr
 
 redis-slowlog: ## Valkey: slowest recent commands and latency [ENV=prod]
 	$(STACK) exec -T redis sh -c 'valkey-cli SLOWLOG GET 10; valkey-cli INFO commandstats | head -12'
+
+backup: ## Dump the database to backups/ (keeps the newest 14) [ENV=prod]
+	@STACK="$(STACK)" NAME=$(or $(ENV),dev) scripts/backup.sh
+
+restore: ## Replace the database with a dump: make restore file=backups/<dump> [ENV=prod]
+	@test -n "$(file)" || { echo 'usage: make restore file=backups/<dump>'; exit 2; }
+	@STACK="$(STACK)" scripts/restore.sh "$(file)"
+
+fresh-host-test: ## The committed tree on a clean Docker host (DinD): prod-up + every user path [DUMP=backups/x.dump]
+	@scripts/fresh-host-test.sh
 
 drills: ## Failure drills on the prod stack, one fault at a time: make drills [d="redis-hang db-stop"]
 	@scripts/failure-drills.sh "$(d)"
@@ -252,7 +268,7 @@ load-tool: ## Run one tool's reference script: make load-tool TOOL=locust CLASS=
 
 # py-spy joins the api container's PID namespace with CAP_SYS_PTRACE; the
 # api itself keeps cap_drop ALL. C= picks the container (dev: C=triage-assistant-api-1).
-C ?= triage-assistant-prod-api-1
+C ?= $(PROD_API)
 PYSPY = docker run --rm --pid=container:$(C) --cap-add SYS_PTRACE
 .py-spy-image:
 	@docker build -q -t triage-assistant-py-spy tools/py-spy >/dev/null
@@ -294,6 +310,10 @@ prod-build: ## Build the production images
 
 prod-up: ## Build and start the production stack (nginx on HTTP_PORT)
 	$(PROD) up -d --build
+
+deploy: ## Roll a release onto this host without refusing requests: make deploy tag=1.4.0 (PULL=0: local images)
+	@test -n "$(tag)" || { echo 'usage: make deploy tag=<image tag>'; exit 2; }
+	scripts/deploy.sh "$(tag)"
 
 prod-down: ## Stop the production stack (volumes kept)
 	$(PROD) down

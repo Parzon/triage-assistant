@@ -1,0 +1,99 @@
+name: Release
+
+# A version tag on main publishes both production images to GitHub's
+# container registry:
+#   git tag -a v1.4.0 -m "v1.4.0" && git push origin v1.4.0
+#   -> ghcr.io/<owner>/triage-assistant-api:1.4.0, :1.4, :sha-<commit>
+#      ghcr.io/<owner>/triage-assistant-web:  the same tags
+# A host then runs it with `make deploy tag=1.4.0` (docs/runbooks/demo-vm.md).
+#
+# Pull requests that touch the release path run the same build without
+# logging in or pushing, so a broken release is found before the tag.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - apps/*/Dockerfile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # Tags can be pushed from any commit; only code that went through a
+      # reviewed, green PR into main gets released.
+      - name: The tag points at a commit on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Production api image - non-root, no dev tools, every module imports
+        run: make image-check
+
+  images:
+    needs: verify
+    # Runs for a PR too (verify is skipped there; build without pushing).
+    if: always() && (needs.verify.result == 'success' || github.event_name == 'pull_request')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [api, web]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Registry paths must be lowercase; GitHub owner names need not be.
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-${{ matrix.image }}" >> "$GITHUB_ENV"
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: apps/${{ matrix.image }}
+          target: production
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # What went into the image, stored next to it in the registry:
+          # the build's provenance and a software bill of materials.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+  notes:
+    needs: images
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: GitHub release with notes generated from the merged PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag

@@ -11,7 +11,7 @@ set -euo pipefail
 RATE=${RATE:-200}
 DURATION=${DURATION:-30}
 NET=triage-assistant-prod_default
-URL=http://web:8080/api/alerts?limit=50
+URL="http://web:8080/api/alerts?limit=50"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$(mktemp -d)
 chmod 777 "$OUT"
