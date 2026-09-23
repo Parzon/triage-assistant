@@ -28,8 +28,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 # PYTHONPYCACHEPREFIX keeps .pyc files out of the bind-mounted source tree
 # (otherwise they land on the host owned by root).
+# PYTHONFAULTHANDLER: a crash inside a C extension prints the Python
+# traceback of every thread instead of dying silently with exit 139.
 ENV PATH="/api/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
     PYTHONPYCACHEPREFIX=/tmp/pycache
 COPY . .
 EXPOSE 8010
@@ -50,9 +53,14 @@ COPY app/ ./app/
 # PROMETHEUS_MULTIPROC_DIR: one metrics file per worker, summed on scrape
 # (app/metrics.py). Must be set before start, never set to "" (the client
 # checks only that the variable exists). /tmp is a tmpfs in compose.prod.yaml.
+# PYTHONBREAKPOINT=0: a breakpoint() left in the code is a no-op here. With
+# the default (pdb) it would stop a worker waiting for keyboard input that
+# never comes - the worker hangs until gunicorn kills it.
 ENV PATH="/api/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONFAULTHANDLER=1 \
+    PYTHONBREAKPOINT=0 \
     PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
 USER 10001:10001
 EXPOSE 8010

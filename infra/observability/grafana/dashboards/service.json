@@ -1005,7 +1005,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 44
       },
@@ -1053,6 +1053,82 @@
     {
       "id": 20,
       "type": "timeseries",
+      "title": "App database pools",
+      "description": "The api's own pools, in front of PgBouncer. In use near max = requests about to wait (pool_timeout) and fail with 503. In use above 0 with no traffic = leaked connections (ADR-0010).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 44
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(db_pool_connections_in_use)",
+          "legendFormat": "in use",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(db_pool_connections_max)",
+          "legendFormat": "max",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(http_requests_in_progress)",
+          "legendFormat": "requests in progress",
+          "refId": "C",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
       "title": "PgBouncer pool",
       "description": "Clients waiting > 0 for long = the pool is too small for the load, or queries are too slow.",
       "datasource": {
@@ -1061,8 +1137,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 12,
         "y": 44
       },
       "targets": [
@@ -1137,7 +1213,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 22,
       "type": "timeseries",
       "title": "Postgres",
       "description": "",
@@ -1147,8 +1223,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 18,
         "y": 44
       },
       "targets": [
@@ -1203,7 +1279,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 23,
       "type": "row",
       "title": "Containers and host",
       "collapsed": false,
@@ -1216,7 +1292,7 @@
       "panels": []
     },
     {
-      "id": 23,
+      "id": 24,
       "type": "timeseries",
       "title": "CPU by container",
       "description": "In cores: 1 = one full CPU.",
@@ -1272,7 +1348,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 25,
       "type": "timeseries",
       "title": "Memory by container (working set)",
       "description": "Working set is what the OOM killer compares with the limit.",
@@ -1328,7 +1404,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 26,
       "type": "timeseries",
       "title": "Host disk free",
       "description": "",
@@ -1338,7 +1414,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 61
       },
@@ -1384,7 +1460,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 27,
       "type": "timeseries",
       "title": "Redis",
       "description": "",
@@ -1394,8 +1470,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 61
       },
       "targets": [
@@ -1434,6 +1510,63 @@
               "group": "A"
             }
           }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "OOM kills",
+      "description": "Processes the kernel killed for exceeding their container's memory limit (last 5 min). A killed gunicorn worker is replaced and the container stays healthy: this panel and the ContainerOOMKilled alert are the only trace.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (container_label_com_docker_compose_service) (increase(container_oom_events_total{container_label_com_docker_compose_project=\"$project\"}[5m]))",
+          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 0
         },
         "overrides": []
       },

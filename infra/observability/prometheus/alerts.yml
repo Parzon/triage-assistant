@@ -94,6 +94,15 @@ groups:
         annotations:
           summary: "clients are queueing for a Postgres connection in PgBouncer"
 
+      # The api's own pools (in front of PgBouncer). Also what leaked
+      # connections look like: stuck requests hold them until nothing is left.
+      - alert: AppDatabasePoolExhausted
+        expr: sum(db_pool_connections_in_use) >= 0.9 * sum(db_pool_connections_max)
+        for: 2m
+        labels: {severity: high}
+        annotations:
+          summary: "the api's database pools are over 90% in use: requests will wait, then fail with 503"
+
   - name: llm
     rules:
       - alert: LLMErrors
@@ -137,3 +146,13 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "{{ $labels.name }} uses over 90% of its memory limit (next: OOM kill, exit 137)"
+
+      # The kernel killed a process for exceeding its container's memory
+      # limit. When it is a gunicorn worker, the master starts a new one:
+      # the container stays up and healthy, and this is the only trace
+      # besides a "Perhaps out of memory?" log line (make drills d=oom).
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{container_label_com_docker_compose_service!=""}[5m]) > 0
+        labels: {severity: high}
+        annotations:
+          summary: "out of memory: the kernel killed a process in {{ $labels.container_label_com_docker_compose_service }}"

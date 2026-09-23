@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException
 
@@ -69,8 +69,33 @@ async def _database_unavailable(request: Request, exc: Exception) -> JSONRespons
     )
 
 
+# SQLSTATE class 08 is "connection exception" - including 08P01, which is
+# what PgBouncer sends for its own refusals ("server login has been failing,
+# try again later", "query_wait_timeout"). 57P01-57P03: the server is
+# shutting down or still starting up. 53300: out of connection slots.
+_UNAVAILABLE_SQLSTATES = ("08", "57P01", "57P02", "57P03", "53300")
+
+
+def connection_failed(exc: DBAPIError) -> bool:
+    """True when the connection failed, not the SQL.
+
+    The driver reports some of these as a generic DBAPIError - a connection
+    PgBouncer closes mid-query arrives as asyncpg's ConnectionDoesNotExistError
+    (08003), which is neither an OperationalError nor an InterfaceError.
+    """
+    sqlstate = getattr(exc.orig, "sqlstate", None) or ""
+    return exc.connection_invalidated or sqlstate.startswith(_UNAVAILABLE_SQLSTATES)
+
+
+async def _dbapi_error(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, DBAPIError) and connection_failed(exc):
+        return await _database_unavailable(request, exc)
+    raise exc  # a real SQL error: the generic 500, logged with its traceback
+
+
 def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, _http_error)
     app.add_exception_handler(RequestValidationError, _validation_error)
+    app.add_exception_handler(DBAPIError, _dbapi_error)
     for exc_type in DATABASE_UNAVAILABLE:
         app.add_exception_handler(exc_type, _database_unavailable)

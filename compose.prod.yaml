@@ -29,6 +29,12 @@ services:
         limits:
           cpus: "${API_CPUS:-2}"
           memory: 1g
+    # Swap allowance = memswap_limit - memory limit. Without this line Docker
+    # allows as much again in swap (memswap = 2x memory) on a host that has
+    # swap: a leak then degrades silently instead of an OOM kill that
+    # alerts and self-heals (make drills d="oom oom-swap"). Kubernetes and
+    # ECS run containers without swap; so does every service here.
+    memswap_limit: 1g
 
   migrate:
     build:
@@ -56,6 +62,7 @@ services:
         limits:
           cpus: "1"
           memory: 256m
+    memswap_limit: 256m
 
   pgbouncer:
     deploy:
@@ -63,6 +70,7 @@ services:
         limits:
           cpus: "0.5"
           memory: 128m
+    memswap_limit: 128m
 
   db:
     deploy:
@@ -70,6 +78,7 @@ services:
         limits:
           cpus: "2"
           memory: 1g
+    memswap_limit: 1g
 
   redis:
     deploy:
@@ -77,6 +86,7 @@ services:
         limits:
           cpus: "0.5"
           memory: 256m
+    memswap_limit: 256m
 
   # Observability. Dashboards listen on the VM's loopback only: reach them
   # through an SSH tunnel (ssh -L 3000:127.0.0.1:3000 <vm>), never on a
@@ -90,6 +100,7 @@ services:
       resources:
         limits:
           memory: 512m
+    memswap_limit: 512m
 
   prometheus:
     ports:
@@ -98,6 +109,7 @@ services:
       resources:
         limits:
           memory: 1g
+    memswap_limit: 1g
 
   alertmanager:
     ports:
@@ -106,21 +118,27 @@ services:
       resources:
         limits:
           memory: 128m
+    memswap_limit: 128m
 
   cadvisor:
     deploy:
       resources:
         limits:
           memory: 256m
+    memswap_limit: 256m
 
   postgres-exporter:
     deploy: {resources: {limits: {memory: 64m}}}
+    memswap_limit: 64m
 
   pgbouncer-exporter:
     deploy: {resources: {limits: {memory: 64m}}}
+    memswap_limit: 64m
 
   redis-exporter:
     deploy: {resources: {limits: {memory: 64m}}}
+    memswap_limit: 64m
 
   node-exporter:
     deploy: {resources: {limits: {memory: 64m}}}
+    memswap_limit: 64m

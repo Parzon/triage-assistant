@@ -96,3 +96,40 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "api event loop lag p95 above 100ms: workers are saturated or something blocks the loop"
+
+  - name: App database pool exhaustion needs two minutes above 90%
+    interval: 15s
+    input_series:
+      - series: 'db_pool_connections_in_use{job="api",instance="api:8010"}'
+        values: "10x4 38x20"
+      - series: 'db_pool_connections_max{job="api",instance="api:8010"}'
+        values: "40x24"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: AppDatabasePoolExhausted
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: AppDatabasePoolExhausted
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "the api's database pools are over 90% in use: requests will wait, then fail with 503"
+
+  - name: An OOM kill alerts at once and clears five minutes later
+    interval: 15s
+    input_series:
+      - series: 'container_oom_events_total{container_label_com_docker_compose_service="api"}'
+        values: "0x4 1x40"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ContainerOOMKilled
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ContainerOOMKilled
+        exp_alerts:
+          - exp_labels: {severity: high, container_label_com_docker_compose_service: api}
+            exp_annotations:
+              summary: "out of memory: the kernel killed a process in api"
+      - eval_time: 8m
+        alertname: ContainerOOMKilled
+        exp_alerts: []

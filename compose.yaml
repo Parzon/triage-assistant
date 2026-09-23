@@ -102,6 +102,24 @@ services:
       MAX_CLIENT_CONN: 500
       # May run SHOW STATS/POOLS on the admin console (pgbouncer-exporter).
       STATS_USERS: ${APP_DB_USER}
+      # Fail fast when Postgres is down or frozen (make drills d="db-stop
+      # db-hang"). PgBouncer defaults in brackets.
+      # A client waits this long for a server connection, then gets an error [120s].
+      QUERY_WAIT_TIMEOUT: 5
+      # Cancels a query running this long and closes its connections [off].
+      # A backstop for when Postgres cannot enforce the role's 10s
+      # statement_timeout itself (frozen, partitioned): keep it above 10s.
+      QUERY_TIMEOUT: 15
+      # A new server connection must be up within this [15s].
+      SERVER_CONNECT_TIMEOUT: 5
+      # After a failed login to Postgres, retry after this long [15s] - which
+      # is also how long clients keep getting "server login has been
+      # failing" once Postgres is back.
+      SERVER_LOGIN_RETRY: 2
+      # A stopped container vanishes from Docker's DNS, and PgBouncer caches
+      # that "no such host" answer [15s]: Postgres would be back while
+      # PgBouncer still failed every login from its cache.
+      DNS_NXDOMAIN_TTL: 1
     depends_on:
       db:
         condition: service_healthy

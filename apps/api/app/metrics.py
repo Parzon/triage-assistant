@@ -85,6 +85,19 @@ event_loop_lag = Histogram(
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
 )
 
+db_pool_in_use = Gauge(
+    "db_pool_connections_in_use",
+    "Connections of the app's database pools in use right now (sampled each "
+    "second). Every legitimate use happens inside a request, so more in use "
+    "than requests in progress means connections leaked.",
+    multiprocess_mode="livesum",
+)
+db_pool_max = Gauge(
+    "db_pool_connections_max",
+    "Size of the app's database pools (pool_size + max_overflow, summed over workers).",
+    multiprocess_mode="livesum",
+)
+
 ratelimit_decisions = Counter(
     "ratelimit_decisions_total",
     "Rate limiter outcomes: allowed, rejected, or fail_open (Redis unreachable).",

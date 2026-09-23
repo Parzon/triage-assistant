@@ -34,8 +34,8 @@ async def health() -> dict[str, str]:
 async def ready(request: Request) -> JSONResponse:
     state = request.app.state
     database, redis = await asyncio.gather(
-        _probe(_ping_database(request), timeout_s=2.0),
-        _probe(state.redis.ping(), timeout_s=0.25),
+        probe(_ping_database(request), timeout_s=2.0),
+        probe(state.redis.ping(), timeout_s=0.25),
     )
     body = {
         "status": "ready" if database else "not_ready",
@@ -52,13 +52,36 @@ async def _ping_database(request: Request) -> None:
         await conn.execute(text("SELECT 1"))
 
 
-async def _probe(check: Awaitable[object], *, timeout_s: float) -> bool:
-    try:
-        async with asyncio.timeout(timeout_s):
-            await check
-    except Exception:
-        return False
-    return True
+# Checks that overran their deadline, still running. Referenced here so they
+# are not garbage-collected mid-flight.
+_abandoned: set[asyncio.Future[object]] = set()
+
+
+async def probe(check: Awaitable[object], *, timeout_s: float) -> bool:
+    """Did `check` succeed within timeout_s? Answers on time, always.
+
+    A check that overruns is abandoned, not cancelled. Cancelling an asyncpg
+    call makes it send the server a cancel request, and every later use of
+    that connection - including the cleanup that returns it to the pool -
+    waits, with no timeout, for the server to acknowledge it. Against a
+    frozen database whose connection then dies (PgBouncer's query_timeout),
+    that wait never ends and the connection leaks. Left alone, the check
+    ends when the database answers or its connection is closed.
+    (asyncio.timeout() would cancel it, and then wait for that cleanup.)
+    """
+    task = asyncio.ensure_future(check)
+    done, _ = await asyncio.wait({task}, timeout=timeout_s)
+    if task in done:
+        return not task.cancelled() and task.exception() is None
+    _abandoned.add(task)
+    task.add_done_callback(_forget)
+    return False
+
+
+def _forget(task: asyncio.Future[object]) -> None:
+    _abandoned.discard(task)
+    if not task.cancelled():
+        task.exception()  # retrieved: no "exception was never retrieved" noise
 
 
 # Scraped by Prometheus on the private network; nginx refuses /api/metrics.
