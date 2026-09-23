@@ -3,7 +3,7 @@ ARG PYTHON_VERSION=3.13
 # uv comes from its official image at a pinned version. `pip install uv`
 # installed whatever was newest at build time (builds not reproducible)
 # and left pip + uv (80MB) inside the runtime image.
-FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.18 AS uv
 
 # ---- deps: virtualenv with runtime dependencies only ----------------------
 FROM python:${PYTHON_VERSION}-slim AS deps
