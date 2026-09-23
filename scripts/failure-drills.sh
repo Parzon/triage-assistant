@@ -26,14 +26,21 @@ cd "$(dirname "$0")/.."
 BASE=${BASE:-http://127.0.0.1:${HTTP_PORT:-8088}}
 PROJECT=triage-assistant-prod
 COMPOSE="docker compose -p $PROJECT -f compose.yaml -f compose.prod.yaml"
-API=$PROJECT-api-1
 NETSHOOT=nicolaka/netshoot:v0.14
 C() { echo "$PROJECT-$1-1"; }
+# The api is looked up by its compose labels before every drill: a rolling
+# deploy leaves it named api-2, not api-1.
+api() {
+  docker ps -q --filter "label=com.docker.compose.project=$PROJECT" \
+    --filter "label=com.docker.compose.service=api" | head -1
+}
+API=$(api)
 
 healthy() {  # wait until every core container is healthy: each drill starts from a sound stack
   local c s start=$SECONDS
   for c in db pgbouncer redis mock-llm api web; do
-    until s=$(docker inspect -f '{{.State.Health.Status}}' "$(C "$c")" 2>/dev/null) && [ "$s" = healthy ]; do
+    until s=$(docker inspect -f '{{.State.Health.Status}}' "$(if [ $c = api ]; then api; else C "$c"; fi)" 2>/dev/null) \
+        && [ "$s" = healthy ]; do
       [ $((SECONDS - start)) -gt 90 ] && { echo "$c is ${s:-missing}"; return 1; }
       sleep 0.5
     done
@@ -152,18 +159,25 @@ oom() {  # oom <name>: cap the api's memory below what its processes already use
 
 # SIGKILL one gunicorn worker (a child of PID 1, the master); the docker-exec'd
 # process itself has PPid 0, so it never picks itself.
-KILL_WORKER="docker exec $API python -c \"import os,signal; w=[int(p) for p in os.listdir('/proc') if p.isdigit() and open(f'/proc/{p}/status').read().split('PPid:')[1].split()[0]=='1']; os.kill(min(w), signal.SIGKILL); print(min(w))\""
+KILL_WORKER="docker exec \$API python -c \"import os,signal; w=[int(p) for p in os.listdir('/proc') if p.isdigit() and open(f'/proc/{p}/status').read().split('PPid:')[1].split()[0]=='1']; os.kill(min(w), signal.SIGKILL); print(min(w))\""
 
 # A crash, as Docker sees one: SIGKILL to the container's PID 1 from the host
 # PID namespace (inside the container, PID 1 ignores SIGKILL). Not `docker
 # kill`: Docker records that as a manual stop, and the restart policy then
 # leaves the container down (measured: exit 137, RestartCount 0).
-CRASH="docker run --rm --pid=host $NETSHOOT kill -9 \$(docker inspect -f '{{.State.Pid}}' $API)"
+CRASH="docker run --rm --pid=host $NETSHOOT kill -9 \$(docker inspect -f '{{.State.Pid}}' \$API)"
 
 # A deploy as `docker compose up` does it: stop the old container (SIGTERM,
 # graceful drain), then create and start the new one. Keeps the running
 # container's rate limits, which came from the shell, not .env.
-DEPLOY="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $API | grep -E '^(ALERTS|CHAT)_RATE_LIMIT='); $COMPOSE up -d --no-deps --force-recreate api"
+DEPLOY="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \$API | grep -E '^(ALERTS|CHAT)_RATE_LIMIT='); $COMPOSE up -d --no-deps --force-recreate api"
+
+# The same new release, rolled out by scripts/deploy.sh instead: the new api
+# starts next to the old one, which then drains. Tags the running images as
+# a "release", so nothing is pulled.
+ROLLOUT="export \$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \$API | grep -E '^(ALERTS|CHAT)_RATE_LIMIT='); \
+  for s in api web; do docker tag \$(docker inspect -f '{{.Config.Image}}' \$(docker ps -q --filter label=com.docker.compose.project=$PROJECT --filter label=com.docker.compose.service=\$s | head -1)) triage-assistant-\$s:drill-\$\$; done; \
+  PULL=0 RECORD_TAG=0 scripts/deploy.sh drill-\$\$"
 
 run_drill() {
   case $1 in
@@ -187,15 +201,17 @@ run_drill() {
     worker-kill)     inflight worker-kill "$KILL_WORKER" ;;
     api-crash)       inflight api-crash "$CRASH" ;;
     deploy)          WINDOW=40 inflight deploy "$DEPLOY" ;;
+    rollout)         WINDOW=45 inflight rollout "$ROLLOUT" ;;
     oom)             oom oom ;;
     *) echo "unknown drill: $1" >&2; return 1 ;;
   esac
 }
 
-ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop worker-kill api-crash deploy oom"
+ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop worker-kill api-crash deploy rollout oom"
 echo "| drill | what a user sees while the fault is active | ready again after restore |"
 echo "|---|---|---|"
 for d in ${1:-$ALL}; do
   if ! why=$(healthy); then printf '| %s | NOT RUN: stack unhealthy (%s) | |\n' "$d" "$why"; continue; fi
+  API=$(api)
   run_drill "$d"
 done
