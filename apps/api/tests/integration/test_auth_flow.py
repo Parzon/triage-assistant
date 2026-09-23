@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
 from app.main import create_app
+from app.sessions import session_cookie
 from tests.integration.conftest import BASE_URL, started
 
 
@@ -87,7 +88,7 @@ async def finish(browser: AsyncClient, callback_url: str) -> httpx.Response:
     return await browser.get("/auth/callback", params=parse_qs(url.query))
 
 
-async def test_sign_in_end_to_end(browser: AsyncClient) -> None:
+async def test_sign_in_end_to_end(app: FastAPI, browser: AsyncClient) -> None:
     authorize = await start(browser, "/after")
     params = parse_qs(urlsplit(authorize).query)
     assert params["code_challenge_method"] == ["S256"]
@@ -96,8 +97,9 @@ async def test_sign_in_end_to_end(browser: AsyncClient) -> None:
     landed = await finish(browser, await idp_login(authorize, "alice"))
     assert landed.status_code == 302
     assert landed.headers["location"] == "/after"
-    session = next(c for c in landed.headers.get_list("set-cookie") if "triage_session" in c)
-    assert session.startswith("__Host-triage_session=")
+    name = session_cookie(app.state.settings)
+    assert name.startswith("__Host-")  # Secure, Path=/, no Domain: no subdomain can set it
+    session = next(c for c in landed.headers.get_list("set-cookie") if c.startswith(f"{name}="))
     for flag in ("HttpOnly", "Secure", "Path=/", "SameSite=lax"):
         assert flag.lower() in session.lower(), flag
 
