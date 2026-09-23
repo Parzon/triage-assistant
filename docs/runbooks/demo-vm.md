@@ -207,9 +207,10 @@ make deploy tag=1.1.0
 - **The one gap left: replacing the edge itself.** It owns ports 80/443,
   so for **~2 s** new connections are refused and in-flight ones cut
   (measured under the same load). `make deploy` replaces it only when its
-  image's content changed: a release that touches `tools/edge`, or a CI
-  build without its layer cache. Only a load balancer in front of two
-  hosts removes that.
+  build inputs (`tools/edge/**`) changed: CI stamps the image with their
+  hash. Only a load balancer in front of two hosts removes that.
+- **The contract migration of v0.3.0** (row-level security) ran while
+  v0.2.0 served the same load: no request failed.
 - If the new api never becomes healthy, it's removed, and the old one
   keeps serving.
 
@@ -224,9 +225,19 @@ Migrations run while the old version is still serving, so they must be
 backward compatible. Add a column first; stop reading it in one release;
 drop it in the next.
 
-**Rollback:** `make deploy tag=<previous>`. It works as long as no
-migration removed something the previous version needs, which is the
-rule above.
+**Rollback:** `make deploy tag=<previous>`. It rolls back the code, never
+the schema (ADR-0015). When the database is at a revision the older image
+does not know, the deploy says "the database (...) is ahead of <tag>:
+rolling back the code only" and skips the migrations. ✅ Measured: v0.3.0
+→ v0.2.0 under load, no failed request outside the edge's swap.
+- **Safe only down to a release that runs on the current schema:** the
+  one just before a contract migration, never past it (v0.3.0 → v0.2.0
+  yes, → v0.1.0 no).
+- **A migration that is itself the fault** is reversed separately and
+  deliberately, with the newer image, which knows it:
+  `IMAGE_TAG=<newer> docker compose -p triage-assistant-prod -f
+  compose.yaml -f compose.prod.yaml run --rm migrate alembic downgrade
+  <revision>`.
 
 ## 7. Backups and restore
 

@@ -130,3 +130,4 @@ The ADRs in `docs/adr/`, one line each:
 - **0013:** sign-in with the organisation's identity provider (OIDC,
   server-side sessions); teams own alerts, with ranked roles.
 - **0014:** Postgres enforces team isolation (row-level security).
+- **0015:** rollbacks roll back the code, never the schema.

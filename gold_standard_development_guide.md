@@ -256,6 +256,14 @@ something bites.
   replaced the edge on a GHCR host. A v0.1.0 edge would have stayed, with
   no `/auth` route. Ask compose (`config --images`), and fail when the
   answer is empty.
+- **A rollback ran the old image's migrations**, and old Alembic has never
+  heard of the new revision: "Can't locate revision". The deploy failed
+  safely, but rolling back was impossible across any migration. Now a
+  database ahead of the image means a code-only rollback (ADR-0015).
+- **`COPY` records file times, and every CI checkout gets new ones**: a
+  rebuilt edge never had the same layers, so every release replaced it
+  (~2 s refused). CI stamps the image with a hash of its inputs, and the
+  deploy compares that.
 - **`make prod-up` on a host that runs releases** would build the
   checkout and name it like the release: it refuses when `IMAGE_PREFIX`
   is a registry.
@@ -690,6 +698,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - HTTPS at the edge (0012)
 - sign-in and team access (0013)
 - row-level security (0014)
+- rollbacks roll back code, not the schema (0015)
 
 A merged ADR is never edited: a new one supersedes it.
 

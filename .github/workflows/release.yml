@@ -80,6 +80,12 @@ jobs:
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-${{ matrix.image }}" >> "$GITHUB_ENV"
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+      # The edge's build inputs, hashed into a label: `make deploy` replaces the
+      # running edge only when they changed. Rebuilt layers never match (COPY
+      # records file times, and every checkout gets new ones).
+      - name: Edge build-inputs stamp
+        if: matrix.image == 'edge'
+        run: echo "INPUTS_LABEL=io.triage-assistant.inputs=${{ hashFiles('tools/edge/**') }}" >> "$GITHUB_ENV"
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
@@ -98,7 +104,9 @@ jobs:
           context: ${{ matrix.image == 'edge' && 'tools/edge' || format('apps/{0}', matrix.image) }}
           target: ${{ matrix.image != 'edge' && 'production' || '' }}
           platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            ${{ env.INPUTS_LABEL }}
           # A tag push publishes by digest; a PR only builds.
           outputs: ${{ github.event_name == 'push' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
           # What went into the image, stored next to it in the registry:

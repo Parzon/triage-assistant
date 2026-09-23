@@ -85,7 +85,9 @@ Grafana.
 | api crashes (PID 1 SIGKILL) | every in-flight stream cut; 502 for ~0.5 s; the restart policy brings it back | `ApiDown` only if it stays down 1 min | 0 s |
 | deploy (`up --force-recreate api`) | in-flight streams **finish** (graceful drain); **new requests get 502 for 6.7 s** | — | 0 s |
 | rolling deploy (`make deploy`), through the TLS edge | in-flight streams finish; **no failed request in three runs**: the edge holds requests while nginx is replaced (worst case one request waited 2.0 s). v0.2.0 from GHCR: 134,917 signed-in requests, 0 failed | — | 0 s |
-| a deploy that replaces the edge (its image changed) | **~2 s of refused connections**; requests in flight on the old edge cut | — | 2 s |
+| a deploy that replaces the edge (its build inputs changed) | **~2 s of refused connections**; requests in flight on the old edge cut | — | 2 s |
+| v0.3.0's contract migration (row-level security on) while v0.2.0 serves | nothing: no request failed | — | — |
+| a rollback across a migration (v0.3.0 → v0.2.0) | nothing, outside an edge swap: the code rolls back, the schema stays (ADR-0015). Before the fix, the deploy refused to start ("Can't locate revision") | the deploy says "the database is ahead" | — |
 | a broken release (`make deploy` of an image that never gets healthy) | nothing: the new api is removed after 90 s, and the old one never stopped (1,018 of 1,018 requests OK) | the deploy fails loudly (exit 1) | — |
 | memory limit below the working set | workers and then PID 1 OOM-killed in a loop (one run: 8 container restarts in 30 s); all streams cut; site down until the limit is fixed | `ContainerOOMKilled` (verified firing) | 3 s |
 
