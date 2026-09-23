@@ -1,7 +1,17 @@
 # docs/
 
-Four document types, each with a different job and a different lifetime.
-Copy the `TEMPLATE.md` in the relevant folder to start one.
+- **`handbook/`**: how this service is built, tested, debugged, shipped
+  and operated, with the measurements behind every choice. Start from the
+  map in [`../gold_standard_development_guide.md`](../gold_standard_development_guide.md).
+- **`runbooks/`**: procedures for pressure: [alerts](runbooks/alerts.md)
+  (one section per alert, linked from each rule), [one VM](runbooks/demo-vm.md)
+  (from the request to IT to teardown).
+- **`images/`**: the dashboard screenshot and the profiling flame graph
+  the chapters show.
+
+Plus four document types for deciding what to build, each with a
+different job and a different lifetime. Copy the `TEMPLATE.md` in the
+relevant folder to start one.
 
 | Type | Question it answers | Audience | Lifetime |
 |---|---|---|---|
