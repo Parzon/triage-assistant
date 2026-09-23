@@ -359,6 +359,12 @@ prod-build: ## Build the production images
 # 0), so the next command - e2e in CI, a smoke check - never races a service
 # that is still starting (Keycloak takes ~20s).
 prod-up: ## Build and start the production stack; returns when it is healthy (HTTPS on EDGE_HTTPS_PORT)
+	@# A host that runs released images names them with a registry prefix in
+	@# .env: building the checkout would label local code with a release's name.
+	@prefix=$${IMAGE_PREFIX:-$$(sed -n 's/^IMAGE_PREFIX=//p' .env 2>/dev/null)}; case "$$prefix" in */*) \
+	  echo "this host runs released images ($$prefix): deploy with make deploy tag=X.Y.Z"; \
+	  echo "to run this checkout instead: IMAGE_PREFIX=triage-assistant IMAGE_TAG=local make prod-up"; \
+	  exit 2;; esac
 	$(PROD) up -d --build --wait --wait-timeout 300
 
 deploy: ## Roll a release onto this host without refusing requests: make deploy tag=1.4.0 (PULL=0: local images)

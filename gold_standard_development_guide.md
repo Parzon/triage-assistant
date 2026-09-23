@@ -250,6 +250,15 @@ something bites.
   hardcode a container name; use `docker compose ps -q api`.
 - **`docker compose up` without the deployed `IMAGE_TAG` silently rolls
   back**: `make deploy` records the tag in `.env`.
+- **A value in `.env` is visible to compose, not to your scripts**:
+  `deploy.sh` built the edge's image name from `$IMAGE_PREFIX` (unset in
+  its shell), found no such image, took "none" for "unchanged", and never
+  replaced the edge on a GHCR host. A v0.1.0 edge would have stayed, with
+  no `/auth` route. Ask compose (`config --images`), and fail when the
+  answer is empty.
+- **`make prod-up` on a host that runs releases** would build the
+  checkout and name it like the release: it refuses when `IMAGE_PREFIX`
+  is a registry.
 - **`docker run --rm` then `docker logs`**: the logs went with the
   container.
 - **Piping a script into `docker run` without `-i`**: nothing runs, and
@@ -619,6 +628,9 @@ something bites.
   became two shell commands (`for ... in <newline>`). Parse the YAML and
   run the resulting command once (`yaml.safe_load`).
 - **`! cmd` is exempt from `set -e`**: test explicitly with `if`.
+- **`pgrep -f pattern` matches the shell running it** when the pattern
+  is in that shell's own command line: a wait loop never ended, and a
+  `kill` loop killed itself.
 - **`mv src existing-dir` moves into it** instead of renaming.
 - **`sudo` needs a terminal for its password, and a password pasted into
   a chat is burned**: rotate it.
@@ -650,7 +662,7 @@ Measured with `make drills`; the full matrix is in
 | the identity provider | signed-in users: nothing. New sign-ins fail on the provider's page. `IdentityProviderDown` fires | 0 s |
 | one api worker (killed, OOM) | its in-flight requests cut; a new worker starts | 0 s |
 | the api container (crash) | in-flight streams cut, ~0.5 s of 502 | < 1 s |
-| a deploy | nothing with `make deploy` (0.3 s at the nginx swap); 6.7 s of 502 with a plain recreate | — |
+| a deploy | nothing with `make deploy` through the edge (134,917 requests, 0 failed); ~2 s of refused connections when the edge itself changes; 6.7 s of 502 with a plain recreate | — |
 | nginx or the VM | the site is down, and **nothing inside the stack alerts** | — |
 
 ## Bottlenecks, in the order they bite
