@@ -27,6 +27,7 @@ Postgres. Tool versions live in the images:
 - `ghcr.io/astral-sh/uv:0.12.17` with Python 3.13 for the api
 - `node:24` for the web
 - `postgres:17`, `valkey/valkey:8.1-alpine`
+- `quay.io/keycloak/keycloak:26.7.4`, the bundled identity provider
 
 A developer with the wrong local Node version cannot break anything.
 
@@ -60,12 +61,12 @@ Containers need a Linux VM on a Mac. The options:
 | Rancher Desktop | free, open source | choose the "dockerd (moby)" engine, not containerd, so `docker compose` works |
 
 - **Give the VM at least 4 CPUs and 8 GB.** The full stack with
-  monitoring idles at ~880 MiB, but image builds and load tests need
-  more. Docker Desktop's default can be too small.
+  monitoring idles at ~880 MiB, and Keycloak adds ~430 MiB. Image builds
+  and load tests need more. Docker Desktop's default can be too small.
 - **Apple Silicon (arm64):** every image in the stack publishes a native
   arm64 variant: Python, Node, nginx, Postgres, Valkey, PgBouncer,
-  Prometheus, Grafana, cAdvisor and the exporters (✅ checked in the
-  registries' manifests). The one exception is the Artillery load-test
+  Prometheus, Grafana, cAdvisor, the exporters and Keycloak (✅ checked
+  in the registries' manifests). The one exception is the Artillery load-test
   image, which is amd64-only and runs under emulation: its numbers are
   meaningless there.
 - **File sharing is the slow part.** The dev stack bind-mounts the
@@ -102,7 +103,7 @@ Windows checkout turns shell scripts into CRLF, and containers fail with
 - **HTTP proxy:** set it for the Docker daemon (Docker Desktop settings,
   or a systemd drop-in), and for builds and containers in
   `~/.docker/config.json` (`"proxies": {"default": {"httpProxy": ...,
-  "noProxy": "localhost,127.0.0.1,api,web,db,pgbouncer,redis,mock-llm"}}`).
+  "noProxy": "localhost,127.0.0.1,api,web,db,pgbouncer,redis,mock-llm,keycloak"}}`).
   The service names belong in `noProxy`, or containers send each other's
   traffic to the proxy.
 - **TLS-inspecting proxies** re-sign HTTPS with a company root CA. The
@@ -157,10 +158,11 @@ runs everything.
 | Port | What | Bound to |
 |---|---|---|
 | 8010 | api (dev, hot reload) | 127.0.0.1 |
-| 5173 | web (Vite dev server; proxies `/api`) | 127.0.0.1 |
+| 5173 | web (Vite dev server; proxies `/api` to the api and `/auth` to Keycloak, so sign-in stays on one origin) | 127.0.0.1 |
 | 5678 | debugpy (`make debug-up` only) | 127.0.0.1 |
 | 3000 / 9090 / 9093 | Grafana / Prometheus / Alertmanager (`make obs-up`) | 127.0.0.1 |
-| `HTTP_PORT` (80; this box uses 8088) | production-shaped nginx (`make prod-up`) | `HTTP_BIND` (0.0.0.0) |
+| `EDGE_HTTPS_PORT` / `EDGE_HTTP_PORT` (443 / 80; this box uses 8443 / 8081) | the production-shaped stack's TLS edge (`make prod-up`); HTTP only redirects | `EDGE_BIND` (0.0.0.0) |
+| `HTTP_PORT` (8088) | production-shaped nginx, plain HTTP, for drills and load tests | `HTTP_BIND` (127.0.0.1) |
 
 A port already taken: `ss -ltnp | grep :8010` (Linux) or `lsof -i :8010`
 (macOS) shows the owner. Often it's a forgotten stack: `docker ps`.
@@ -184,3 +186,7 @@ volumes, *including databases*: know what you are deleting.
 | files in the repo owned by root | a container wrote them as root | `make fix-perms` |
 | hot reload does nothing (Windows) | the repo is under `/mnt/c` | clone into the WSL filesystem |
 | `toomanyrequests` pulling images | Docker Hub's anonymous limit, shared by the office | `docker login`, or a mirror |
+| "Sign in" shows an error page for ~30 s after `make up` | Keycloak is still starting (`make ps`: `health: starting`) | wait for `(healthy)` |
+| the keycloak container exits: "set DEMO_USER_PASSWORD in .env" | an `.env` from before sign-in existed | copy the sign-in block from `.env.example` into `.env` |
+| a realm change (users, groups) does not show up | Keycloak imports the realm file only into an empty database, which lives inside its container | `docker compose up -d --force-recreate keycloak` |
+| signed in on the prod stack, but every POST answers 403 `csrf_failed` | the page's origin is not `PUBLIC_URL` (e.g. `https://127.0.0.1:8443` vs `https://localhost:8443`) | open the site at exactly `PUBLIC_URL` |

@@ -8,6 +8,7 @@ the compose file that passes it, and the env-var table in the handbook.
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +78,65 @@ class Settings(BaseSettings):
     # Shared secret Alertmanager sends as a bearer token. Unset = the
     # webhook endpoint does not exist (404).
     alertmanager_webhook_token: SecretStr | None = None
+
+    # --- Sign-in: OpenID Connect against the organisation's identity
+    # provider (Keycloak locally; Entra ID, Okta, Google... in production).
+    # ADR-0013 and the security chapter of the handbook.
+    #
+    # The app's address as the browser sees it, no path: the OIDC redirect
+    # URI (<public_url>/api/auth/callback), the page after sign-out and the
+    # origin every state-changing request must come from are derived from it.
+    public_url: str
+    # Must equal the `iss` claim of the provider's ID tokens exactly - trailing
+    # slash included - and the `issuer` in its discovery document.
+    oidc_issuer: str = Field(min_length=1)
+    # Where the api reads the provider's metadata. Empty: <issuer>/.well-known/
+    # openid-configuration, right for any real provider. Set only when the
+    # issuer URL is not reachable from the api's own network - the bundled
+    # Keycloak, which the browser reaches through the edge and the api directly.
+    oidc_discovery_url: str | None = None
+    oidc_client_id: str = Field(min_length=1)
+    oidc_client_secret: SecretStr = Field(min_length=1)
+    oidc_scopes: str = "openid profile email"
+    # The claim listing the user's groups (Keycloak, Okta) or app roles
+    # (Entra ID: "roles"). Values "team:<slug>:<role>" and "org:admin" grant
+    # access; everything else in it is ignored.
+    oidc_groups_claim: str = "groups"
+    oidc_timeout_s: float = Field(5.0, gt=0)
+    # A session ends at whichever comes first: this long after sign-in, or
+    # this long without a request. Role changes in the identity provider
+    # apply at the next sign-in, so the lifetime bounds how long a removed
+    # member keeps access - revoke sessions for immediate effect (handbook).
+    session_max_age_s: int = Field(12 * 3600, ge=60)
+    session_idle_timeout_s: int = Field(2 * 3600, ge=60)
+    # False only for plain-HTTP development (http://localhost:5173): browsers
+    # drop Secure cookies, and the __Host- prefix requires them, on http://.
+    session_cookie_secure: bool = True
+    # Per client IP per window: sign-in redirects and callbacks.
+    auth_rate_limit: int = Field(30, ge=1)
+
+    @field_validator("public_url")
+    @classmethod
+    def _origin_only(cls, value: str) -> str:
+        url = urlsplit(value)
+        if url.scheme not in ("http", "https") or not url.netloc or url.path not in ("", "/"):
+            raise ValueError("PUBLIC_URL must be scheme://host[:port] with no path")
+        return f"{url.scheme}://{url.netloc}"
+
+    @field_validator("oidc_discovery_url", mode="before")
+    @classmethod
+    def _empty_means_default(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @property
+    def oidc_metadata_url(self) -> str:
+        return self.oidc_discovery_url or (
+            self.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration"
+        )
+
+    @property
+    def oidc_redirect_uri(self) -> str:
+        return f"{self.public_url}/api/auth/callback"
 
     @field_validator("alertmanager_webhook_token", mode="before")
     @classmethod

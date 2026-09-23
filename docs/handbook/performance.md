@@ -186,6 +186,93 @@ How each tool showed it:
   `timeout`), `WORKER TIMEOUT`, then the workers killed. The result: 2
   × 502, and 2 answers cut off.
 
+## Bottleneck 4: the cost of signing in
+
+Sign-in (ADR-0013) put work in front of every request: read the session
+cookie, look up the session, the user and their teams, and tell Postgres
+who is asking (`set_config`, for row-level security). Measured A/B: the
+previous release's image and this one, behind the same nginx, same data,
+same load, one after the other (`k6 alerts-read.js`, org admin, whose
+query is the global list the old version ran):
+
+| | 500 req/s | 1,000 req/s | 1,500 req/s offered |
+|---|---|---|---|
+| before sign-in | p95 2.1 ms, api 0.53 core | p95 2.6 ms, 1.09 cores | p95 6.4 ms, 1.71 cores |
+| sign-in, first version | p95 6.5 ms | **933 req/s achieved, p95 1.07 s** | — |
+| sign-in, one query in the request's transaction | p95 4.0 ms, 0.95 core | p95 19.7 ms, 1.86 cores | saturated: 1,039 req/s, p95 2.4 s |
+
+**Where it went.** Count the database round trips per request:
+- *Before sign-in:* 3. The pool's pre-ping, the query, and the rollback
+  when the session closes.
+- *The first version:* 8.
+  - The session and the memberships were two queries.
+  - Authentication then committed its own transaction, so the request's
+    query started a new one: the pool's check-in and check-out, another
+    pre-ping, and `set_config` in the new transaction.
+- *The fix:* 5. One query returns the session, the user and one row per
+  membership (LEFT JOINs). It runs in the request's own transaction, and
+  `set_config` follows in the same transaction. Only the 5-minutely
+  `last_seen_at` touch commits on its own.
+
+Each round trip costs the api CPU (SQLAlchemy and asyncpg, per statement),
+and the api's CPU is the ceiling. So authentication still roughly doubles
+the cost of the cheapest request: ~530 trivial reads per second per core,
+against ~920 before. Levers left, not taken:
+- **A per-worker cache of sessions** (10-30 s): one round trip less. A
+  revoked session would stay valid for up to the cache's lifetime.
+- **`set_config` inside the authentication query**: one round trip less.
+  But the role logic would then be written twice, in Python and in SQL.
+- **More cores or replicas.** The cost is per request and scales out
+  linearly.
+
+For chat, none of this shows: a streamed answer takes seconds.
+
+**Clumped arrivals pay more.** Locust's 200 users, each sending one
+request a second, arrive in bursts. Now p50 is 170 ms, against 3 ms for
+the same 200 req/s spread out. k6's `paced-users.js` (the same shape)
+measured p50 182 ms: the shape, not the tool. Each request's CPU cost
+multiplies the queue a burst builds (the load-testing chapter).
+
+## Reading several teams at once
+
+A user in several teams reads "the newest alerts of these teams". The
+obvious query hands the choice to the planner:
+```sql
+SELECT ... WHERE team_id = ANY(:teams) ORDER BY created_at DESC, id DESC LIMIT 50
+```
+With 2–2.5 M rows and a team index `(team_id, created_at, id)`
+(`EXPLAIN (ANALYZE, BUFFERS)`, `make psql`):
+
+| Teams read | `= ANY(...)` | LATERAL, one team at a time |
+|---|---|---|
+| one small team | 0.24 ms (the team index) | same |
+| a small and a medium team | 0.19 ms (walks the global time index, filters) | 0.11 ms |
+| two sparse teams | 2.9 ms (sorts all their rows) | 0.07 ms |
+| a small team and a **large, quiet** one (500k rows, all 90+ days old) | **13.2 ms**: walked the time index, 103,036 rows filtered out | 0.06 ms |
+
+The planner's choice depends on the data, and the bad case grows with the
+table. `app/queries.py` reads each team through its own index and merges
+the results. The cost is bounded by teams × limit index entries, whatever
+the data:
+```sql
+SELECT a.* FROM unnest(:teams) AS t(id)
+CROSS JOIN LATERAL (SELECT * FROM alerts WHERE team_id = t.id
+                    ORDER BY created_at DESC, id DESC LIMIT 50) a
+ORDER BY a.created_at DESC, a.id DESC LIMIT 50
+```
+Measured through the api: a user in two of three seeded teams (333k
+alerts each), at 500 req/s, p95 7.7 ms for the list and 9.6 ms for the
+severity-filtered one (`make load s=alerts-read RATE=250`).
+
+**The migration that added teams** ran on the 2 M-row table while the
+previous release served reads and writes:
+- a column with a default (instant on Postgres 11+);
+- a foreign key added `NOT VALID`, then validated in its own transaction;
+- the team index built `CONCURRENTLY`.
+
+It took 1.5 s, and the 116,708 requests made meanwhile had 0 errors and
+no latency spike.
+
 ## Startup and memory
 
 - **Import time is 734 ms** per worker (`python -X importtime`):

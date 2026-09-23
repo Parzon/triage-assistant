@@ -14,10 +14,24 @@ services:
       LLM_MAX_RETRIES: "0"
       SSE_HEARTBEAT_S: "0.2"
       MOCK_LLM_ADMIN_URL: http://mock-llm:8020/_admin
+      # The sign-in tests play the browser: the app at https://test (the
+      # in-process test client - Secure cookies, as in production), the
+      # identity provider at an address both sides can reach.
+      PUBLIC_URL: https://test
+      OIDC_ISSUER: http://keycloak:8080/auth/realms/triage
+      OIDC_DISCOVERY_URL: ""
+      SESSION_COOKIE_SECURE: "true"
+      KEYCLOAK_URL: http://keycloak:8080/auth
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-}
     depends_on:
       # Test-only: the chat tests drive the mock's failure modes.
       mock-llm:
         condition: service_healthy
+
+  keycloak:
+    environment:
+      KC_HOSTNAME: http://keycloak:8080/auth
+      TRIAGE_PUBLIC_URL: https://test
 
   db:
     # Durability off: a test database that loses data on a crash is fine,

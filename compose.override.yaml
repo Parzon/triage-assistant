@@ -15,6 +15,12 @@ services:
     environment:
       # The Vite dev proxy sets X-Forwarded-For (xfwd), like nginx in prod.
       FORWARDED_ALLOW_IPS: "*"
+      # Sign-in in development: the browser is on the Vite dev server, over
+      # plain HTTP, and reaches Keycloak through its /auth proxy. Browsers
+      # drop Secure cookies on http://, so these cannot be Secure here.
+      PUBLIC_URL: http://localhost:${WEB_PORT:-5173}
+      OIDC_ISSUER: http://localhost:${WEB_PORT:-5173}/auth/realms/triage
+      SESSION_COOKIE_SECURE: "false"
     volumes:
       - ./apps/api:/api
       # Anonymous volume: keeps the image's .venv visible under the bind
@@ -32,6 +38,11 @@ services:
       # New migration files written on the host are picked up immediately.
       - ./apps/api:/api
       - /api/.venv
+
+  keycloak:
+    environment:
+      KC_HOSTNAME: http://localhost:${WEB_PORT:-5173}/auth
+      TRIAGE_PUBLIC_URL: http://localhost:${WEB_PORT:-5173}
 
   web:
     build:

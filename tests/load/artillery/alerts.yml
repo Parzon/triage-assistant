@@ -13,3 +13,6 @@ scenarios:
     flow:
       - get:
           url: /api/alerts?limit=50
+          # The session `make load-tool` minted (app.cli), from the environment.
+          headers:
+            Cookie: "{{ $env.SESSION_COOKIE }}"

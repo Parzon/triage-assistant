@@ -151,6 +151,31 @@ provider's status page, and the key's quota in the provider console.
 size: `CHAT_CONTEXT_ALERTS` alerts go into every prompt. Then our
 event-loop lag (a busy api delays tokens too).
 
+## IdentityProviderDown
+
+**Users:** anyone signing in gets the edge's "unavailable" page (the bundled
+Keycloak) or the provider's error; **signed-in users are unaffected** -
+sessions are this service's own, and last up to 12 hours.
+**Check:** `curl -s localhost:8088/api/ready` shows
+`"identity_provider": "degraded"`; the api log says why ("identity provider
+unavailable", with the URL). Bundled Keycloak: `make logs ENV=prod S=keycloak`.
+Also: `"metadata names another issuer"` means OIDC_ISSUER does not match the
+provider's - a configuration change, not an outage.
+**Fix:** the provider (or the network path to it: DNS, egress firewall,
+proxy). Nothing to restart here; the check recovers within 30s.
+
+## SignInsFailing
+
+**Users:** nobody can sign in, though the provider answers.
+**Check:** the api log's `"sign-in failed"` lines carry the reason:
+`invalid_client` / "code exchange refused" (the client secret was rotated
+at the provider but not in OIDC_CLIENT_SECRET), `invalid_token` with "iat"
+or "exp" (the api host's clock is off - check NTP), "issued to another
+client" (OIDC_CLIENT_ID). A redirect URI refused by the provider never
+reaches this service at all: the provider shows its own error page.
+**Fix:** align the setting with the provider, then `make deploy` (or
+restart the api) to pick it up.
+
 ## DiskWillFillIn6h / DiskAlmostFull
 
 **Users:** nothing yet. At 100%, Postgres stops accepting writes.

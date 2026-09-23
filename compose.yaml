@@ -36,6 +36,19 @@ services:
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}
       # Shared with Alertmanager (secret below); empty = webhook disabled.
       ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:-}
+      # Sign-in (OIDC, ADR-0013). Defaults: the bundled Keycloak below, which
+      # browsers reach under <PUBLIC_URL>/auth and the api directly. The dev
+      # and test overlays set their own addresses. A real provider: see
+      # .env.example.
+      PUBLIC_URL: ${PUBLIC_URL:-https://localhost}
+      OIDC_ISSUER: ${OIDC_ISSUER:-${PUBLIC_URL:-https://localhost}/auth/realms/triage}
+      # "-", not ":-": an empty value in .env must stay empty (a real provider).
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL-http://keycloak:8080/auth/realms/triage/.well-known/openid-configuration}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-triage-web}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+    # Deliberately no depends_on the identity provider either: the api starts
+    # without it, and sessions already issued keep working while it is down.
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -75,6 +88,65 @@ services:
     build:
       context: ./tools/mock-llm
     profiles: ["mock"]
+    restart: unless-stopped
+    logging: *logging
+
+  # Stand-in for the organisation's identity provider, as mock-llm is for the
+  # model provider: Keycloak with a demo realm (infra/keycloak/triage-realm.json
+  # - the client, the team groups, four demo users). Profile "idp", on by
+  # default (COMPOSE_PROFILES in .env); with a real provider, drop the profile
+  # and set the OIDC_* variables. Development mode, its database inside the
+  # container, the realm imported from the file whenever the container is
+  # created: fine for development, CI and demos - never the production IdP.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    profiles: ["idp"]
+    # Refuses to start - rather than create demo users with an empty
+    # password - when .env lacks the passwords. (A compose-level ${VAR:?}
+    # would stop every stack, even those not using this profile.)
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        : "$${DEMO_USER_PASSWORD:?set DEMO_USER_PASSWORD in .env}"
+        "$${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}"
+        && exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      # Served under /auth, so browsers reach it on the app's own origin:
+      # through the edge in the production shape, the Vite proxy in dev.
+      KC_HTTP_RELATIVE_PATH: /auth
+      # The address browsers use; ID tokens name it as their issuer. The api
+      # calls keycloak:8080 directly instead: with a dynamic back channel,
+      # Keycloak answers those calls with keycloak:8080 URLs.
+      KC_HOSTNAME: ${PUBLIC_URL:-https://localhost}/auth
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # The edge's X-Forwarded-* headers: the client's real address, for
+      # brute-force protection.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      # Values for the ${...} placeholders in the realm file.
+      TRIAGE_PUBLIC_URL: ${PUBLIC_URL:-https://localhost}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-}
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+    # In every environment: the JVM sizes its heap from the memory it can
+    # see. Without a limit it took 1.1 GiB on a 62 GiB host; with this one,
+    # ~430 MiB.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    memswap_limit: 1g
+    healthcheck:
+      # No curl or wget in the image; bash speaks enough HTTP. Health lives
+      # on the management port, 9000, under the same /auth prefix.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 90s
+      retries: 3
     restart: unless-stopped
     logging: *logging
 

@@ -86,6 +86,9 @@ class RequestContextMiddleware:
             if route != "/metrics":  # scrapes every 15s would drown real traffic
                 http_requests.labels(scope["method"], route, str(status)).inc()
                 http_duration.labels(scope["method"], route).observe(duration)
+            # Who did what: the user id (not the email - logs are copied to
+            # more places than the database, so they carry no personal data).
+            principal = scope.get("state", {}).get("principal")
             access_log.info(
                 "request",
                 extra={
@@ -94,6 +97,7 @@ class RequestContextMiddleware:
                     "status": status,
                     "duration_ms": round(duration * 1000, 2),
                     "client": (scope.get("client") or ("-",))[0],
+                    "user_id": getattr(principal, "user_id", None),
                 },
             )
             request_id_var.reset(token)

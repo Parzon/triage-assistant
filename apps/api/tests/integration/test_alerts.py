@@ -8,9 +8,14 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.config import Settings
 from app.main import create_app
-from tests.integration.conftest import ClientFactory, started
+from tests.integration.conftest import BASE_URL, SignIn, started
 
-ALERT = {"source": "prometheus", "severity": "critical", "message": "disk 95% full on db-1"}
+ALERT = {
+    "team": "default",
+    "source": "prometheus",
+    "severity": "critical",
+    "message": "disk 95% full on db-1",
+}
 
 
 async def create(client: AsyncClient, **overrides: str) -> dict[str, object]:
@@ -32,6 +37,7 @@ async def test_create_returns_the_stored_alert(client: AsyncClient) -> None:
         {**ALERT, "severity": "apocalyptic"},
         {**ALERT, "message": ""},
         {**ALERT, "message": "x" * 4001},
+        {**ALERT, "team": "Not A Slug"},
         {"source": "prometheus"},
     ],
 )
@@ -54,33 +60,52 @@ async def test_get_one_and_404(client: AsyncClient) -> None:
     assert missing.json()["error"]["code"] == "not_found"
 
 
-async def test_list_is_newest_first_and_filters_by_severity(client_for: ClientFactory) -> None:
-    async with client_for("203.0.113.10") as client:
-        first = await create(client, severity="info")
-        second = await create(client, severity="critical")
-        body = (await client.get("/alerts")).json()
-        assert [a["id"] for a in body["items"]] == [second["id"], first["id"]]
-        critical = (await client.get("/alerts", params={"severity": "critical"})).json()
-        assert [a["id"] for a in critical["items"]] == [second["id"]]
+async def test_list_is_newest_first_and_filters_by_severity(client: AsyncClient) -> None:
+    first = await create(client, severity="info")
+    second = await create(client, severity="critical")
+    body = (await client.get("/alerts")).json()
+    assert [a["id"] for a in body["items"]] == [second["id"], first["id"]]
+    critical = (await client.get("/alerts", params={"severity": "critical"})).json()
+    assert [a["id"] for a in critical["items"]] == [second["id"]]
 
 
-async def test_pagination_visits_every_alert_exactly_once(client_for: ClientFactory) -> None:
+async def test_pagination_visits_every_alert_exactly_once(sign_in_as: SignIn) -> None:
     created = []
-    for n in range(7):  # more than one client's rate limit, so spread the source IPs
-        async with client_for(f"203.0.113.{20 + n}") as c:
-            created.append((await create(c, message=f"alert {n}"))["id"])
-    async with client_for("203.0.113.99") as client:
-        seen, cursor, pages = [], None, 0
-        while True:
-            params = {"limit": 3, **({"cursor": cursor} if cursor else {})}
-            page = (await client.get("/alerts", params=params)).json()
-            seen += [a["id"] for a in page["items"]]
-            pages += 1
-            cursor = page["next_cursor"]
-            if cursor is None:
-                break
+    for n in range(7):  # more than one user's rate limit (5): spread over users
+        writer = await sign_in_as("team:default:responder", email=f"writer{n}@example.com")
+        created.append((await create(writer, message=f"alert {n}"))["id"])
+    reader = await sign_in_as("team:default:viewer")
+    seen, cursor, pages = [], None, 0
+    while True:
+        params = {"limit": 3, **({"cursor": cursor} if cursor else {})}
+        page = (await reader.get("/alerts", params=params)).json()
+        seen += [a["id"] for a in page["items"]]
+        pages += 1
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
     assert pages == 3
     assert seen == sorted(created, reverse=True)
+
+
+async def test_pagination_across_several_teams(sign_in_as: SignIn) -> None:
+    """Several teams are read team by team and merged (queries.newest_alerts):
+    the pages must still interleave them in time order, each alert once."""
+    payments = await sign_in_as("team:payments:responder", email="p@example.com")
+    platform = await sign_in_as("team:platform:responder", email="q@example.com")
+    ids = []
+    for n in range(4):
+        ids.append((await create(payments, team="payments", message=f"p{n}"))["id"])
+        ids.append((await create(platform, team="platform", message=f"q{n}"))["id"])
+    both = await sign_in_as("team:payments:viewer", "team:platform:viewer")
+    seen, cursor = [], None
+    while True:
+        params = {"limit": 3, **({"cursor": cursor} if cursor else {})}
+        page = (await both.get("/alerts", params=params)).json()
+        seen += [a["id"] for a in page["items"]]
+        if (cursor := page["next_cursor"]) is None:
+            break
+    assert seen == sorted(ids, reverse=True)
 
 
 async def test_bad_cursor_is_a_400(client: AsyncClient) -> None:
@@ -89,12 +114,16 @@ async def test_bad_cursor_is_a_400(client: AsyncClient) -> None:
     assert response.json()["error"]["code"] == "bad_request"
 
 
-async def test_database_outage_is_a_503_not_a_500(with_database: Callable[[str], Settings]) -> None:
-    app = create_app(with_database("postgresql://x:y@127.0.0.1:1/triage"))
+async def test_database_outage_is_a_503_not_a_500(
+    app: FastAPI, sign_in_as: SignIn, with_database: Callable[[str], Settings]
+) -> None:
+    signed_in = await sign_in_as("team:default:viewer")
+    broken = create_app(with_database("postgresql://x:y@127.0.0.1:1/triage"))
     async with (
-        started(app),
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        started(broken),
+        AsyncClient(transport=ASGITransport(app=broken), base_url=BASE_URL) as client,
     ):
+        client.cookies = signed_in.cookies
         response = await client.get("/alerts")
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"

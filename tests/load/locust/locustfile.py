@@ -25,6 +25,11 @@ import time
 import gevent
 from locust import FastHttpUser, HttpUser, constant_throughput, events, task
 
+# The signed-in user every simulated user runs as: a session minted by
+# `make load-tool` (app.cli), and the Origin the api's CSRF check requires on
+# POSTs.
+SESSION = {"Cookie": os.environ["SESSION_COOKIE"], "Origin": os.environ.get("ORIGIN", "")}
+
 
 class AlertReader(FastHttpUser):
     """The shared scenario: one list request per user per second, so
@@ -32,6 +37,7 @@ class AlertReader(FastHttpUser):
     times cheaper per request than HttpUser (requests)."""
 
     wait_time = constant_throughput(1)
+    default_headers = SESSION
 
     def on_start(self) -> None:
         # Users are spawned in batches on whole-second boundaries; with a
@@ -51,6 +57,9 @@ class ChatUser(HttpUser):
     because it can iterate a streamed body; FastHttpUser cannot."""
 
     wait_time = constant_throughput(0.5)
+
+    def on_start(self) -> None:
+        self.client.headers.update(SESSION)
 
     @task
     def ask(self) -> None:

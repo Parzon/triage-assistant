@@ -2,7 +2,8 @@
 # Proves the stack comes up on a machine with nothing but Docker, make and
 # bash: a Docker-in-Docker container gets the committed tree (git archive
 # HEAD - uncommitted files cannot make it pass), `cp .env.example .env`,
-# `make prod-up`, and every user path is checked through nginx. Its Docker
+# `make prod-up`, and every user path is checked through the edge, signed
+# in through the bundled identity provider like a browser. Its Docker
 # has no image cache, so everything builds and pulls from scratch.
 #   make fresh-host-test                          ~5-10 minutes
 #   DUMP=backups/<file>.dump make fresh-host-test  also restores a dump into
@@ -39,16 +40,21 @@ step "ready over HTTPS: $(inside 'curl -sk https://localhost/api/ready')"
 step "plain HTTP is redirected to HTTPS"
 inside 'curl -sfk https://localhost/ | grep -q "<div id=\"root\">"'
 step "the edge and nginx serve the app"
-created=$(inside "curl -sfk -X POST https://localhost/api/alerts -H 'content-type: application/json' -d '{\"source\":\"fresh-host\",\"severity\":\"high\",\"message\":\"it works\"}'")
-inside 'curl -sfk "https://localhost/api/alerts?limit=5"' | grep -q '"fresh-host"'
+inside 'for i in $(seq 90); do [ "$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/auth/realms/triage/.well-known/openid-configuration)" = 200 ] && exit 0; sleep 2; done; exit 1'
+inside '. scripts/lib/session.sh && sign_in https://localhost alice "$(sed -n "s/^DEMO_USER_PASSWORD=//p" .env)" /tmp/jar -k'
+step "signed in as alice through the bundled identity provider"
+# As alice: her session cookie, and the Origin the api requires on writes.
+AS_ALICE="curl -sfk -b /tmp/jar -H 'Origin: https://localhost'"
+created=$(inside "$AS_ALICE -X POST https://localhost/api/alerts -H 'content-type: application/json' -d '{\"team\":\"payments\",\"source\":\"fresh-host\",\"severity\":\"high\",\"message\":\"it works\"}'")
+inside "$AS_ALICE 'https://localhost/api/alerts?limit=5'" | grep -q '"fresh-host"'
 step "write + read: $created"
-inside "curl -sfkN -X POST https://localhost/api/chat/stream -H 'content-type: application/json' -d '{\"message\":\"hello\"}'" | grep -q '^event: done'
+inside "$AS_ALICE -N -X POST https://localhost/api/chat/stream -H 'content-type: application/json' -d '{\"message\":\"hello\"}'" | grep -q '^event: done'
 step "chat streams to the end"
 
 if [ -n "${DUMP:-}" ]; then
   docker exec "$NAME" mkdir -p /srv/triage-assistant/backups
   docker cp "$DUMP" "$NAME:/srv/triage-assistant/backups/"
   inside "YES=1 make restore ENV=prod file=backups/$(basename "$DUMP") >/tmp/restore.log 2>&1" || { inside 'tail -30 /tmp/restore.log'; exit 1; }
-  step "restored $(basename "$DUMP"): $(inside "docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml exec -T db sh -c 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"select count(*) from alerts\"'") alerts, ready $(inside 'curl -s -o /dev/null -w "%{http_code}" localhost/api/ready')"
+  step "restored $(basename "$DUMP"): $(inside "docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml exec -T db sh -c 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"select count(*) from alerts\"'") alerts, ready $(inside 'curl -sk -o /dev/null -w "%{http_code}" https://localhost/api/ready')"
 fi
 step "PASS"

@@ -59,14 +59,16 @@ test('a provider failure is shown with a request id', async ({ page, request }) 
   await expect(alert).toContainText(/request id [0-9a-f]{32}/)
 })
 
-test('new alerts appear in the panel', async ({ page, request }) => {
+test('a responder creates an alert and it appears in the list', async ({ page }) => {
   const message = `e2e disk alert ${Date.now()}`
-  const created = await request.post('/api/alerts', {
-    data: { source: 'e2e', severity: 'critical', message },
-  })
-  expect(created.status()).toBe(201)
   await page.goto('/')
-  await expect(page.getByRole('listitem').filter({ hasText: message })).toBeVisible()
+  const form = page.getByRole('region', { name: 'New alert' })
+  await form.getByLabel('Severity').selectOption('critical')
+  await form.getByLabel('Message').fill(message)
+  await form.getByRole('button', { name: 'Create' }).click()
+  const row = page.getByRole('listitem').filter({ hasText: message })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText('payments') // alice's only team she may write to
 })
 
 test('the page loads with no console errors (CSP included)', async ({ page }) => {

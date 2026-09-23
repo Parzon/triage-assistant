@@ -20,6 +20,10 @@ Makefile to see the real `docker compose` command.
 | the production-shaped stack | `make prod-up` (HTTPS on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`) |
 | start from an empty database | `make nuke && make up` (deletes the dev volume) |
 | sample data | `make seed n=10000` |
+| sign in (dev) | http://localhost:5173 → Sign in → `alice`, `bob`, `carol` or `dave`, password `DEMO_USER_PASSWORD` from `.env` |
+| call the api with curl, signed in | `c=$(make -s session groups="team:default:responder")`, then `curl -b "$c" -H "Origin: http://localhost:5173" ...` (`ENV=prod`: `Origin` is `PUBLIC_URL`) |
+| end someone's sessions now | `make revoke email=alice@example.com` (`ENV=prod`) |
+| the identity provider's admin console (dev) | http://localhost:5173/auth/admin/, `admin` / `KEYCLOAK_ADMIN_PASSWORD` |
 
 ## Add a Python dependency
 
@@ -66,29 +70,45 @@ service's `node_modules` volume is root-owned.
 ## Add an endpoint
 
 1. **The route** in `apps/api/app/routes/<area>.py`, with request and
-   response models in `app/schemas.py`. Use `async def` and the async
-   session (`Session` dependency). A blocking call inside an async route
-   stalls every request on that worker. That's measured: a synchronous
-   HTTP client made `/health` take 4.8 s. Put CPU-heavy work in
-   `run_in_threadpool`.
-2. **Errors** go through the shared shape `{"error": {code, message,
+   response models in `app/schemas.py`. Use `async def` and the
+   request's database session (`db: DbSession`). A blocking call inside
+   an async route stalls every request on that worker. That's measured:
+   a synchronous HTTP client made `/health` take 4.8 s. Put CPU-heavy
+   work in `run_in_threadpool`.
+2. **Who may call it.** Take `principal: CurrentUser`: a request without
+   a session gets 401 before your code runs, and a state-changing one
+   from another site gets 403.
+   - Filter reads by `principal.team_ids()`, or reuse
+     `queries.newest_alerts`.
+   - Check writes with `require_role(principal, team_id, Role.RESPONDER,
+     "team")`: 404 when the caller cannot see the team, 403 when their
+     role is too low.
+   - Never trust a team id from the request body without that check.
+   - A new right is a new rank check, not a new role
+     (`app/access.py`).
+3. **Errors** go through the shared shape `{"error": {code, message,
    request_id}}`: raise `HTTPException`, or let the handlers in
    `app/errors.py` map database failures to 503. Never return a stack
    trace.
-3. **Rate limiting:** `dependencies=[Depends(rate_limit("<scope>",
+4. **Rate limiting:** `dependencies=[Depends(rate_limit("<scope>",
    "<setting>"))]`, as in `routes/chat.py`, plus a `<SCOPE>_RATE_LIMIT`
-   setting (see "Add a setting").
-4. **Metrics** come for free: the middleware records every request by
-   its route *template*.
-5. **Tests:** success, validation, not found, dependency down, rate
-   limit. The checklist is in the testing chapter.
-6. **Through nginx:** everything under `/api/` is proxied. A streaming
+   setting (see "Add a setting"). It counts per signed-in user;
+   `rate_limit_by_ip` is for routes used before sign-in.
+5. **Metrics** come for free: the middleware records every request by
+   its route *template*, and the access log records the user's id.
+6. **Tests:** success, validation, not found, access (401 / 404 / 403 /
+   `csrf_failed`), dependency down, rate limit. The checklist is in the
+   testing chapter.
+7. **Through nginx:** everything under `/api/` is proxied. A streaming
    endpoint needs its own `location` with `proxy_buffering off`
    (`location = /api/chat/stream` in `apps/web/nginx/default.conf`), or
    nginx delivers the whole stream at once. An internal-only endpoint
    gets `return 404` there, as `/api/metrics` does.
-7. **The UI** calls it through `apps/web/src/lib/api.ts`, which
-   turns every non-2xx into an `ApiError` carrying the request id.
+8. **The UI** calls it through `apps/web/src/lib/api.ts`, which
+   turns every non-2xx into an `ApiError` carrying the request id. A 401
+   from any query shows the sign-in page (`main.tsx`). Hide what a role
+   cannot do (`atLeast(team.role, 'responder')`), knowing that hiding is
+   a courtesy: the api is the control.
 
 ## Add a setting
 
@@ -230,7 +250,8 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `RATELIMIT_TIMEOUT_S` | 0.2 | budget per limiter call; past it the request is allowed (fail-open, ADR-0004) |
 | `REDIS_MAX_CONNECTIONS` | 256 | per worker; at least the concurrent requests per worker |
 | `RATELIMIT_WINDOW_S` | 60 | |
-| `ALERTS_RATE_LIMIT` / `CHAT_RATE_LIMIT` | 60 / 10 | per client IP per window. Load tests raise both |
+| `ALERTS_RATE_LIMIT` / `CHAT_RATE_LIMIT` | 60 / 10 | per signed-in user per window. Load tests raise both |
+| `AUTH_RATE_LIMIT` | 30 | sign-in redirects and callbacks, per client IP per window |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | required | any OpenAI-compatible endpoint (ADR-0006) |
 | `LLM_CONNECT_TIMEOUT_S` | 5 | |
 | `LLM_READ_TIMEOUT_S` | 60 | max silence from the provider, first token included |
@@ -240,6 +261,15 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `CHAT_CONTEXT_ALERTS` | 20 | recent alerts put in the prompt |
 | `SSE_HEARTBEAT_S` | 15 | keep-alive comments while the model is silent; below every proxy's idle timeout |
 | `ALERTMANAGER_WEBHOOK_TOKEN` | empty (webhook off) | shared with Alertmanager |
+| `PUBLIC_URL` | required (compose: `https://localhost`) | the site's address as browsers see it, no path; the redirect URI (`<PUBLIC_URL>/api/auth/callback`) and the `Origin` every state-changing request must carry derive from it. Dev: `http://localhost:5173` |
+| `OIDC_ISSUER` | required (compose: `<PUBLIC_URL>/auth/realms/triage`) | exactly the `iss` of the provider's ID tokens |
+| `OIDC_DISCOVERY_URL` | compose: the bundled Keycloak's, direct | where the api reads the provider's metadata. Empty for a real provider (`<issuer>/.well-known/openid-configuration`) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | `triage-web` / required | the app's registration at the provider; the secret must not be empty |
+| `OIDC_SCOPES` | `openid profile email` | |
+| `OIDC_GROUPS_CLAIM` | `groups` | the claim carrying `team:<slug>:<role>` and `org:admin` (`roles` for Entra ID app roles) |
+| `OIDC_TIMEOUT_S` | 5 | each call to the provider |
+| `SESSION_MAX_AGE_S` / `SESSION_IDLE_TIMEOUT_S` | 43200 / 7200 | a session ends 12 h after sign-in or 2 h after its last request; role changes apply at the next sign-in |
+| `SESSION_COOKIE_SECURE` | `true` | `false` only for plain-HTTP dev (the dev overlay sets it): the cookie is then `triage_session`, not `__Host-triage_session` |
 
 **gunicorn** (`apps/api/gunicorn.conf.py`, production image only):
 
@@ -261,7 +291,8 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | the schema owner: Postgres and migrations |
 | `APP_DB_USER`, `APP_DB_PASSWORD` | the app's role (reads and writes rows; no DDL), through PgBouncer |
 | `MONITOR_DB_USER`, `MONITOR_DB_PASSWORD` | postgres-exporter (`pg_monitor`: statistics only) |
-| `COMPOSE_PROFILES` | `mock` runs the mock LLM; add `observability` for the monitoring stack |
+| `COMPOSE_PROFILES` | `mock` runs the mock LLM, `edge` the TLS edge, `idp` the bundled Keycloak; add `observability` for the monitoring stack |
+| `KEYCLOAK_ADMIN_PASSWORD`, `DEMO_USER_PASSWORD` | the bundled Keycloak's administrator and its demo users (it refuses to start without both) |
 | `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT` | monitoring (bound to 127.0.0.1) |
 | `BIND_ADDR`, `API_PORT`, `WEB_PORT` | dev ports (127.0.0.1 by default) |
 | `HTTP_BIND`, `HTTP_PORT` | nginx over plain HTTP: loopback `8088` behind the TLS edge; `0.0.0.0`/`80` behind a cloud load balancer (edge profile off) |

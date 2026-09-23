@@ -9,23 +9,45 @@ services, what would be split off first, and the signal that says when.
 apps/web  (React, built to static files, served by nginx)
     │  /api/*  (nginx strips /api)
     ▼
-apps/api  (one FastAPI app, 1,449 lines of Python)
+apps/api  (one FastAPI app, 2,936 lines of Python)
+    routes/auth.py      GET /auth/login, GET /auth/callback, POST /auth/logout, GET /me,
+                        GET /teams/{slug}/members
     routes/alerts.py    POST /alerts, GET /alerts (keyset pages), GET /alerts/{id},
-                        POST /alerts/alertmanager (webhook, token)
+                        DELETE /alerts/{id}, POST /alerts/alertmanager (webhook, token)
     routes/chat.py      POST /chat/stream (SSE)
     routes/health.py    /health, /ready, /metrics
     triage.py           the prompt and the streaming loop (heartbeats, caps, cancellation)
     llm.py              the provider seam: any OpenAI-compatible API (ADR-0006)
-    ratelimit.py        per-client fixed windows in Valkey, fail-open (ADR-0004)
-    db.py, models.py    SQLAlchemy async, one table (alerts), PgBouncer in front (ADR-0005)
+    oidc.py             the identity-provider seam: OIDC code flow, ID-token checks (ADR-0013)
+    sessions.py         sessions in Postgres, the request's principal, the CSRF check
+    access.py           roles and who may do what: no I/O, unit-tested alone
+    queries.py          reads shared by routes: the visibility rule lives once
+    ratelimit.py        per-user fixed windows in Valkey, fail-open (ADR-0004)
+    db.py, models.py    SQLAlchemy async, PgBouncer in front (ADR-0005); the tenant
+                        context in every transaction
+    cli.py              operator commands: a session for scripts, revoke a user
     middleware.py, errors.py, logs.py, metrics.py   the cross-cutting parts
 ```
 
+The data:
+```
+teams ─┬─< memberships >── users ──< sessions         login_requests (a sign-in in progress)
+       └─< alerts
+```
+- **teams:** created the first time a sign-in names them.
+- **memberships:** the user's role per team, replaced at every sign-in.
+- **users:** identified by `(issuer, subject)`.
+- **sessions:** the SHA-256 of each cookie's token.
+- **alerts:** each owned by one team.
+
 It's a **modular monolith**:
 - One process type, one deploy, one database.
-- The internal boundaries are visible: the AI-specific logic is two
-  files (`triage.py`, `llm.py`), and everything else is the standard
-  scaffold every service here should share (ADR-0001).
+- The internal boundaries are visible:
+  - the AI-specific logic is two files (`triage.py`, `llm.py`);
+  - identity is three: `oidc.py` speaks the protocol, `sessions.py`
+    turns a cookie into a principal, `access.py` decides;
+  - everything else is the standard scaffold every service here should
+    share (ADR-0001).
 
 The frontend is a separate artifact because it has a different
 toolchain and a different runtime (static files), not because it is a
@@ -73,10 +95,11 @@ In order: each step is cheaper than the next and buys a known amount
 
 1. **Fix the query.** The first bottleneck was a missing index (p95 7 s
    → 4 ms). No amount of scaling fixes that.
-2. **More CPU for the api.** Workers follow the CPU limit (~500 simple
-   reads/s per core).
+2. **More CPU for the api.** Workers follow the CPU limit (~530 simple
+   signed-in reads/s per core).
 3. **More api replicas** behind a load balancer. They are stateless:
-   rate limits live in Valkey, sessions don't exist. The connection
+   rate limits live in Valkey, sessions in Postgres, so any replica
+   serves any request, with no sticky sessions. The connection
    budget sets the limit: 2 workers × 20 per replica against PgBouncer's
    `MAX_CLIENT_CONN` 500, i.e. ~12 replicas before that changes.
 4. **Separate chat and read deployments** (above).
@@ -101,3 +124,6 @@ The ADRs in `docs/adr/`, one line each:
 - **0009:** performance defaults from load tests.
 - **0010:** database timeouts live on the server side.
 - **0011:** releases and rolling deploys.
+- **0012:** HTTPS terminates at a Caddy edge.
+- **0013:** sign-in with the organisation's identity provider (OIDC,
+  server-side sessions); teams own alerts, with ranked roles.

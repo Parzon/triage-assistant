@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore acme-test fresh-host-test drills image-check seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        backup restore acme-test fresh-host-test drills image-check session revoke seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms
 
 help: ## List all targets
@@ -116,7 +116,7 @@ lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, 
 	$(DEV) run --rm --no-deps web npm run lint
 
 shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
-	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/git-hooks/*
+	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/lib/*.sh scripts/git-hooks/*
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
@@ -132,8 +132,11 @@ test: test-api test-web ## Every test suite (api + web), as CI runs them
 
 # --build: `run` never rebuilds an existing image, and the test project has
 # its own images - without it, tests silently run against stale dependencies.
-test-api: ## api suite + coverage gate, in a throwaway stack (real Postgres/PgBouncer/Valkey/mock LLM)
-	@$(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check' \
+# Keycloak starts first and boots (~20s) while images build and migrations
+# run; the sign-in tests wait for it (tests/integration/test_auth_flow.py).
+test-api: ## api suite + coverage gate, in a throwaway stack (real Postgres/PgBouncer/Valkey/Keycloak/mock LLM)
+	@$(TEST) up -d keycloak \
+	  && $(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check' \
 	  && $(TEST) run --build --rm $(AS_ME) api pytest --cov --cov-report=term --cov-report=xml:coverage.xml; \
 	  status=$$?; $(TEST) down --volumes --remove-orphans >/dev/null 2>&1; exit $$status
 
@@ -152,9 +155,13 @@ test-fast: ## api unit tests only: no database, seconds
 # reached at its container IP. Docker Desktop: enable host networking
 # (Settings > Resources > Network), or rely on CI.
 EDGE_HTTPS_PORT ?= $(or $(shell sed -n 's/^EDGE_HTTPS_PORT=//p' .env 2>/dev/null),443)
+# The tests sign in as the bundled identity provider's demo users. The
+# password travels in the environment (-e NAME, no value), never on a command
+# line that make echoes into terminals and CI logs.
+e2e: export DEMO_USER_PASSWORD ?= $(shell sed -n 's/^DEMO_USER_PASSWORD=//p' .env 2>/dev/null)
 e2e: ## Browser tests (Playwright) through the TLS edge of the running production stack: make prod-up first
 	docker run --rm --network host --shm-size=1g $(AS_ME) \
-	  -e npm_config_cache=/tmp/npm \
+	  -e npm_config_cache=/tmp/npm -e DEMO_USER_PASSWORD \
 	  -e E2E_BASE_URL=https://localhost:$(EDGE_HTTPS_PORT) -e E2E_IGNORE_HTTPS_ERRORS=1 \
 	  -e MOCK_ADMIN_URL=http://$$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $$($(PROD) ps -q mock-llm)):8020/_admin \
 	  -v "$(CURDIR)/tests/e2e:/e2e" -w /e2e mcr.microsoft.com/playwright:v1.63.0-noble \
@@ -173,7 +180,11 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 	@# through a test tool passes CI and crashes production. Read-only rootfs +
 	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
 	docker run --rm --read-only --tmpfs /tmp --entrypoint python $(IMG) -c "import app.main, app.triage, app.llm, app.routes.chat, app.metrics"
-	@echo "production image: non-root, no dev tools, all modules import"
+	@# The operator CLI runs next to the server (make session): it must never
+	@# write into the server's metrics directory - here one it could not write.
+	docker run --rm --read-only --tmpfs /tmp -e PROMETHEUS_MULTIPROC_DIR=/not-writable \
+	  --entrypoint python $(IMG) -m app.cli --help >/dev/null
+	@echo "production image: non-root, no dev tools, all modules import, the CLI runs"
 
 # --- Debugging toolkit ------------------------------------------------------------
 # ENV=prod points a target at the production-shaped stack instead of dev.
@@ -242,6 +253,18 @@ fresh-host-test: ## The committed tree on a clean Docker host (DinD): prod-up + 
 drills: ## Failure drills on the prod stack, one fault at a time: make drills [d="redis-hang db-stop"]
 	@scripts/failure-drills.sh "$(d)"
 
+# --- Sessions for scripts -------------------------------------------------------
+# A signed-in user without the identity provider (app/cli.py), for curl, load
+# tests and drills. groups= are claim values, as the provider would send them.
+
+session: ## Print a session cookie ("name=value"): make session [email=you@example.com] [groups="team:default:admin org:admin"] [ENV=prod]
+	@docker exec $(API_C) python -m app.cli session --email $(or $(email),script@example.com) \
+	  $(foreach g,$(or $(groups),team:default:viewer),--group $(g)) --hours $(or $(hours),4)
+
+revoke: ## End every session of a user now (after removing their access at the provider): make revoke email=... [ENV=prod]
+	@test -n "$(email)" || { echo 'usage: make revoke email=<address> [ENV=prod]'; exit 2; }
+	@docker exec $(API_C) python -m app.cli revoke --email "$(email)"
+
 # --- Performance lab ------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through
 # nginx, from a container on its network. Raise the rate limits for them:
@@ -251,9 +274,16 @@ seed: ## Insert N synthetic alerts: make seed n=1000000 [ENV=prod]
 	@test -n "$(n)" || { echo 'usage: make seed n=<rows> [ENV=prod]'; exit 2; }
 	$(if $(filter prod,$(ENV)),$(PROD),$(DEV)) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v n=$(n)' < scripts/seed-alerts.sql
 
+# Load tests run as a signed-in user: a session minted by app.cli (make
+# session) for a member of two seeded teams, and the site's origin for POSTs.
+LOAD_SESSION = docker exec $(PROD_API) python -m app.cli session \
+  --email load@example.com --group team:payments:viewer --group team:platform:viewer --hours 4
+LOAD_ORIGIN = docker exec $(PROD_API) printenv PUBLIC_URL
+
 s ?= alerts-read
 load: ## k6 scenario through nginx on the prod stack: make load s=chat VUS=100 (alerts-read|chat|health)
 	docker run --rm --network triage-assistant-prod_default $(AS_ME) -v "$(CURDIR)/tests/load:/scripts:ro" \
+	  -e SESSION_COOKIE="$$($(LOAD_SESSION))" -e ORIGIN="$$($(LOAD_ORIGIN))" \
 	  -e BASE_URL=http://web:8080 -e RATE=$(RATE) -e VUS=$(VUS) -e DURATION=$(DURATION) \
 	  -e K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write \
 	  -e 'K6_PROMETHEUS_RW_TREND_STATS=p(50),p(95),p(99),max' \
@@ -268,15 +298,18 @@ load-compare: ## Same scenario through k6, vegeta, oha, Locust, Artillery, JMete
 USERS ?= 50
 CLASS ?= AlertReader
 load-tool: ## Run one tool's reference script: make load-tool TOOL=locust CLASS=ChatUser USERS=50
-	@case "$(TOOL)" in \
+	@session="$$($(LOAD_SESSION))"; origin="$$($(LOAD_ORIGIN))"; \
+	case "$(TOOL)" in \
 	  locust) docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
+	    -e SESSION_COOKIE="$$session" -e ORIGIN="$$origin" \
 	    locustio/locust:2.46.6 -f /load/locust/locustfile.py $(CLASS) --headless -u $(USERS) -r $(USERS) \
 	    -t $(or $(DURATION),30s) --host http://web:8080 --only-summary ;; \
 	  artillery) docker run --rm --network triage-assistant-prod_default -e ARTILLERY_DISABLE_TELEMETRY=true \
+	    -e SESSION_COOKIE="$$session" \
 	    -v "$(CURDIR)/tests/load:/load:ro" artilleryio/artillery:2.0.34 run /load/artillery/alerts.yml ;; \
 	  jmeter) docker build -q -t triage-assistant-jmeter tools/load/jmeter >/dev/null && \
 	    docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
-	    triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx ;; \
+	    triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx -Jcookie="$$session" ;; \
 	  *) echo "usage: make load-tool TOOL=locust|artillery|jmeter  (k6: make load; all: make load-compare)"; exit 2 ;; \
 	esac
 
@@ -322,8 +355,11 @@ deps-web: ## Add an npm dependency: make deps-web p=zod   (dev-only: p="-D vites
 prod-build: ## Build the production images
 	$(PROD) build
 
-prod-up: ## Build and start the production stack (nginx on HTTP_PORT)
-	$(PROD) up -d --build
+# --wait: returns once every service is healthy (the one-shot migrate: exited
+# 0), so the next command - e2e in CI, a smoke check - never races a service
+# that is still starting (Keycloak takes ~20s).
+prod-up: ## Build and start the production stack; returns when it is healthy (HTTPS on EDGE_HTTPS_PORT)
+	$(PROD) up -d --build --wait --wait-timeout 300
 
 deploy: ## Roll a release onto this host without refusing requests: make deploy tag=1.4.0 (PULL=0: local images)
 	@test -n "$(tag)" || { echo 'usage: make deploy tag=<image tag>'; exit 2; }

@@ -21,7 +21,26 @@ from app.logs import request_id_var
 
 log = logging.getLogger(__name__)
 
-_CODES = {400: "bad_request", 404: "not_found", 405: "method_not_allowed", 429: "rate_limited"}
+_CODES = {
+    400: "bad_request",
+    401: "unauthenticated",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    429: "rate_limited",
+}
+
+
+class ApiError(HTTPException):
+    """An HTTPException with its own error code instead of the status's
+    generic one: {"error": {"code": "csrf_failed", ...}}."""
+
+    def __init__(
+        self, status_code: int, code: str, detail: str, headers: dict[str, str] | None = None
+    ) -> None:
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+        self.code = code
+
 
 # Connection-level failures only: the database is down, unreachable, too
 # slow, or the pool is exhausted. Constraint violations and SQL bugs are
@@ -50,7 +69,7 @@ def error_response(
 async def _http_error(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, HTTPException):  # registered for HTTPException only
         raise exc
-    code = _CODES.get(exc.status_code, "error")
+    code = exc.code if isinstance(exc, ApiError) else _CODES.get(exc.status_code, "error")
     return error_response(exc.status_code, code, str(exc.detail), dict(exc.headers or {}))
 
 

@@ -8,9 +8,11 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
     "gunicorn>=26.2.0",
+    "httpx2>=2.13",
     "openai>=3.17",
     "prometheus-client>=0.23",
     "pydantic-settings>=2.15.0",
+    "pyjwt[crypto]>=2.14",
     "redis>=8.1.0",
     "sqlalchemy[asyncio]>=2.0.54",
     "uvicorn-worker>=0.4",
@@ -48,6 +50,8 @@ select = [
 "tests/**" = ["S101", "S105", "S106"]    # asserts and fake credentials are fine in tests
 # 0.0.0.0 is the point inside a container; /dev/shm is a deliberate RAM-backed heartbeat dir
 "gunicorn.conf.py" = ["S104", "S108"]
+# Must change the environment before its imports (see the module).
+"app/cli.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -65,6 +69,10 @@ markers = ["integration: needs Postgres, PgBouncer and Redis - run via `make tes
 [tool.coverage.run]
 branch = true
 source = ["app"]
+# SQLAlchemy's asyncio layer runs database calls inside greenlets; without
+# this, coverage loses track at each switch and reports lines after an
+# `await session...` as never run.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 fail_under = 85

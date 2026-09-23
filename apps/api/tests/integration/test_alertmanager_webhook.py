@@ -5,7 +5,7 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.main import create_app
-from tests.integration.conftest import started
+from tests.integration.conftest import SignIn, started
 
 TOKEN = "test-webhook-token-0123456789"
 
@@ -48,7 +48,7 @@ async def test_firing_alerts_are_stored_once(settings: Settings, app: object) ->
     assert again.json() == {"received": 2, "created": 0}
 
 
-async def test_alerts_keep_severity_and_summary(settings: Settings, app: object) -> None:
+async def test_alerts_keep_severity_and_summary(settings: Settings, sign_in_as: SignIn) -> None:
     await post(
         with_token(settings),
         payload(am_alert("DiskAlmostFull", severity="critical")),
@@ -57,16 +57,37 @@ async def test_alerts_keep_severity_and_summary(settings: Settings, app: object)
     await post(
         with_token(settings), payload(am_alert("Odd", severity="page-everyone")), f"Bearer {TOKEN}"
     )
-    app_ = create_app(settings)
-    async with (
-        started(app_),
-        httpx.AsyncClient(transport=httpx.ASGITransport(app=app_), base_url="http://t") as client,
-    ):
-        items = (await client.get("/alerts")).json()["items"]
+    org_admin = await sign_in_as("org:admin")
+    items = (await org_admin.get("/alerts")).json()["items"]
     by_source = {item["source"]: item for item in items}
     assert by_source["alertmanager/DiskAlmostFull"]["severity"] == "critical"
     assert by_source["alertmanager/DiskAlmostFull"]["message"] == "DiskAlmostFull summary"
     assert by_source["alertmanager/Odd"]["severity"] == "info"  # unknown label -> info
+
+
+async def test_alerts_are_routed_by_their_team_label(
+    settings: Settings, sign_in_as: SignIn
+) -> None:
+    payments = await sign_in_as("team:payments:viewer")  # the team exists once someone signs in
+    await post(
+        with_token(settings),
+        payload(
+            am_alert("PaymentsDown", team="payments"),
+            am_alert("Orphan", team="no-such-team"),
+            am_alert("Unlabelled"),
+        ),
+        f"Bearer {TOKEN}",
+    )
+    org_admin = await sign_in_as("org:admin")
+    teams = {i["source"]: i["team"] for i in (await org_admin.get("/alerts")).json()["items"]}
+    assert teams == {
+        "alertmanager/PaymentsDown": "payments",
+        "alertmanager/Orphan": "default",  # unknown team: logged, kept, not lost
+        "alertmanager/Unlabelled": "default",
+    }
+    assert [i["source"] for i in (await payments.get("/alerts")).json()["items"]] == [
+        "alertmanager/PaymentsDown"
+    ]
 
 
 async def test_resolved_alerts_are_not_stored(settings: Settings, app: object) -> None:

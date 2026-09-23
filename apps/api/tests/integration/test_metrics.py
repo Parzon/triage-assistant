@@ -35,13 +35,12 @@ async def test_http_metrics_use_route_templates(client: AsyncClient) -> None:
 
 
 async def test_llm_and_ratelimit_metrics_after_a_chat(
-    client_for: ClientFactory, mock_llm: MockLLM
+    client: AsyncClient, mock_llm: MockLLM
 ) -> None:
-    async with client_for("192.0.2.90") as client:
-        before = (await client.get("/metrics")).text
-        ok_before = _or_zero(before, "llm_requests_total", outcome="ok")
-        await client.post("/chat/stream", json={"message": "metrics please"})
-        text = (await client.get("/metrics")).text
+    before = (await client.get("/metrics")).text
+    ok_before = _or_zero(before, "llm_requests_total", outcome="ok")
+    await client.post("/chat/stream", json={"message": "metrics please"})
+    text = (await client.get("/metrics")).text
     assert sample(text, "llm_requests_total", outcome="ok") == ok_before + 1
     assert sample(text, "llm_tokens_total", kind="completion") > 0
     assert sample(text, "llm_time_to_first_token_seconds_count") >= 1
@@ -63,6 +62,19 @@ async def test_pool_gauge_counts_connections_in_use(app: FastAPI) -> None:
         assert REGISTRY.get_sample_value("db_pool_connections_max") == 5
     finally:
         watcher.cancel()
+
+
+async def test_refused_requests_are_counted_by_reason(
+    client: AsyncClient, anonymous: ClientFactory
+) -> None:
+    before = (await client.get("/metrics")).text
+    async with anonymous() as nobody:
+        await nobody.get("/alerts")
+    await client.post("/alerts", json={}, headers={"Origin": "https://evil.example"})
+    after = (await client.get("/metrics")).text
+    for reason in ("no_session", "cross_origin"):
+        was = _or_zero(before, "auth_rejections_total", reason=reason)
+        assert sample(after, "auth_rejections_total", reason=reason) == was + 1
 
 
 def _or_zero(text: str, name: str = "http_requests_total", **labels: str) -> float:

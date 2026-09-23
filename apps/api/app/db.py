@@ -10,14 +10,17 @@ temp tables) outliving a transaction, and migrations bypass PgBouncer
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Annotated, Any
 
-from fastapi import Request
+from fastapi import Depends, Request
+from sqlalchemy import Connection, Select, event, func, select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.pool import QueuePool
 
 from app.config import Settings
@@ -68,13 +71,54 @@ async def watch_db_pool(engine: AsyncEngine, capacity: int, interval_s: float = 
         await asyncio.sleep(interval_s)
 
 
+class ContextSession(Session):
+    """A Session that tells Postgres who is asking, in every transaction.
+
+    Values given to set_transaction_settings() (by the request's
+    authentication: app/sessions.py) are applied with set_config(..., true)
+    to the open transaction and as each later one begins. Row-level security
+    policies read them with current_setting() (ADR-0013, ADR-0014).
+
+    Transaction-local on purpose: through PgBouncer's transaction pooling
+    the next transaction on this server connection may be another user's.
+    A session-level SET would still be there for them.
+    """
+
+
+def _set_config(values: dict[str, str]) -> Select[Any]:
+    return select(*(func.set_config(k, v, True) for k, v in values.items()))
+
+
+@event.listens_for(ContextSession, "after_begin")
+def _apply_transaction_settings(
+    session: Session, transaction: SessionTransaction, connection: Connection
+) -> None:
+    values: dict[str, str] | None = session.info.get("transaction_settings")
+    if values:
+        connection.execute(_set_config(values))
+
+
+async def set_transaction_settings(session: AsyncSession, values: dict[str, str]) -> None:
+    """Applied to the open transaction, if any, and to every later one."""
+    session.info["transaction_settings"] = values
+    if session.in_transaction():
+        await session.execute(_set_config(values))
+
+
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     # expire_on_commit=False: returned ORM objects stay readable after
     # commit without a second round trip (and without implicit async I/O).
-    return async_sessionmaker(engine, expire_on_commit=False)
+    return async_sessionmaker(engine, expire_on_commit=False, sync_session_class=ContextSession)
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
     async with sessionmaker() as session:
         yield session
+
+
+# One database session per request, closed as soon as the route returns -
+# scope="function". The default scope closes it after the response is SENT,
+# which for a streamed answer is a minute later: its connection (and any
+# open transaction) would stay checked out the whole time.
+DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]

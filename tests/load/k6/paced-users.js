@@ -4,6 +4,7 @@
 // the workload shape, not the tool, changes the result.
 import http from 'k6/http'
 import { sleep } from 'k6'
+import { AUTH } from './session.js'
 
 export const options = {
   scenarios: { users: { executor: 'constant-vus', vus: Number(__ENV.VUS || 100), duration: `${__ENV.DURATION || 20}s` } },
@@ -12,6 +13,6 @@ export const options = {
 
 export default function () {
   const started = Date.now()
-  http.get(`${__ENV.BASE_URL || 'http://web:8080'}${__ENV.PATH_ || '/api/alerts?limit=50'}`)
+  http.get(`${__ENV.BASE_URL || 'http://web:8080'}${__ENV.PATH_ || '/api/alerts?limit=50'}`, { headers: AUTH })
   sleep(Math.max(0, 1 - (Date.now() - started) / 1000))
 }

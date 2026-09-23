@@ -97,10 +97,12 @@ runcmd:
   - sudo -u deploy git clone https://github.com/Parzon/triage-assistant.git /srv/triage-assistant
   # Real secrets instead of the template's placeholders; the LLM key stays
   # for the operator to set (or keep COMPOSE_PROFILES=mock for a demo
-  # without a provider).
+  # without a provider). The demo users' password is generated too: read it
+  # from .env to sign in.
   - >-
     sudo -u deploy sh -c 'cd /srv/triage-assistant && cp .env.example .env && chmod 600 .env &&
-    for v in POSTGRES_PASSWORD APP_DB_PASSWORD MONITOR_DB_PASSWORD GRAFANA_ADMIN_PASSWORD ALERTMANAGER_WEBHOOK_TOKEN;
+    for v in POSTGRES_PASSWORD APP_DB_PASSWORD MONITOR_DB_PASSWORD GRAFANA_ADMIN_PASSWORD ALERTMANAGER_WEBHOOK_TOKEN
+    OIDC_CLIENT_SECRET KEYCLOAK_ADMIN_PASSWORD DEMO_USER_PASSWORD;
     do sed -i "s|^$v=.*|$v=$(openssl rand -hex 24)|" .env; done'
 
 final_message: "triage-assistant host ready after $UPTIME s. Next: docs/runbooks/demo-vm.md, step 3."

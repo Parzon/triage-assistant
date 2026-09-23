@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 
 from httpx import ASGITransport, AsyncClient
@@ -26,7 +27,10 @@ async def test_liveness_needs_no_dependencies(client: AsyncClient) -> None:
 async def test_ready_when_database_and_redis_answer(client: AsyncClient) -> None:
     response = await client.get("/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "checks": {"database": "ok", "redis": "ok"}}
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["checks"]["database"] == "ok"
+    assert body["checks"]["redis"] == "ok"
 
 
 async def test_redis_outage_degrades_but_stays_ready(
@@ -34,7 +38,32 @@ async def test_redis_outage_degrades_but_stays_ready(
 ) -> None:
     status, body = await get(with_redis("redis://127.0.0.1:1/0"), "/ready")
     assert status == 200
-    assert body["checks"] == {"database": "ok", "redis": "degraded"}
+    assert body["checks"]["redis"] == "degraded"
+
+
+async def test_identity_provider_outage_degrades_but_stays_ready(
+    settings: Settings, blackhole_port: int
+) -> None:
+    """Signed-in users carry on without the provider: never a reason to take
+    an instance out of rotation. Reported from the background check."""
+    down = settings.model_copy(
+        update={
+            "oidc_discovery_url": f"http://127.0.0.1:{blackhole_port}/.well-known/x",
+            "oidc_timeout_s": 0.2,
+        }
+    )
+    app = create_app(down)
+    async with (
+        started(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        for _ in range(50):  # the watcher's first check times out after 0.2s
+            response = await client.get("/ready")
+            if response.json()["checks"]["identity_provider"] != "unknown":
+                break
+            await asyncio.sleep(0.05)
+    assert response.status_code == 200
+    assert response.json()["checks"]["identity_provider"] == "degraded"
 
 
 async def test_database_outage_is_not_ready(with_database: Callable[[str], Settings]) -> None:

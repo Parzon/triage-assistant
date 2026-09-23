@@ -22,6 +22,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.metrics import ratelimit_decisions
+from app.sessions import CurrentUser
 
 log = logging.getLogger(__name__)
 
@@ -76,36 +77,48 @@ class RateLimiter:
         return Decision(allowed, limit, max(0, limit - count), reset_s)
 
 
-def client_identity(request: Request) -> str:
-    """Who is being limited. The client IP as rewritten by the proxy-headers
-    middleware from the X-Forwarded-For that nginx sets. Behind SSO, key on
-    the authenticated user instead: a whole office can share one egress IP.
-    """
+def client_ip(request: Request) -> str:
+    """The client's address as the proxies report it (X-Forwarded-For, read
+    by the proxy-headers middleware; the edge overwrites what clients send)."""
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit(scope: str, limit_setting: str) -> Callable[[Request], Awaitable[Decision]]:
-    """FastAPI dependency enforcing the limit named by `limit_setting`.
+async def enforce(request: Request, scope: str, limit_setting: str, client: str) -> Decision:
+    """Count one request for `client`; 429 once over the limit named by
+    `limit_setting`. The decision's headers are stashed on the request state
+    and written by RequestContextMiddleware, so they reach JSON and streaming
+    responses alike."""
+    settings = request.app.state.settings
+    limiter: RateLimiter = request.app.state.limiter
+    decision = await limiter.hit(
+        scope,
+        client,
+        limit=getattr(settings, limit_setting),
+        window_s=settings.ratelimit_window_s,
+    )
+    request.state.response_headers = decision.headers()
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429, detail="rate limit exceeded", headers=decision.headers()
+        )
+    return decision
 
-    The decision's headers are stashed on the request state and written by
-    RequestContextMiddleware, so they reach JSON and streaming responses
-    alike.
-    """
+
+def rate_limit(scope: str, limit_setting: str) -> Callable[..., Awaitable[Decision]]:
+    """Per signed-in user: a whole office can share one egress IP. Depends
+    on the principal, so it also runs after authentication, whatever order
+    a route declares its dependencies in."""
+
+    async def dependency(request: Request, principal: CurrentUser) -> Decision:
+        return await enforce(request, scope, limit_setting, f"user:{principal.user_id}")
+
+    return dependency
+
+
+def rate_limit_by_ip(scope: str, limit_setting: str) -> Callable[..., Awaitable[Decision]]:
+    """For requests made before anyone is signed in (the sign-in itself)."""
 
     async def dependency(request: Request) -> Decision:
-        settings = request.app.state.settings
-        limiter: RateLimiter = request.app.state.limiter
-        decision = await limiter.hit(
-            scope,
-            client_identity(request),
-            limit=getattr(settings, limit_setting),
-            window_s=settings.ratelimit_window_s,
-        )
-        request.state.response_headers = decision.headers()
-        if not decision.allowed:
-            raise HTTPException(
-                status_code=429, detail="rate limit exceeded", headers=decision.headers()
-            )
-        return decision
+        return await enforce(request, scope, limit_setting, f"ip:{client_ip(request)}")
 
     return dependency

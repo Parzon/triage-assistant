@@ -7,13 +7,13 @@ layer caught in this repo. All numbers are from the current `main`.
 
 | Layer | Runs against | Count | Command | Proves |
 |---|---|---|---|---|
-| api unit | nothing (pure Python) | part of 99 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets |
-| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, mock LLM | part of 99 | `make test-api` (~28 s) | every endpoint's success and failure paths through the real drivers, pools and SQL |
-| web unit/component | jsdom (Vitest + React Testing Library) | 25 | `make test-web` | UI states, the SSE parser, error handling in the API client |
-| end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 5 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
-| image | the production image | 1 check | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem |
+| api unit | nothing (pure Python) | 108 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model |
+| api integration | a throwaway stack: real Postgres, PgBouncer, Valkey, Keycloak, mock LLM | 82 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what; signing in through the real identity provider |
+| web unit/component | jsdom (Vitest + React Testing Library) | 47 | `make test-web` | UI states, the sign-in gate, role-dependent UI, the SSE parser, error handling in the API client |
+| end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 12 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: signing in and out through Keycloak's page, two users seeing different alerts, a cross-site POST refused, incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
+| image | the production image | 2 checks | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem, and the operator CLI runs without touching the server's metrics directory |
 | load | the production stack | on demand | `make load`, `make load-compare` | capacity, latency under load (performance chapter) |
-| failure drills | the production stack | 21 drills | `make drills` | what users see when each dependency fails, and that it recovers (failure-modes chapter) |
+| failure drills | the production stack | 22 drills | `make drills` | what users see when each dependency fails, and that it recovers (failure-modes chapter) |
 | fresh host | a clean Docker host (DinD) | 1 run | `make fresh-host-test` | the committed tree comes up from `.env.example` alone, serving HTTPS |
 | release smoke | the *published* images, amd64 and arm64 | every release | `scripts/smoke-release.sh <prefix> <tag>` | what was pushed runs: HTTPS with a verified chain, write, read, a streamed answer |
 | ACME rehearsal | the edge image against Pebble (Let's Encrypt's test CA) | on demand | `make acme-test` | automatic certificates: obtained over HTTP-01, served, kept across a restart |
@@ -21,9 +21,12 @@ layer caught in this repo. All numbers are from the current `main`.
 `make test` runs the api and web suites exactly as CI does. `make check`
 also runs lint and types. Run it before every push.
 
-**Coverage:** the api has **95.9% line+branch coverage** (gate: 85%, branch
-coverage on). The web has **99.1% of lines and 93.8% of branches** (gates:
-85% lines, 80% branches). The gates are floors, not goals: a line that
+**Coverage:** the api has **96.5% line+branch coverage** (gate: 85%, branch
+coverage on). The web has **100% of lines and 95.7% of branches** (gates:
+85% lines, 80% branches). The api measures with
+`concurrency = ["greenlet", "thread"]`: without it, coverage loses track
+at SQLAlchemy's greenlet switches and reports the lines after an `await
+session...` as never run (it read 89.7% for the same tests). The gates are floors, not goals: a line that
 ran is not a behaviour that was checked. Coverage finds code nothing
 exercises; only assertions find wrong behaviour.
 
@@ -39,9 +42,10 @@ Before pytest runs:
 
 The test database runs with `fsync=off` and `synchronous_commit=off`.
 Durability is useless for throwaway data, and every commit skips the
-disk flush. The 99 tests take ~10 s; with the stack created and
-destroyed around them, `make test-api` takes ~28 s. `make test-fast`
-(unit tests only, no services) takes ~4 s.
+disk flush. Keycloak starts first and boots (~20 s) while the images
+build and the migrations run. The 190 tests take ~22 s; with the stack
+created and destroyed around them, `make test-api` takes ~40 s. `make
+test-fast` (unit tests only, no services) takes ~4 s.
 
 The api's settings are tuned for tests there: small rate limits (5 alert
 requests per minute), a 1 s model read timeout, no retries, 0.2 s
@@ -51,11 +55,30 @@ Fixtures worth knowing (`apps/api/tests/integration/conftest.py`):
 
 | Fixture | What it gives you |
 |---|---|
-| `app`, `client` | the real app with its lifespan (pools, clients), called in-process through httpx's ASGI transport |
-| `client_for("192.0.2.7")` | a client with its own `X-Forwarded-For`, so rate-limit tests don't share one budget |
+| `app` | the real app with its lifespan (pools, clients), called in-process through httpx's ASGI transport; the data is reset before each test |
+| `sign_in_as("team:payments:responder", email=...)` | a client signed in as a user whose identity provider sent those groups. Made by `sessions.sign_in`, the code the real callback runs, so every test goes through the real session, access and tenant code. A different `email` is a different user, with their own rate-limit budget |
+| `client` | a responder in the `default` team: may read and create its alerts |
+| `anonymous()` | a client with no session: for the 401 paths |
+| `signed_in(app, ...)` | the same, for an app a test builds itself (other settings) |
 | `with_database(url)`, `with_redis(url)` | settings pointing a dependency somewhere unreachable: outage tests |
 | `blackhole_port` | a TCP server that accepts connections and never answers: what a frozen dependency looks like to a client |
 | `mock_llm` | drives the mock provider's failure modes (429, 500, hang, drop mid-stream) and reads its counters: `streams_cancelled` proves a cancellation reached the provider |
+
+### Signing in, in tests
+
+Only `test_auth_flow.py` drives the identity provider: it plays the
+browser against the test stack's Keycloak, submitting its login form and
+following the redirects. It covers the whole flow and each refusal: a
+replayed code, a callback from another browser, a mix-up `iss`, an open
+redirect, sign-out at the provider, the provider down. Everything else
+signs in with `sign_in_as`, in milliseconds.
+
+The clients send `Origin: https://test` (the test stack's `PUBLIC_URL`),
+as a browser does. CSRF tests remove it. In the browser tests, a
+Playwright *setup project* (`specs/auth.setup.ts`) signs alice and bob in
+once through Keycloak's page, and saves their cookies. Every other test
+starts signed in (`storageState`); `test.use({ storageState: { cookies:
+[], origins: [] } })` gives a signed-out one.
 
 ## What not to mock
 
@@ -89,6 +112,10 @@ Real incidents in this repo, and the layer that found them:
 | stale dependencies in the test stack: `docker compose run` never rebuilds an existing image | ModuleNotFoundError locally while CI (fresh) passed | noticed in a local run; `make test-api` now passes `--build` |
 | database connections leaked forever after Postgres froze under load | 13 of 40 pool slots stuck | only the freeze-under-load drill: single-request tests never showed it |
 | missing index on newest-first reads | p95 7 s at 40 req/s; 43–152 ms when tested alone | only a load test |
+| a request-scoped database session would have held its connection for a whole streamed answer (FastAPI closes `yield` dependencies after the response is sent) | 20 slow answers would have emptied a worker's pool | a 20-line experiment before shipping; now an integration test checks the pool mid-stream |
+| the operator CLI crashed in the production image: an empty `PROMETHEUS_MULTIPROC_DIR` still turns multiprocess mode on, pointed at a relative path on a read-only root | `OSError: Read-only file system` from `make load` | running it against the production stack; now `make image-check` |
+| the first sign-in design doubled CPU per request and collapsed at 1,000 req/s (p95 1.07 s) | fine at low load, every functional test green | only an A/B load test |
+| an identity provider outage was invisible: sign-in redirects came from cached metadata | no failed request anywhere | only the `idp-stop` drill; now a 30 s check, `/ready` and an alert |
 
 Each layer earns its place by finding a class of bug the layer below
 could not.
@@ -103,7 +130,12 @@ The minimum (AGENTS.md):
 - **Dependency down:** `with_database` / `with_redis` pointing nowhere,
   or `blackhole_port` for a hang. Assert the status (503) and the error
   code, not just "not 200".
-- **Rate limit:** if it is limited, use `client_for` with a fresh IP.
+- **Access:** signed out → 401 (`anonymous()`); another team's resource
+  → 404, the same as a missing one; a role too low → 403; a POST from
+  another origin → 403 `csrf_failed`. `test_access.py` has the pattern:
+  a cast of users, one per role.
+- **Rate limit:** if it is limited, use a user of its own
+  (`sign_in_as(..., email=...)`).
 - **Metrics:** if it adds a metric, assert it moved and its labels are
   bounded (`test_metrics.py`).
 
@@ -121,7 +153,8 @@ Common causes met here:
   task finishes: assert after `await asyncio.sleep(0)`.
 - **Merged cancellations.** A second `task.cancel()` before the first is
   delivered merges into one: wait for evidence the first landed.
-- **Shared rate-limit budgets** between tests: use `client_for`.
+- **Shared rate-limit budgets** between tests: limits are per user, so
+  give each test's writers their own email.
 
 ## CI
 
@@ -131,7 +164,8 @@ Common causes met here:
   coverage figure in the job summary)
 - `build` (`make image-check`)
 - `web-build` (lint, tests, build, and the production nginx config test)
-- `e2e` (`make prod-up`, then Playwright; the report is uploaded when it
+- `e2e` (`make prod-up`, which waits until every service is healthy,
+  Keycloak included, then Playwright; the report is uploaded when it
   fails)
 
 All five are required checks on `main`. If CI and your laptop disagree,

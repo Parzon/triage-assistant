@@ -1,6 +1,7 @@
 // k6 side of `make load-compare`: one GET per iteration at a fixed arrival
 // rate, identical to the other tools' scenario.
 import http from 'k6/http'
+import { AUTH } from './session.js'
 
 export const options = {
   scenarios: {
@@ -17,5 +18,5 @@ export const options = {
 }
 
 export default function () {
-  http.get(`${__ENV.BASE_URL || 'http://web:8080'}/api/alerts?limit=50`)
+  http.get(`${__ENV.BASE_URL || 'http://web:8080'}/api/alerts?limit=50`, { headers: AUTH })
 }

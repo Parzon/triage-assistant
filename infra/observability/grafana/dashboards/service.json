@@ -984,7 +984,7 @@
     {
       "id": 18,
       "type": "row",
-      "title": "Dependencies",
+      "title": "Sign-in and access",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -996,6 +996,194 @@
     },
     {
       "id": 19,
+      "type": "stat",
+      "title": "Identity provider",
+      "description": "1 = the provider answered the api's last check (every 30s). 0 = new sign-ins fail; signed-in users are unaffected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 0,
+        "y": 44
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(identity_provider_up)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Sign-ins by outcome",
+      "description": "Callbacks from the provider per 5 min. access_denied: the user cancelled or may not use the app. invalid_state / expired: a sign-in replayed or left too long. login_failed / invalid_token: the exchange or the token was refused - a burst after a change means a client secret, redirect URI or clock problem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 4,
+        "y": 44
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (increase(auth_logins_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Refused requests by reason",
+      "description": "no_session: not signed in (a sign-in page loading). expired: sessions ending. cross_origin: a state-changing request from another site - someone attempting CSRF, or a script without the Origin header.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 14,
+        "y": 44
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(auth_rejections_total[1m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Dependencies",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
       "type": "timeseries",
       "title": "Rate limiter decisions",
       "description": "fail_open = Redis did not answer within the budget, request allowed (ADR-0004).",
@@ -1007,7 +1195,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1051,7 +1239,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 24,
       "type": "timeseries",
       "title": "App database pools",
       "description": "The api's own pools, in front of PgBouncer. In use near max = requests about to wait (pool_timeout) and fail with 503. In use above 0 with no traffic = leaked connections (ADR-0010).",
@@ -1063,7 +1251,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1127,7 +1315,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 25,
       "type": "timeseries",
       "title": "PgBouncer pool",
       "description": "Clients waiting > 0 for long = the pool is too small for the load, or queries are too slow.",
@@ -1139,7 +1327,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1213,7 +1401,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 26,
       "type": "timeseries",
       "title": "Postgres",
       "description": "",
@@ -1225,7 +1413,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1279,7 +1467,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 27,
       "type": "row",
       "title": "Containers and host",
       "collapsed": false,
@@ -1287,12 +1475,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "panels": []
     },
     {
-      "id": 24,
+      "id": 28,
       "type": "timeseries",
       "title": "CPU by container",
       "description": "In cores: 1 = one full CPU.",
@@ -1304,7 +1492,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 61
       },
       "targets": [
         {
@@ -1348,7 +1536,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 29,
       "type": "timeseries",
       "title": "Memory by container (working set)",
       "description": "Working set is what the OOM killer compares with the limit.",
@@ -1360,7 +1548,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 61
       },
       "targets": [
         {
@@ -1404,7 +1592,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 30,
       "type": "timeseries",
       "title": "Host disk free",
       "description": "",
@@ -1416,7 +1604,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1460,7 +1648,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 31,
       "type": "timeseries",
       "title": "Redis",
       "description": "",
@@ -1472,7 +1660,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1526,7 +1714,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 32,
       "type": "timeseries",
       "title": "OOM kills",
       "description": "Processes the kernel killed for exceeding their container's memory limit (last 5 min). A killed gunicorn worker is replaced and the container stays healthy: this panel and the ContainerOOMKilled alert are the only trace.",
@@ -1538,7 +1726,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {

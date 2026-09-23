@@ -136,6 +136,30 @@ groups:
           summary: "users wait over 10s (p95) for the first word of an answer"
           runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#llmslowfirsttoken"
 
+  # Signed-in users never notice these: sessions are the service's own. Only
+  # people trying to sign in do - so without these, nobody would be told.
+  - name: sign-in
+    rules:
+      - alert: IdentityProviderDown
+        expr: min(identity_provider_up) == 0
+        for: 2m
+        labels: {severity: high}
+        annotations:
+          summary: "the identity provider does not answer: new sign-ins fail (signed-in users are unaffected)"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#identityproviderdown"
+
+      # The provider answers, yet nobody gets in: a rotated client secret, a
+      # redirect URI changed at the provider, clock skew rejecting tokens.
+      - alert: SignInsFailing
+        expr: |
+          sum(increase(auth_logins_total{outcome!="ok"}[15m])) >= 5
+            and (sum(increase(auth_logins_total{outcome="ok"}[15m])) or vector(0)) == 0
+        for: 5m
+        labels: {severity: high}
+        annotations:
+          summary: "every sign-in in the last 15 minutes failed"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#signinsfailing"
+
   - name: capacity
     rules:
       - alert: DiskWillFillIn6h

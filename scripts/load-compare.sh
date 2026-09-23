@@ -16,6 +16,13 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$(mktemp -d)
 chmod 777 "$OUT"
 TOOLS="k6 vegeta oha locust artillery jmeter"
+# Every tool runs as the same signed-in user (a session minted by app.cli), in
+# two of the seeded teams: the multi-team read path.
+# shellcheck source=scripts/lib/session.sh
+. "$ROOT/scripts/lib/session.sh"
+API=$(docker ps -q --filter label=com.docker.compose.project=triage-assistant-prod \
+  --filter label=com.docker.compose.service=api | head -1)
+SESSION=$(mint_session "$API" load@example.com team:payments:viewer team:platform:viewer)
 cleanup() {
   for t in $TOOLS; do docker rm -f "lt-$t" >/dev/null 2>&1 || true; done
   rm -rf "$OUT"
@@ -40,17 +47,21 @@ run() {
   sleep 5  # let the server settle between tools
 }
 
-run k6 grafana/k6:2.3.0 run --quiet --no-usage-report -e RATE="$RATE" -e DURATION="$DURATION" \
+run k6 -e SESSION_COOKIE="$SESSION" grafana/k6:2.3.0 run --quiet --no-usage-report -e RATE="$RATE" -e DURATION="$DURATION" \
   --summary-export /out/k6.json /load/k6/compare.js
-run vegeta --entrypoint sh triage-assistant-vegeta -c \
-  "echo 'GET $URL' | vegeta attack -rate=$RATE/s -duration=${DURATION}s | vegeta report -type=json > /out/vegeta.json"
-run oha "$OHA" -z "${DURATION}s" -q "$RATE" --latency-correction --no-tui --output-format json -o /out/oha.json "$URL"
-run locust locustio/locust:2.46.6 -f /load/locust/locustfile.py AlertReader --headless \
+# The targets file names the cookie as ${SESSION_COOKIE}; sed fills it in
+# (session tokens are URL-safe base64: nothing in them clashes with "|").
+run vegeta -e SESSION_COOKIE="$SESSION" --entrypoint sh triage-assistant-vegeta -c \
+  "sed \"s|\\\${SESSION_COOKIE}|\$SESSION_COOKIE|\" /load/vegeta/alerts.txt | vegeta attack -rate=$RATE/s -duration=${DURATION}s | vegeta report -type=json > /out/vegeta.json"
+run oha "$OHA" -z "${DURATION}s" -q "$RATE" --latency-correction --no-tui -H "Cookie: $SESSION" \
+  --output-format json -o /out/oha.json "$URL"
+run locust -e SESSION_COOKIE="$SESSION" locustio/locust:2.46.6 -f /load/locust/locustfile.py AlertReader --headless \
   -u "$RATE" -r "$RATE" -t "${DURATION}s" --host http://web:8080 --csv /out/locust --only-summary
-run artillery -e ARTILLERY_DISABLE_TELEMETRY=true artilleryio/artillery:2.0.34 run \
+run artillery -e SESSION_COOKIE="$SESSION" -e ARTILLERY_DISABLE_TELEMETRY=true artilleryio/artillery:2.0.34 run \
   --overrides "{\"config\":{\"phases\":[{\"duration\":$DURATION,\"arrivalRate\":$RATE}]}}" \
   --output /out/artillery.json /load/artillery/alerts.yml
-run jmeter triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx -Jduration="$DURATION" -l /out/jmeter.jtl -j /out/jmeter.log
+run jmeter triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx -Jduration="$DURATION" -Jcookie="$SESSION" \
+  -l /out/jmeter.jtl -j /out/jmeter.log
 
 python3 - "$OUT" "$RATE" "$DURATION" <<'PY'
 import csv, json, sys

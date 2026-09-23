@@ -22,6 +22,8 @@ production api container.
 | Container restarted / exit 137 | `docker inspect` (ExitCode, OOMKilled, RestartCount) | Grafana **OOM kills** panel; `memory.events` |
 | A service can't reach another | `make netshoot` (dig, curl, ss) | `make tcpdump` |
 | Rate limiting behaves oddly | `make redis-slowlog`, `make redis-cli` | the `ratelimit_decisions_total` panel |
+| Nobody can sign in, or one person can't | the api log's `"sign-in failed"` lines (code and reason) | "Signing in" below: the provider's log, the flow with curl |
+| Someone sees too much or too little | `GET /api/me` as them (their teams and roles) | the provider's groups for them; `make psql`: `memberships` |
 | A logic bug you can reproduce | breakpoints: `make debug-up` + VS Code | `pdb` |
 | A crash with no traceback | faulthandler (on in every image) | `py-spy dump` on a live copy |
 | Something odd in the browser | DevTools Network tab | Playwright trace (`make e2e`, then the trace viewer) |
@@ -354,6 +356,44 @@ Measured: an empty slowlog, `incrby` 36,509 calls at 0.52 µs each. The
 store is never the bottleneck; the network round trip and the event loop
 are. 📘 `MONITOR` streams every command to your terminal and slows the
 server: never on a production instance.
+
+## Signing in ✅
+
+A sign-in crosses the browser, the api and the identity provider, so look
+at all three:
+- **The api's log.**
+  - `"sign-in failed"` carries a `code` (`login_failed`,
+    `invalid_token`, `idp_unavailable`) and a `reason`: "code exchange
+    refused" (with the provider's `error`, such as `invalid_client` for a
+    wrong secret), "ID token rejected: ..." (the failed check: expired,
+    audience, issuer), "nonce does not match".
+  - `"identity provider unavailable"` carries the URL it could not
+    reach.
+  - `"metadata names another issuer"`: `OIDC_ISSUER` is wrong.
+- **The browser.** Where did the flow stop? After `/api/auth/login` the
+  URL is the provider's. A failure that never comes back to
+  `/api/auth/callback` happened at the provider (a redirect URI it does
+  not allow, a user not assigned to the app), and its page says why. One
+  that does come back lands on `/?auth_error=<code>`.
+- **The provider's log.** For the bundled one: `make logs S=keycloak`.
+  Keycloak logs each refusal with its reason (`invalid_redirect_uri`,
+  `invalid_client_credentials`, `user_not_found`).
+- **The whole flow from a terminal**, without a browser:
+  `scripts/lib/session.sh`'s `sign_in`:
+  ```
+  . scripts/lib/session.sh
+  sign_in http://localhost:5173 alice "$(sed -n 's/^DEMO_USER_PASSWORD=//p' .env)" /tmp/jar -v
+  ```
+  `-v` shows every redirect and cookie.
+- **Is the provider up, as the api sees it?**
+  `curl -s localhost:8088/api/ready`, then `identity_provider` in the
+  checks. The api checks it every 30 s.
+- **What does the api think of a user?** `GET /api/me` with their session
+  shows their teams and roles as the last sign-in recorded them. Roles
+  change only at the next sign-in: `make revoke email=...` forces one.
+- **Why a 403 on a POST?** `csrf_failed`: the request's `Origin` is not
+  exactly `PUBLIC_URL`. The usual cause is opening the site under another
+  name (`127.0.0.1` vs `localhost`, a different port).
 
 ## nginx ✅
 
