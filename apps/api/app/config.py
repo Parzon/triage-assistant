@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # set; the SDK also reads the other standard OTEL_* variables itself.
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "triage-assistant-api"
+    # How long one export may take, retries included. It also bounds a
+    # worker's shutdown when the trace backend is down (measured: the
+    # exporter's default, 10 s, delayed every stop by 10 s). Our own name,
+    # in seconds: the spec's OTEL_EXPORTER_OTLP_TIMEOUT is milliseconds, and
+    # the Python exporter reads it as seconds.
+    trace_export_timeout_s: float = Field(2.0, gt=0)
     # Questions, prompts, answers and runbook headings on spans, redacted.
     # Development only: a trace store is readable by everyone who debugs,
     # across every team.

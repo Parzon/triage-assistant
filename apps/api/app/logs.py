@@ -33,7 +33,8 @@ class JsonFormatter(logging.Formatter):
             "request_id": request_id_var.get(),
         }
         span_context = trace.get_current_span().get_span_context()
-        if span_context.is_valid:
+        # Only a recorded trace: an unsampled one's id finds nothing.
+        if span_context.is_valid and span_context.trace_flags.sampled:
             payload["trace_id"] = format(span_context.trace_id, "032x")
             payload["span_id"] = format(span_context.span_id, "016x")
         for key, value in vars(record).items():

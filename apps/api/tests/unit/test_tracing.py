@@ -95,3 +95,20 @@ def test_log_lines_carry_the_trace_they_belong_to(spans: InMemorySpanExporter) -
         payload = json.loads(JsonFormatter().format(record))
         assert payload["trace_id"] == trace_id() == format(span.get_span_context().trace_id, "032x")
         assert payload["span_id"] == format(span.get_span_context().span_id, "016x")
+
+
+def test_an_unsampled_trace_hands_out_no_id() -> None:
+    # A sampler that drops the trace still gives the request a valid id;
+    # handed out, it would lead nowhere in Jaeger.
+    record = logging.makeLogRecord({"name": "app.test", "levelname": "INFO", "msg": "hello"})
+    unsampled = trace.NonRecordingSpan(
+        trace.SpanContext(
+            trace_id=0x0AF7651916CD43DD8448EB211C80319C,
+            span_id=0xB7AD6B7169203331,
+            is_remote=False,
+            trace_flags=trace.TraceFlags(trace.TraceFlags.DEFAULT),
+        )
+    )
+    with trace.use_span(unsampled):
+        assert trace_id() is None
+        assert "trace_id" not in json.loads(JsonFormatter().format(record))
