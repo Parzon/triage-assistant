@@ -20,7 +20,9 @@ with a way to prove it is done. Then:
 - backups, restored and rehearsed on a clean host;
 - releases for amd64 and arm64, smoke-tested after publishing;
 - sign-in against a real OIDC provider (Keycloak);
-- evals against a real model (local).
+- evals against a real model (local);
+- runbook search against a local embedding model, on a hand-written
+  corpus.
 
 📘 **Not yet:**
 - a cloud VM with a real domain;
@@ -90,13 +92,17 @@ provider".
   - zero data retention, or no training on your data;
   - a region your data may be processed in.
 
-  Alert text and questions leave your network ([security](security.md)).
+  Alert text, runbook text and questions leave your network, to the chat
+  model and to the embedding model ([security](security.md)).
   [RFQ-0001](../rfq/0001-llm-inference.md) is the request to send
   vendors.
 - **Evals first:**
   - calibrate the judge;
   - run the whole suite with `--repeat 10`, and the leak case with
-    `--repeat 200`;
+    `--repeat 200` at least: one leak in 200 already puts the bound over
+    the 1.5% target, and then it takes more runs;
+  - run the retrieval benchmark with the provider's embedding model
+    (`--target retrieval`), then `make reembed`;
   - commit the provider's baseline ([AI engineering](ai-engineering.md)).
 - **Size the rate limits from the provider's quota** (tokens per
   minute), not the api's capacity. The quota binds first (failure
@@ -120,6 +126,9 @@ For two to four weeks:
   ([the PRD](../prd/0001-triage-assistant.md)).
 - **Add real failures to the evals.** Every answer the pilot reports as
   wrong becomes an eval case, anonymised.
+- **Import the pilot team's runbooks, and label 30 of their real
+  questions** for the retrieval benchmark: the one cost RFC-0001 asked
+  for that is not measured yet.
 
 **Done when:**
 - the SLOs held for the whole pilot;
@@ -253,4 +262,5 @@ run before the stage that depends on it.
 | A third-party security review or penetration test | the attack table (security chapter) is self-assessed | before handling sensitive data |
 | An accessibility audit | tests find controls by role, but nobody has audited with a screen reader | an audit, or axe in the e2e suite |
 | Data retention and deletion (GDPR and similar) | alerts and sessions are kept forever today | a retention job, and a documented deletion path per user |
-| Answer quality on real questions | the evals hold 14 hand-written cases | the pilot's reported bad answers become cases |
+| Answer quality on real questions | the evals hold 19 hand-written cases | the pilot's reported bad answers become cases |
+| Retrieval on real runbooks, with a hosted embedding model | recall was measured on 8 hand-written runbooks and 19 questions, with a local model | the pilot's runbooks and 30 labelled questions; `--target retrieval` with the provider's model |

@@ -151,6 +151,10 @@ counts the semantic candidates, reports `keyword_only`, and
 | 3. no index, every row compared | 20 | 49,531 | 6.5 ms |
 | 4. the service's query: `team_id = ANY(...)` | 20 | 0 (team index, then sort) | **0.8 ms** |
 
+The vectors are random, so each seed differs. Over three runs here,
+configuration 1 found 0 or 1, configuration 2 took 32 to 71 ms, and
+configuration 4 took 0.8 to 1.6 ms.
+
 1. The approximate index returns its nearest 40 candidates (`ef_search`),
    and the team filter runs after the scan. With 1% of the rows the
    caller's, the 40 were all other teams'. The search found nothing, and

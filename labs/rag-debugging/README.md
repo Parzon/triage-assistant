@@ -124,8 +124,9 @@ first.
 `lab search "How do I rebalance a Kafka consumer group?" --k 4`, then
 `lab ask` with the same question. What distances do the top sections
 have? What does the model do with four irrelevant sections? Would a
-distance cutoff help with nomic-embed-text? The AI engineering chapter
-has the measured distances.
+distance cutoff help with nomic-embed-text? The RAG chapter
+([docs/handbook/rag.md](../../docs/handbook/rag.md)) has the measured
+distances.
 
 **7. The embedding settings change (ingestion).** Recreate the api with
 `EMBEDDING_DOCUMENT_PREFIX="document: "`. Run

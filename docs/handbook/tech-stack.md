@@ -24,7 +24,7 @@ are the source of truth, and Dependabot moves them weekly:
 | Servers | gunicorn managing Uvicorn workers (uvloop, httptools) | 26.2 / 0.53 | `apps/api/gunicorn.conf.py` |
 | Database access | SQLAlchemy (async) + asyncpg | 2.0.54 / 0.31 | `app/db.py`, `app/models.py` |
 | Migrations | Alembic | 1.20 | `apps/api/migrations/` |
-| Database | PostgreSQL | 17 | `compose.yaml` (`db`) |
+| Database | PostgreSQL, with pgvector | 17 / 0.8.6 | `compose.yaml` (`db`) |
 | Connection pooler | PgBouncer | 1.25.2 | `compose.yaml` (`pgbouncer`) |
 | Rate-limit store | Valkey, via redis-py | 8.1 / 8.1 | `app/ratelimit.py` |
 | The model | the openai SDK over httpx2 | 3.17 / 2.13 | `app/llm.py` |
@@ -40,7 +40,7 @@ are the source of truth, and Dependabot moves them weekly:
 | Tests (web) | Vitest, jsdom, Testing Library | 5.0 / 30 / 16 | `apps/web/src/**/*.test.ts(x)` |
 | Tests (browser) | Playwright | 1.63 | `tests/e2e/` |
 | Lint, types | ruff, mypy (strict); oxlint, tsc | 0.16 / 2.3; 1.85 / 6.0 | `pyproject.toml`, `package.json` |
-| Local model | Ollama | 0.34.3 | `compose.yaml` (`ollama` profile) |
+| Local models | Ollama: gpt-oss:20b answers, nomic-embed-text embeds, gemma3:27b judges | 0.34.3 | `compose.yaml` (`ollama` profile) |
 | Containers | Docker Engine, Compose v2, GNU make | | `compose*.yaml`, `Makefile` |
 | CI, releases | GitHub Actions, GHCR, Dependabot | | `.github/` |
 | Monitoring | Prometheus, Alertmanager, Grafana, exporters, cAdvisor | 3.14 / 0.34 / 13.2 | `infra/observability/` |
@@ -116,12 +116,29 @@ migration`), then read and fixed by hand. Autogenerate misses renames
 and some constraint changes. Migrations are expand/contract, so the
 previous release still runs on the new schema (ADR-0015).
 
-**PostgreSQL 17** holds everything that must survive: alerts, teams,
-memberships, sessions. It also enforces team isolation itself, with
-row-level security (ADR-0014).
+**PostgreSQL 17** holds everything that must survive: alerts, runbooks,
+teams, memberships, sessions. It also enforces team isolation itself,
+with row-level security (ADR-0014).
 - **Trap:** a major version upgrade (16 → 17) needs a dump and restore
   or `pg_upgrade`, not a new tag. That's why Dependabot leaves compose
   images alone.
+
+**pgvector** adds a `vector` type, distance operators (`<=>` is cosine
+distance) and approximate indexes (HNSW, IVFFlat) to Postgres: runbook
+search runs next to the data and under the same row-level security
+(ADR-0017). The image, `pgvector/pgvector:0.8.6-pg17-trixie`, is the
+same Debian, glibc and PostgreSQL build as `postgres:17`, so the data
+directory and collations carry over. Alternatives: a dedicated vector
+database (Qdrant, Weaviate, OpenSearch), which adds a second datastore,
+a second backup, and a second copy of team membership.
+- **Trap:** an approximate index hands back its nearest rows first, and
+  filters after. With the caller's team owning 1% of the rows, a
+  one-team search found nothing. The service sends an explicit team
+  filter; iterative scans (0.8+) cover unfiltered searches
+  ([RAG](rag.md)).
+- **No new package:** SQLAlchemy has no vector type, and `app/vector.py`
+  defines one in under 60 lines (the text wire format). The `pgvector` Python
+  package does the same.
 
 **PgBouncer** pools connections in **transaction** mode: thousands of
 client connections share a few server connections.

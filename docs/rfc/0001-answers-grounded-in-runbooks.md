@@ -1,10 +1,55 @@
 # RFC-0001: Answers grounded in the team's runbooks
 
-**Status:** draft
+**Status:** accepted, and built (see Outcome)
 **Author:** the service's engineers
 **Reviewers:** on-call team leads, security, platform
 **Date:** 2026-09-24
 **Related PRD:** [PRD-0001](../prd/0001-triage-assistant.md), requirement F7
+
+## Outcome (2026-09-24)
+
+Accepted and built in PR #48. The decisions are in
+[ADR-0017](../adr/0017-runbook-retrieval-in-postgres.md); how it works,
+and what was measured, in [the RAG chapter](../handbook/rag.md). The
+proposal below is kept as it was reviewed.
+
+**What changed on the way:**
+- **Citations are numbered, `[R1]`,** not `[runbook: <title> § <heading>]`.
+  A number is short, and one outside the list shows up as invented. The
+  service maps each number back to its runbook and section for the UI.
+- **The keyword half ORs the question's words.** `websearch_to_tsquery`
+  requires every word, and a question rarely uses all of its answer's.
+- **4 sections per prompt** (`RAG_CONTEXT_CHUNKS`). With 1, the model
+  invented a step, without the runbook's safety conditions (the lab,
+  exercise 5).
+- **The team filter is sent explicitly,** as well as enforced by
+  row-level security. Behind an OR, the vector index found nothing for one
+  team among many.
+- **Credentials are redacted before the prompt.** The prompt's rule
+  against repeating them failed about 1 run in 100.
+- **Re-embedding is a command** (`make reembed`), not a background job.
+  Each vector stores the settings it was made with, and a search says
+  when its vectors are stale.
+- **Not built yet:** the per-team setting, shadow mode, and the wiki sync.
+  Runbooks are used for every team that has any, once an embedding model
+  is set. Rolling back is still one setting: `RAG_CONTEXT_CHUNKS=0`.
+
+**The costs this RFC asked to measure:**
+
+| Cost | Asked for | Measured (gpt-oss:20b and nomic-embed-text, locally) |
+|---|---|---|
+| retrieval latency | first word under the 3 s SLO | hybrid search p50 10.5 ms, p95 12.2 ms (110 warm searches). First token through the service p50 0.28 s, p95 1.61 s (57 answers; without runbooks, 0.21 s and 0.48 s over 42). The slow answers' time was not in the search, and was not measured apart |
+| recall@5 | ≥ 0.8, on ≥ 30 questions about the pilot's real runbooks | 1.00 on 19 questions about 8 hand-written runbooks. **Still to do:** 30 questions, on real runbooks |
+| prompt tokens | the tokens added per answer | 4 sections added a median of 234 tokens (202–304) to a 394-token prompt, over the benchmark's 22 questions |
+| the eval suite | 10 runs per case, the production model | every case passes at 10 runs against gpt-oss:20b. The production model waits on RFQ-0001 |
+
+**The open questions:**
+- the source of truth: still open. Runbooks are uploaded through the api;
+- embeddings at the provider: still open (RFQ-0001);
+- chunk size: sections split at headings, and at paragraphs past 300
+  words. Not compared at 200–400 words as proposed;
+- stale sections: every section shows its `updated` date in the prompt.
+  Nothing flags old ones yet.
 
 ## Summary
 

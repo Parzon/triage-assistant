@@ -9,6 +9,8 @@ An assistant for on-call engineers.
 - An engineer asks in plain language what is happening, and an AI
   model answers, streaming, from **only the alerts that engineer is
   allowed to see**.
+- For what to do, it gives the steps from the team's own runbooks, and
+  names each section it used, so the engineer can check the source.
 - People sign in with the company's identity provider, and their roles
   come from it.
 
@@ -25,24 +27,25 @@ keeps everything else:
 
 | Who | What they get |
 |---|---|
-| On-call engineers | the right alert first, the likely cause (a recent deploy to the same service), and a plain "the alerts do not say" instead of a guess |
+| On-call engineers | the right alert first, the likely cause (a recent deploy to the same service), the runbook's steps with their source, and a plain "the alerts do not say" instead of a guess |
 | Team leads | per-team ownership: responders add alerts, admins manage them, and nobody sees another team's incidents |
 | Security and compliance | company sign-in; access enforced twice, in the service and in the database; the model never given data the asker could not read; no secrets in code |
 | Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([infrastructure Q&A](handbook/infrastructure-qa.md)) |
 | Other engineering teams | a working starting point, and a documented way to adopt it ([using this template](handbook/using-this-template.md)) |
 
-## Where it stands (v0.4.0, September 2026)
+## Where it stands (v0.5.0, September 2026)
 
 ✅ **Built and measured**, on one production-shaped host:
 
 | | Measured |
 |---|---|
-| Tests | 134 unit, 95 integration (real database, identity provider, pooler), 49 UI, 12 browser end-to-end; 94% line and branch coverage |
+| Tests | 166 unit, 110 integration (real database, identity provider, pooler), 52 UI, 12 browser end-to-end; 93% line and branch coverage |
 | Capacity | ~1,000 signed-in reads per second, or 500 simultaneous streamed answers, on 2 CPUs |
 | Deploys | 155,659 requests during a deploy, 0 failed; rollbacks work across database changes |
 | Failure drills | 22 injected faults (database frozen, identity provider down, model provider erroring...), each with what users saw and how it recovered |
-| AI quality | 14 test cases against a real model: grounding, refusals, prompt injection, isolation between teams. The 11 answer cases pass 10 runs in 10; all 14 pass through the whole service. The model printed its instructions 0 times in 200 attempts, down from 5 in 200 before the last prompt fix |
-| Releases | 4 releases, for Intel and ARM servers, each smoke-tested after publishing |
+| AI quality | 19 test cases against a real model: grounding, refusals, prompt injection, isolation between teams, answers from runbooks. The 15 answer cases pass 10 runs in 10, but one at 9 in 10, within chance. Through the whole service, 18 pass 3 runs in 3; one runbook answer left out a step once. The model printed its instructions 2 times in 600 attempts, under the 1.5% limit set for it |
+| Runbook search | the section that answers is in the top 5 for all 19 test questions, and first for 15; about 10 ms a search |
+| Releases | 5 releases, for Intel and ARM servers, each smoke-tested after publishing |
 
 📘 **Not yet:**
 - a cloud server with a real domain;
@@ -56,13 +59,14 @@ stages, each with a measurable exit.
 ## How it works
 
 ```
-browser ─HTTPS─► edge (TLS) ─► web server ─► api ─► database (alerts, teams, sessions)
+browser ─HTTPS─► edge (TLS) ─► web server ─► api ─► database (alerts, runbooks, teams, sessions)
                                               ├───► identity provider (sign-in)
                                               └───► AI model (any OpenAI-compatible provider)
 ```
 
-The model sees the question and the asker's recent alerts, and nothing
-else. It has no tools: it cannot run commands or change data. The worst
+The model sees the question, the asker's recent alerts, and the
+sections of the asker's runbooks that match the question, with known
+credential formats removed. Nothing else. It has no tools: it cannot run commands or change data. The worst
 a malicious alert can do is distort one answer, to someone who could
 read that alert anyway.
 
@@ -72,7 +76,8 @@ read that alert anyway.
 |---|---|
 | The AI answers wrongly or is manipulated by alert text | measured with test cases before each change, calibrated automatic grading, safety cases that must pass 100%; no tools; answers shown as text only |
 | One team sees another's data | access checks in the service, plus database-level row security, both tested |
-| Alert text sent to an external AI provider | provider terms with zero data retention ([RFQ-0001](rfq/0001-llm-inference.md)), or a model in the company's own cloud |
+| Alert and runbook text sent to an external AI provider | provider terms with zero data retention ([RFQ-0001](rfq/0001-llm-inference.md)), or a model in the company's own cloud; known credential formats removed before anything is sent |
+| A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own |
 | Cost runaway | per-user rate limits, output limits, a cost panel; a provider budget alarm is stage 3 |
 | One server is a single point of failure | acceptable for a pilot; a second host or a managed platform is stage 5 |
 
@@ -82,7 +87,8 @@ read that alert anyway.
 |---|---|
 | What are we building, and why? | [PRD-0001](prd/0001-triage-assistant.md) |
 | Is the architecture sound? | [ARD-0001](ard/0001-triage-assistant.md), the architecture review |
-| What should come next? | [RFC-0001](rfc/0001-answers-grounded-in-runbooks.md): answers that cite the team's runbooks |
+| How was a feature proposed, and what did it cost? | [RFC-0001](rfc/0001-answers-grounded-in-runbooks.md): answers that cite the team's runbooks (accepted and built, with the costs measured) |
+| What should come next? | "Not done yet" in [the guide](../gold_standard_development_guide.md#not-done-yet) |
 | What do we ask model vendors for? | [RFQ-0001](rfq/0001-llm-inference.md) |
-| Why was each technical decision made? | [the ADRs](adr/) (16) |
+| Why was each technical decision made? | [the ADRs](adr/) (17) |
 | How is it built, run and repaired? | [the guide](../gold_standard_development_guide.md) and the [handbook](handbook/) |

@@ -282,6 +282,12 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `LLM_MAX_RETRIES` | 1 | the SDK's default is 2, with a 600 s read timeout |
 | `LLM_MAX_OUTPUT_TOKENS` | 800 | cost and latency cap. A reasoning model's hidden thinking counts against it |
 | `LLM_REASONING_EFFORT` | empty (not sent) | reasoning models only: `low`, `medium` or `high`. Other models reject the parameter. gpt-oss:20b: `low` (ai-engineering chapter) |
+| `EMBEDDING_MODEL` | empty (runbooks off) | runbook search: an embedding model on the same endpoint (RAG chapter). `.env.example` sets the mock's, `mock-embed` |
+| `EMBEDDING_QUERY_PREFIX` / `EMBEDDING_DOCUMENT_PREFIX` | empty | the model's task prefixes, from its card (nomic-embed-text: `"search_query: "`, `"search_document: "`); quoted in `.env` |
+| `EMBEDDING_DIMENSIONS` | empty (the model's own) | the database stores 768: set it for a model with another native size that can shorten its vectors |
+| `EMBEDDING_TIMEOUT_S` | 5 | past it, runbook search uses keywords alone |
+| `RAG_CONTEXT_CHUNKS` | 4 | runbook sections per prompt; 0 = alerts only |
+| `RUNBOOKS_RATE_LIMIT` | 60 | per user per window: runbook writes and searches (each an embedding call) |
 | `CHAT_CONTEXT_ALERTS` | 20 | recent alerts put in the prompt |
 | `SSE_HEARTBEAT_S` | 15 | keep-alive comments while the model is silent; below every proxy's idle timeout |
 | `ALERTMANAGER_WEBHOOK_TOKEN` | empty (webhook off) | shared with Alertmanager |

@@ -18,12 +18,15 @@ Everything else is the platform, and stays as it is.
 | **Keep** | Database access, pools, timeouts, row-level security plumbing | `app/db.py`, ADR-0005, ADR-0010, ADR-0014 |
 | **Keep** | Rate limits, SSE streaming, errors, logging, metrics | `app/ratelimit.py`, `app/sse.py`, `app/errors.py`, `app/logs.py`, `app/metrics.py` |
 | **Keep** | The model seam and the mock | `app/llm.py`, `tools/mock-llm/` |
-| **Keep** | The eval harness | `apps/api/evals/*.py` |
+| **Keep** | The eval harness, the retrieval benchmark's harness | `apps/api/evals/*.py` |
+| **Keep** | Credentials redacted before any model call | `app/redact.py` |
+| **Keep or drop** | Answers from documents (runbooks here): sections, hybrid search, citations, re-embedding. Point it at your documents (policies, contracts), or leave `EMBEDDING_MODEL` empty and chat uses its own context alone | `app/runbooks.py`, `app/routes/runbooks.py`, `app/vector.py`; [RAG](rag.md), ADR-0017 |
 | **Keep** | Deploys, backups, drills, monitoring | `scripts/`, `infra/observability/` |
 | **Replace** | The data model and its migrations | `app/models.py`, `apps/api/migrations/versions/` |
 | **Replace** | Routes, the visibility queries, request and response shapes | `app/routes/alerts.py`, `app/queries.py`, `app/schemas.py` |
 | **Replace** | The prompt and its context | `app/triage.py` |
 | **Replace** | Eval cases, judge calibration answers, the baseline | `apps/api/evals/cases/`, `judge_calibration.toml`, `baselines/` |
+| **Replace** | The retrieval benchmark: a corpus and labelled questions | `apps/api/evals/runbooks/`, `retrieval.toml` |
 | **Replace** | The mock's canned answer | `tools/mock-llm/mock_llm.py` |
 | **Replace** | The UI | `apps/web/src/` |
 | **Replace** | Browser tests, load scripts | `tests/e2e/specs/`, `tests/load/` |
@@ -176,7 +179,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
    YES and a NO for every judge criterion
    ([AI engineering](ai-engineering.md)).
 5. **The prompt and its context** (`app/triage.py`). Measure with `make
-   evals` against a real model, and commit a baseline.
+   evals` against a real model, and commit a baseline. If answers come
+   from documents, measure retrieval first, on your own corpus and
+   questions (`make evals a="--target retrieval"`, [RAG](rag.md)): a
+   prompt cannot fix a section that was never retrieved.
 6. **The mock's canned answer**, so plumbing-mode evals and the tests
    make sense.
 7. **The UI**, then **browser tests** for the flows only a browser

@@ -3,7 +3,8 @@
 This repository is a small, complete AI service: alerts in Postgres,
 owned by teams; sign-in with the organisation's identity provider; an
 assistant that streams answers from any OpenAI-compatible model, about
-the alerts the asker may see; a React UI. It is also the reference for how every such service here is built,
+the alerts the asker may see, with the steps from the team's own
+runbooks, cited; a React UI. It is also the reference for how every such service here is built,
 tested, shipped, watched and repaired. This file is the map. The details
 live in the handbook chapters it links to.
 
@@ -26,6 +27,7 @@ needs a real cloud account). Where the two differ, trust ✅.
 | on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [infrastructure Q&A](docs/handbook/infrastructure-qa.md) (reproducibility, scale) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
 | taking it to production | [going to production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) |
 | changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
+| changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` → [the RAG debugging lab](labs/rag-debugging/README.md) |
 | deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
 
 ## The system on one page
@@ -39,11 +41,12 @@ browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; 
                    │   ▼ http://api:8010                                                          │
                    │ api  gunicorn → N uvicorn workers (N = CPU limit), FastAPI                   │
                    │   │  every request: session cookie → user and teams (one query)              │
-                   │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17                    │
-                   │   │     alerts (owned by teams), users, memberships, sessions                │
+                   │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17 + pgvector        │
+                   │   │     alerts and runbooks (owned by teams), users, memberships, sessions   │
                    │   ├─► Valkey :6379 (rate-limit counters; if down, requests pass: fail-open)  │
                    │   ├─► the identity provider's back channel (code exchange, keys; Keycloak)   │
-                   │   └─► the model: any OpenAI-compatible API (mock-llm locally), SSE to user   │
+                   │   └─► the model: any OpenAI-compatible API (mock-llm locally), SSE to user;  │
+                   │         its embeddings for runbook search                                    │
                    │                                                                              │
                    │ Prometheus ◄─ scrapes api, exporters, cAdvisor ─► Grafana; Alertmanager ─►   │
                    │   api (alerts appear in the app)            [dashboards on 127.0.0.1 only]   │
@@ -63,10 +66,12 @@ Four request paths matter:
 - **Read alerts:** edge (TLS) → nginx → api (session → user → teams) →
   PgBouncer → Postgres. Only the caller's teams' alerts, ~4 ms at
   500 req/s.
-- **Ask the assistant:** edge and nginx (no buffering) → api loads the
-  asker's visible alerts → streams the model's answer as Server-Sent
-  Events, with a heartbeat every 15 s. Stop in the browser cancels the
-  model call.
+- **Ask the assistant:** edge and nginx (no buffering) → api finds the
+  runbook sections that match the question (full-text and vector search,
+  the asker's teams only) and loads the asker's visible alerts →
+  redacts credentials → streams the model's answer as Server-Sent
+  Events, with a heartbeat every 15 s, then the sections it cited. Stop
+  in the browser cancels the model call.
 - **Alert webhook:** Alertmanager → api (bearer token) → a row in
   Postgres, in the team its `team` label names.
 
@@ -74,9 +79,10 @@ The same images run everywhere. Only configuration changes: `.env` on a
 host, a secret store on a platform.
 
 ```
-apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals), tests/{unit,integration}, migrations/
+apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals, the retrieval benchmark), tests/{unit,integration}, migrations/
 apps/web/        React + Vite UI (Node 24); nginx config for production
-tools/           mock-llm (a provider stand-in with failure modes), py-spy and load-tool images
+tools/           mock-llm (a provider stand-in with failure modes, chat and embeddings), py-spy and load-tool images
+labs/            hands-on exercises, one fault at a time: rag-debugging (each stage of runbook retrieval)
 tests/           e2e (Playwright through production nginx), load (k6, Locust, vegeta, JMeter, Artillery)
 infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
 scripts/         deploy, backup, restore, failure drills, fresh-host test, SQL helpers, debug scripts
@@ -175,6 +181,10 @@ Each rule exists because breaking it cost something measurable here.
     judge. Every prompt fix here had a side effect elsewhere, and a
     2.5% failure showed only in 200 runs.
     ([AI engineering](docs/handbook/ai-engineering.md), ADR-0016)
+20. **A safety property that matters goes in code, not in the prompt.**
+    A prompt rule is a probability: "never repeat credentials" failed
+    about 1 run in 100. Redacting them before any model call cannot fail
+    for the formats it knows. ([security](docs/handbook/security.md))
 
 ## The handbook
 
@@ -194,6 +204,7 @@ Each rule exists because breaking it cost something measurable here.
 | [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
 | [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
+| [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
@@ -579,6 +590,12 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
 - **Small samples hide rare failures.** 110 passing calls missed a
   failure that happens 1 run in 40. Zero failures in *n* runs means a
   rate below about 3/*n*.
+- **"Passed before, fails now" is not a regression.** A case that fails
+  1 run in 30 would "regress" a third of the time. The gate compares
+  failure counts with a one-sided Fisher exact test (p < 0.05).
+- **One failure is an anecdote, not a cause.** A marker blamed for 1
+  failure in 10 caused 0 in 60 when put back (p = 0.14). Write a cause
+  into a comment only once it reproduces.
 - **A check that passes a wrong answer is worse than none.** Read the
   answers, not just the pass rate.
 - **Model output uses typography**: a non-breaking hyphen in `db‑1`, a
@@ -593,6 +610,47 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
   ("without claiming…") passed wrong answers 3 runs in 3.
 - **Safety cases never rest on the judge alone.** It reads output from
   a model that may have been injected.
+- **A GPU container can lose its GPU and keep running.** Ollama fell back
+  to the CPU, about 50 times slower, with no error; `nvidia-smi` inside
+  said "Failed to initialize NVML". `ollama ps` shows the processor.
+  Recreate the container.
+
+### Runbook retrieval (RAG)
+Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
+[RAG](docs/handbook/rag.md) and [the lab](labs/rag-debugging/README.md).
+- **A team filter under an approximate vector index can find nothing.**
+  HNSW hands back its 40 nearest rows, then the filter runs. With 1% of
+  the rows the caller's, a one-team search found 0 of 20, and nothing
+  failed. Send the filter as a plain `team_id = ANY(...)`, never behind
+  an OR, and turn on iterative scans (pgvector 0.8+) where there is no
+  filter. `make rag-overfiltering-lab` shows all four plans.
+- **Change the embedding model, its dimensions or its document prefix,
+  and every stored vector is meaningless against new questions.**
+  Similarity search still returns rows. Here each vector carries the key
+  it was made with: old ones are ignored, search says
+  `keyword_only (no_current_vectors)`, `RetrievalDegraded` fires. Fix:
+  `make reembed`.
+- **"Hybrid" search can quietly be keyword-only.** The first version said
+  hybrid while its semantic half returned nothing. Report what actually
+  contributed.
+- **`websearch_to_tsquery` requires every word.** A question rarely uses
+  every word of its answer: OR the question's own lexemes, and let the
+  ranking sort them.
+- **Task prefixes are part of the embedding model.** nomic-embed-text
+  expects `search_query: ` and `search_document: `, trailing space
+  included: quote them in `.env`. Here they moved distances a lot and
+  recall not at all.
+- **A distance cutoff is per model, and often impossible.** With
+  nomic-embed-text, relevant sections reached 0.43 and unanswerable
+  questions started at 0.41.
+- **Reciprocal rank fusion weights both lists equally.** "comes back
+  down" matched "Roll back" by keyword and outranked the semantic winner.
+- **Too little context makes the model invent.** With 1 section, it
+  invented a step, without the runbook's safety conditions. With 4, the
+  answer was right.
+- **Models cite however they like.** Asked for `[R1]`, gpt-oss also wrote
+  `(R1)`, `【R1】`, `[**R1**]` and a bare R1. A strict pattern failed a
+  quarter of the correct answers.
 
 ### Observability
 - **A ratio with a numerator that doesn't exist yet is "no data", not 0**:
@@ -748,6 +806,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - row-level security (0014)
 - rollbacks roll back code, not the schema (0015)
 - evals gate prompt and model changes (0016)
+- runbook retrieval in Postgres, hybrid, under row-level security (0017)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -770,6 +829,10 @@ oversight:
   demand, against a local model.
 - **Tracing (OpenTelemetry) and central logs**, once there is more than
   one service or host.
+- **Better runbook answers:** a reranker, the neighbouring sections in
+  context, shadow mode before a team turns runbooks on, a sync from the
+  wiki, and retrieval measured on real questions
+  ([RAG](docs/handbook/rag.md)).
 
 ## Where things are written
 

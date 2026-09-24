@@ -115,6 +115,7 @@ protection is on ([security](security.md)).
 | signed-in reads (`GET /alerts`) | ~1,000 req/s with 2 api CPUs (p95 1.4 ms at 500/s, 173 ms at 1,000/s) | api CPU |
 | streamed answers (mock model) | 500 concurrent streams, 239 answers/s, 0% errors | api CPU: the openai SDK costs 126 µs per chunk |
 | Postgres | a fraction of a core at those rates | not the bottleneck |
+| runbook search (hybrid, local embedding model) | p50 10.5 ms, p95 12.2 ms a search, one at a time | 📘 not load-tested |
 | a hosted model | its tokens-per-minute quota | 📘 binds first in real use |
 
 **What limits are set?** Everything has a CPU and memory limit, and no
@@ -200,14 +201,15 @@ The contract any platform needs is already here:
 
 **What must be backed up?**
 - **Postgres**, and only Postgres: `make backup`, which runs `pg_dump`
-  in custom format.
+  in custom format. Runbooks are in it, with their vectors. The vectors
+  can be rebuilt (`make reembed`), the runbook text cannot.
 - **Restore:** 6 s in one transaction on the demo data. Rehearse it at
   production size before trusting it.
 - **Copy each backup off the host.**
 - Valkey holds disposable counters, and needs no backup.
 
 **What does it need to reach?** Outbound only:
-- the model provider's API;
+- the model provider's API: answers, and embeddings for runbook search;
 - the identity provider (its metadata, signing keys, and the code
   exchange);
 - Let's Encrypt, for certificates.
@@ -216,7 +218,7 @@ All over HTTPS. Nothing else at runtime.
 
 **What does it log?**
 - JSON lines on stdout, with one request id across nginx and the api.
-- Never tokens, cookies, question text or alert text.
+- Never tokens, cookies, question text, alert text or runbook text.
 - Users appear by id, not email.
 
 **What will page us?**
