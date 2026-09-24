@@ -41,7 +41,11 @@ Ollama, one RTX 6000 Ada). 📘 = not built yet.
    - **keyword:** Postgres full-text search over the question's own
      lexemes, parsed and stemmed as the index was, joined with OR (a
      question rarely uses every word of its answer), and ranked by
-     `ts_rank_cd`;
+     `ts_rank_cd`. That is not BM25: it has no inverse document
+     frequency, so a rare word counts no more than a common one. Tested:
+     a document matching a word found in 1 of 101 documents scored the
+     same as one matching a word found in 100 of them. For BM25 inside
+     Postgres, use an extension (ParadeDB's `pg_search`) 📘;
    - **meaning:** the cosine distance to the question's vector, through
      an HNSW index, over sections whose embedding key is today's.
 3. **Reciprocal rank fusion** merges them: each section scores

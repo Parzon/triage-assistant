@@ -636,6 +636,9 @@ Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
 - **`websearch_to_tsquery` requires every word.** A question rarely uses
   every word of its answer: OR the question's own lexemes, and let the
   ranking sort them.
+- **Postgres full-text ranking is not BM25.** `ts_rank` and `ts_rank_cd`
+  ignore how rare a word is: a word in 1 of 101 documents scored the same
+  as one in 100 of them.
 - **Task prefixes are part of the embedding model.** nomic-embed-text
   expects `search_query: ` and `search_document: `, trailing space
   included: quote them in `.env`. Here they moved distances a lot and
