@@ -131,6 +131,12 @@ security also lets only org admins read it.
 `team`, `target`, `since`; paged with `before`); operators, `make audit
 a="--action runbook.saved --target 17"` (add `ENV=prod`).
 
+**A rollback leaves a gap.** v0.6.0 does not know the table: while it
+runs after a rollback, nothing is audited. Measured on the v0.7.0 upgrade,
+under steady traffic: 238,281 requests during the migration and the
+switch, 0 failed; back to v0.6.0 and forward again, 0 failed of 243,594
+and 244,223.
+
 **Retention is yours to decide.** Rows are kept until the schema owner
 deletes them: `make audit-prune days=N`. Set N from your organisation's
 policy. Some rules require a minimum; privacy law requires a maximum.
