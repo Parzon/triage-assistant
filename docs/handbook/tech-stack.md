@@ -46,8 +46,8 @@ are the source of truth, and Dependabot moves them weekly:
 | Containers | Docker Engine, Compose v2, GNU make | | `compose*.yaml`, `Makefile` |
 | CI, releases | GitHub Actions, GHCR, Dependabot | | `.github/` |
 | Monitoring | Prometheus, Alertmanager, Grafana, exporters, cAdvisor | 3.14 / 0.34 / 13.2 | `infra/observability/` |
-| Load testing | k6, vegeta, oha, Locust, Artillery, JMeter | | `tests/load/` ([load testing](load-testing.md)) |
-| Debugging | debugpy, py-spy, netshoot (tcpdump, dig, ss), strace | | `Makefile` ([debugging](debugging.md)) |
+| Load testing | k6 | | `tests/load/k6/` ([load testing](load-testing.md)) |
+| Debugging | debugpy, pdb, faulthandler, asyncio debug mode | | `Makefile` ([debugging](debugging.md)) |
 
 ## The api (Python)
 
@@ -255,8 +255,7 @@ plugins; `tsc -b` type-checks.
 
 Alternatives: TLS in nginx, which needs certbot plus reload scripts;
 Traefik, which is configured by container labels. Caddy needs the
-least configuration for automatic HTTPS. `make acme-test` rehearses
-it against Pebble, Let's Encrypt's test CA.
+least configuration for automatic HTTPS.
 
 **Keycloak** is the bundled OpenID Connect provider, for development
 and demos: the realm, demo users and groups are imported from
@@ -336,14 +335,8 @@ means changing an address.
 Dashboards, alert rules and the rules' tests are code
 ([observability](observability.md)).
 
-**Load testing:** six tools with working scripts, and a measured
-comparison ([load testing](load-testing.md)). k6 is the default.
-
-**Debugging:**
-- **netshoot** has network tools in the api's network namespace;
-- **py-spy** profiles a live worker without restarting it;
-- **strace** summarises system calls;
-- **tcpdump** captures packets for Wireshark ([debugging](debugging.md)).
+**Load testing:** k6, open and closed models, results into Prometheus
+([load testing](load-testing.md)).
 
 **cloud-init** turns a fresh Ubuntu VM into a host for the stack
 (`infra/vm/cloud-init.yaml`, [the VM runbook](../runbooks/demo-vm.md)).

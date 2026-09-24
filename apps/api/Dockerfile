@@ -36,8 +36,7 @@ ENV PATH="/api/.venv/bin:$PATH" \
     PYTHONPYCACHEPREFIX=/tmp/pycache
 # The dev server runs as `dev`, whose UID is yours (make passes DEV_UID and
 # DEV_GID): files it or your tools write into the bind-mounted source stay
-# owned by you on Linux, and a dev container (.devcontainer/api) attaches as
-# the same user. A GID that already exists (macOS's 20 is Debian's
+# owned by you on Linux. A GID that already exists (macOS's 20 is Debian's
 # "dialout") is reused rather than recreated.
 ARG DEV_UID=1000
 ARG DEV_GID=1000

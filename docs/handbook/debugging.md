@@ -6,26 +6,26 @@ one marked ✅ has been run against this repo, and the outputs quoted are
 real. 📘 = recommended practice not exercised here.
 
 Most targets act on the dev stack; add `ENV=prod` for the production-shaped
-stack (`make prod-up`). The py-spy and gunicorn targets always target the
-production api container.
+stack (`make prod-up`). The gunicorn target always targets the production
+api container.
 
 ## Start here: symptom → tool
 
 | Symptom | First | Then |
 |---|---|---|
 | One user got an error | `make trace id=<request id>` (id from the error message, the `X-Request-ID` header, or the UI) | the traceback in the api's log line |
-| Everything is slow at once | Grafana: **event loop lag** panel | `make py-spy-dump` (what is each worker doing?), `make py-spy-top` |
+| Everything is slow at once | Grafana: **event loop lag** panel | a slow request's trace (`make trace id=...`); asyncio debug mode locally |
 | One route is slow | `make db-top-queries` | `EXPLAIN (ANALYZE, BUFFERS)` in `make psql` |
 | Requests hang, then 503 | `make db-activity`, `make db-locks` | `curl /api/ready` says which dependency |
 | nginx returns 502/504 | nginx log: `upstream_time` vs `request_time`, error lines (below) | `make ps ENV=prod`, `make gunicorn c="show workers"` |
-| `WORKER TIMEOUT` in the api log | something blocks the event loop | `make py-spy-dump`; asyncio debug mode locally |
+| `WORKER TIMEOUT` in the api log | something blocks the event loop | asyncio debug mode locally (below) |
 | Container restarted / exit 137 | `docker inspect` (ExitCode, OOMKilled, RestartCount) | Grafana **OOM kills** panel; `memory.events` |
-| A service can't reach another | `make netshoot` (dig, curl, ss) | `make tcpdump` |
+| A service can't reach another | `make ps` (running and healthy?), `/api/ready` | `docker compose exec api getent hosts db` (does the name resolve?) |
 | Rate limiting behaves oddly | `make redis-slowlog`, `make redis-cli` | the `ratelimit_decisions_total` panel |
 | Nobody can sign in, or one person can't | the api log's `"sign-in failed"` lines (code and reason) | "Signing in" below: the provider's log, the flow with curl |
 | Someone sees too much or too little | `GET /api/me` as them (their teams and roles) | the provider's groups for them; `make psql`: `memberships` |
 | A logic bug you can reproduce | breakpoints: `make debug-up` + VS Code | `pdb` |
-| A crash with no traceback | faulthandler (on in every image) | `py-spy dump` on a live copy |
+| A crash with no traceback | faulthandler (on in every image) | the exit code and `OOMKilled` in `docker inspect` |
 | Something odd in the browser | DevTools Network tab | Playwright trace (`make e2e`, then the trace viewer) |
 
 The first five minutes of any incident, in order: `make ps ENV=prod`
@@ -172,51 +172,15 @@ Linters did not catch that blocking call: `ruff --select ASYNC,B,S`
 reported "All checks passed!". They don't know which SDK clients are
 synchronous.
 
-## What is every worker doing right now? py-spy ✅
-
-**How it works.** py-spy is a sampling profiler that reads the target
-process's memory from outside (`process_vm_readv`) and reconstructs the
-Python stack from the interpreter's own data structures. There are no
-code changes, no restart, and negligible overhead, so it is safe on a
-production process. It needs to see the target's processes and be
-allowed to read them. The sidecar (`tools/py-spy`) therefore joins the
-api container's PID namespace (`--pid=container:...`) and gets
-`CAP_SYS_PTRACE`, while the api itself keeps `cap_drop: ALL`.
-
-```
-make py-spy-dump                # one stack per process, right now: where is it stuck?
-make py-spy-top                 # live top-style view
-make py-spy-record              # 30 s flame graph -> docs/images/api-flame.svg (run load meanwhile)
-```
-
-They target the production api container (`triage-assistant-prod-api-1`);
-`C=<container>` points them at another one.
-
-What it found here:
-- **The blocking-client lab.** `dump` showed the worker's main thread in
-  `read (httpcore2/_backends/sync.py:127)`, a synchronous socket read on
-  the event-loop thread. That one line was the whole diagnosis.
-- **The streaming profile** at 300 concurrent streams (2,276 samples):
-  openai SDK 40.1%, httpx2/httpcore2 21.9%, asyncio 18.2%, pydantic 5.0%,
-  our code 2.5%. The flame graph is `docs/images/api-flame.svg`; how to
-  read it and what was done with it is in the performance chapter.
-
-Gotcha: gunicorn workers are forked from the master, so every worker
-stack starts inside `gunicorn/arbiter.py`. When you filter samples, a
-filter on "arbiter" throws away every worker sample.
-
 ## Which profiler for which question
 
 | Question | Tool | Why this one |
 |---|---|---|
-| Where does a *running* server spend its time? | py-spy (above) ✅ | no code change, no restart, safe in production |
+| Where does a *running* server spend its time? | 📘 py-spy | a sampling profiler that reads the process from outside: no code change, no restart, safe in production |
 | How many times is each function called, exactly? | `cProfile` (standard library) ✅ | deterministic: counts every call; it slows the code it measures (+40% on the import below), so the absolute times are inflated |
 | Why is startup slow? | `python -X importtime` ✅ | per-module import time; cProfile shows only `importlib` frames for this |
-| Is memory growing per request? | `tracemalloc` (standard library) ✅, `scripts/debug/memory_growth.py` | compares live allocations between two snapshots, by source line |
+| Is memory growing per request? | `tracemalloc` (standard library) ✅ | compares live allocations between two snapshots, by source line. Call `gc.collect()` before each, and run two sizes: a leak grows with the number of requests, a cache settles |
 | Which native allocations (C extensions) grow? | 📘 memray | must be installed in the *target* interpreter (`memray run`, or `memray attach`, which injects into it), so dev/test images only, never the production image |
-
-📘 pyinstrument (a statistical profiler with an ASGI middleware) is not
-used: py-spy answers the same questions without touching the code.
 
 Startup, measured in the production image:
 
@@ -231,69 +195,6 @@ $ docker run --rm --entrypoint python triage-assistant-api:check -X importtime -
 Every new worker pays this (deploys, scale-out, a worker restarted after
 an OOM kill). The virtualenv ships precompiled (`UV_COMPILE_BYTECODE=1`,
 3,029 `.pyc` files), so none of it is compile time.
-
-Memory growth per request:
-
-```
-docker compose run --rm -T -e N=1000 -e ALERTS_RATE_LIMIT=1000000 -e LOG_LEVEL=WARNING \
-    api python - < scripts/debug/memory_growth.py
-1000 x GET /alerts?limit=20: +47.0 KiB still allocated (+48.2 B per request)
-     +24.0 KiB    +522 blocks  /usr/local/lib/python3.13/re/__init__.py:285
-     +16.4 KiB    +335 blocks  /api/app/routes/alerts.py:119
-# N=4000: +49.2 KiB (+12.6 B per request) - the same ~48 KiB: bounded caches, not a leak
-```
-
-Reading it: run two sizes. A leak grows with N; a cache settles at a
-fixed size (`re`'s compiled-pattern cache is bounded). Two things made
-the first version of this script report a leak that wasn't there, 470 KiB
-growing with N:
-- It snapshotted without `gc.collect()`. Objects in reference cycles
-  (SQLAlchemy's result metadata here) stay allocated until the cyclic
-  collector runs.
-- It counted the in-process test client's own allocations (the `httpx`
-  package). The script now filters both out.
-
-## What is it asking the kernel for? strace ✅
-
-**How it works.** strace uses `ptrace` to stop the process at every
-system call and record it. That makes it very informative and very
-expensive: never leave it on a production process under load. `make
-strace` finds a worker's host PID with `docker top` and runs strace from
-a container in the host PID namespace with `SYS_PTRACE`. It records for
-`SECS` seconds and prints a summary (`-c -f`).
-
-A worker at ~100 req/s for 8 s: `write` 7,835 / `read` 7,835,
-`epoll_pwait` 13,531, `getpid` 6,779, `utimensat` 1. The two odd ones:
-- `getpid` about 8 times per request: prometheus_client's multiprocess
-  mode checks the pid on every metric update, to notice it is in a new
-  (forked) process.
-- `utimensat` is gunicorn's heartbeat. Each worker touches a file in
-  `/dev/shm`, and the master kills a worker whose file is older than
-  `timeout` (`WORKER TIMEOUT`). A worker whose event loop is blocked
-  cannot touch it, which is how a blocked loop becomes a killed worker.
-
-## Network: netshoot and tcpdump ✅
-
-**How it works.** A container can join another container's network
-namespace (`--network container:<name>`). It then sees exactly what that
-container sees: same interfaces, same DNS resolver, same `localhost`.
-`nicolaka/netshoot` is an image full of network tools, so the api image
-stays minimal and you still get `dig`, `curl`, `ss`, `tcpdump` next to it.
-
-```
-make netshoot ENV=prod
-  cat /etc/resolv.conf          # nameserver 127.0.0.11 = Docker's embedded DNS
-  dig +short api db pgbouncer   # service names -> container IPs
-  dig +short nope               # empty: NXDOMAIN (a *stopped* container vanishes like this)
-  ss -tanp                      # connections and their states
-  curl -s localhost:8010/ready  # the api from its own network namespace
-make tcpdump SECS=20            # -> .captures/api.pcap, open in Wireshark
-```
-
-The capture settled a question in the Locust investigation. The only
-differences between Locust's requests and curl's were `User-Agent` and
-`Accept-Encoding`, and replaying them with curl was fast. So headers were
-not the cause.
 
 ## gunicorn's control socket ✅
 

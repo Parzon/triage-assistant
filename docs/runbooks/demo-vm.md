@@ -115,15 +115,14 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u <github user> --password-stdin
 make deploy tag=1.0.0
 ```
 
-Or build on the VM from the checkout (✅ exactly what `make
-fresh-host-test` does, on a clean Docker host: 41 s from checkout to
-serving):
+Or build on the VM from the checkout (✅ 41 s from checkout to serving,
+on a clean Docker host):
 
 ```
 make prod-up
 ```
 
-Then check (✅ the same checks the fresh-host test makes):
+Then check:
 
 ```
 curl -s https://<domain>/api/ready   # {"status":"ready","checks":{"database":"ok","redis":"ok","identity_provider":"ok"}}
@@ -155,10 +154,9 @@ it in the `edge-data` volume. Needs: ports 80 and 443 reachable from the
 internet (the ACME challenge arrives on 80), and DNS pointing at the VM
 before the first start.
 
-- ✅ **Rehearsed here:** `make acme-test` has the same hardened edge image
-  obtain a certificate over ACME HTTP-01 from Pebble, Let's Encrypt's own
-  test CA. It serves the certificate with a verified chain, and doesn't
-  ask again after a restart.
+- ✅ **Rehearsed here:** the same edge image obtained a certificate over
+  ACME HTTP-01 from Pebble, Let's Encrypt's test CA, served it with a
+  verified chain, and did not ask again after a restart.
 - 📘 **Not here:** the real Let's Encrypt, which needs a public domain.
 - Let's Encrypt stopped sending expiry emails in 2025, so watch expiry
   yourself: an uptime check that alerts on certificates close to expiry
@@ -280,8 +278,7 @@ make restore ENV=prod file=backups/triage-prod-<time>.dump
   healthy 13 s after the restore started. Row count and a checksum
   matched the data before it was damaged.
 - **Onto a brand-new host:** a clean Docker host rebuilt from the
-  checkout had the dump restored and was ready in 11 s
-  (`DUMP=... make fresh-host-test`).
+  checkout had the dump restored and was ready in 11 s.
 
 Schedule it, and get the dumps off the VM: a backup on the VM's only
 disk dies with the disk. 📘 A cron line for the `deploy` user:
@@ -291,8 +288,8 @@ disk dies with the disk. 📘 A cron line for the `deploy` user:
 ```
 
 A backup nobody has restored is a hope, not a backup. Rehearse a restore
-onto a clean host (`DUMP=... make fresh-host-test`) after schema changes,
-and before relying on a backup.
+onto a clean host (`make restore file=...` on a fresh `make prod-up`) after
+schema changes, and before relying on a backup.
 
 ## 8. Cutting a release
 

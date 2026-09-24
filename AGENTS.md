@@ -39,8 +39,7 @@ Run `make` to list every target. The ones you need most:
 - After any dependency change: `make rebuild` — NOT `docker compose up
   --build`, which keeps the old `.venv`/`node_modules` anonymous volume
 - Production-shaped stack locally: `make prod-up` (HTTPS through the TLS
-  edge on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`). `make
-  acme-test` rehearses automatic certificates against Pebble.
+  edge on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`).
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
@@ -62,9 +61,7 @@ Run `make` to list every target. The ones you need most:
   `make session` cookie
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
-  `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
-  `make load-compare` (same scenario through six tools), `make load-tool TOOL=locust`.
-  Profile a live worker: `make py-spy-dump` / `py-spy-top` / `py-spy-record`.
+  `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health` (k6).
 - Monitoring: `make obs-up` (Prometheus :9090, Grafana :3000, Alertmanager
   :9093, Jaeger :16686 on localhost; it turns tracing on, `make obs-down`
   off); `make obs-check` validates configs, unit-tests the
@@ -77,13 +74,12 @@ Run `make` to list every target. The ones you need most:
   `make trace id=<request id>` (one request across nginx and the api, then
   its Jaeger link), `labs/ai-observability/` (a worse answer, diagnosed from its
   trace; docs/handbook/ai-observability.md),
-  `make db-activity` / `db-locks` / `db-top-queries`, `make netshoot`,
-  `make tcpdump`, `make strace` (add `ENV=prod` for the production stack).
+  `make db-activity` / `db-locks` / `db-top-queries` (add `ENV=prod` for
+  the production stack).
 - Releases and hosts: a `vX.Y.Z` tag on main publishes the api, web and edge images (amd64 + arm64) to GHCR
   (`.github/workflows/release.yml`); a host runs `make deploy tag=X.Y.Z`
   (rolling: the new api is healthy before the old one drains). `make
-  backup` / `make restore file=...` (add `ENV=prod`); `make fresh-host-test`
-  proves the committed tree comes up on a clean Docker host. Runbook:
+  backup` / `make restore file=...` (add `ENV=prod`). Runbook:
   `docs/runbooks/demo-vm.md`. Never hardcode a container name: after a
   rolling deploy the api is `api-2`, `api-3`... - use `docker compose ps -q api`.
 - Failure drills: `make drills` injects each fault into the production stack
@@ -114,9 +110,8 @@ Run `make` to list every target. The ones you need most:
 
 See `docs/README.md` for the full picture. Short version: **PRD**
 (`docs/prd/`) for what/why before building; **RFC** (`docs/rfc/`) for
-should-we/how, before a non-trivial change; **Design Doc**
-(`docs/design-docs/`) for the detailed technical plan once an RFC is
-accepted; **ADR** (`docs/adr/`) for any decision that would confuse
+should-we/how, with the technical plan, before a non-trivial change;
+**ADR** (`docs/adr/`) for any decision that would confuse
 someone later if left unexplained — write one whenever you make an
 irreversible or non-obvious call (a new dependency, a schema choice, a
 deployment pattern), even if nobody asked for it.

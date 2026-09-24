@@ -63,9 +63,8 @@ Yes, but not bit for bit, and by design.
   importable.
 - Configuration differs only through the environment, as documented in
   the settings reference.
-- `make fresh-host-test` brings the whole production stack up on a clean
-  Docker host, from committed files and `.env.example` alone, serving
-  HTTPS.
+- The whole production stack came up on a clean Docker host from
+  committed files and `.env.example` alone, serving HTTPS.
 
 **Is the database schema reproducible?**
 Yes:
@@ -171,7 +170,7 @@ Not request rate alone: a stream holds a worker's attention for up to
    thinner client would halve it (55 µs vs 126 µs, measured).
 3. **Connections:** check the budget above.
 4. **The model provider:** the real ceiling. Negotiate quota or
-   dedicated capacity ([RFQ-0001](../rfq/0001-llm-inference.md)), and
+   dedicated capacity, and
    budget for it: about 350 prompt and 85 completion tokens per answer,
    measured.
 

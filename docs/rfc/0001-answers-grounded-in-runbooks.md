@@ -41,11 +41,11 @@ proposal below is kept as it was reviewed.
 | retrieval latency | first word under the 3 s SLO | hybrid search p50 10.5 ms, p95 12.2 ms (110 warm searches). First token through the service p50 0.28 s, p95 1.61 s (57 answers; without runbooks, 0.21 s and 0.48 s over 42). The slow answers' time was not in the search, and was not measured apart |
 | recall@5 | ≥ 0.8, on ≥ 30 questions about the pilot's real runbooks | 1.00 on 19 questions about 8 hand-written runbooks. **Still to do:** 30 questions, on real runbooks |
 | prompt tokens | the tokens added per answer | 4 sections added a median of 234 tokens (202–304) to a 394-token prompt, over the benchmark's 22 questions |
-| the eval suite | 10 runs per case, the production model | every case passes at 10 runs against gpt-oss:20b. The production model waits on RFQ-0001 |
+| the eval suite | 10 runs per case, the production model | every case passes at 10 runs against gpt-oss:20b. The production model waits on the provider choice |
 
 **The open questions:**
 - the source of truth: still open. Runbooks are uploaded through the api;
-- embeddings at the provider: still open (RFQ-0001);
+- embeddings at the provider: still open (the provider's terms);
 - chunk size: sections split at headings, and at paragraphs past 300
   words. Not compared at 200–400 words as proposed;
 - stale sections: every section shows its `updated` date in the prompt.
@@ -176,8 +176,8 @@ The assistant still has no tools. **A person runs every command.**
 
 **Operations:**
 - the database image changes to one with `pgvector`
-  (`pgvector/pgvector:pg17`). That is a data migration step, rehearsed
-  with `make fresh-host-test`;
+  (`pgvector/pgvector:pg17`). That is a data migration step, rehearsed on
+  a clean host;
 - embeddings must be recomputed when the embedding model changes (a
   background job; the model name is stored with each vector).
 
@@ -187,7 +187,7 @@ The assistant still has no tools. **A person runs every command.**
   in this service?
 - **Embeddings at the provider:** do they need the same zero-retention
   terms as chat? They do if the runbooks are confidential. That is a
-  question for RFQ-0001.
+  question for the provider.
 - **Chunk size and overlap:** measure at 200–400 words, split at
   headings, before choosing.
 - **Stale sections:** show every runbook's age, or flag only sections

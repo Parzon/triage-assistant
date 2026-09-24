@@ -18,7 +18,7 @@ needs a real cloud account). Where the two differ, trust ✅.
 
 | You are… | Read, in order |
 |---|---|
-| deciding about the project (not reading code) | [the overview](docs/overview.md) → [PRD-0001](docs/prd/0001-triage-assistant.md) → [ARD-0001](docs/ard/0001-triage-assistant.md) |
+| deciding about the project (not reading code) | [the overview](docs/overview.md) → [PRD-0001](docs/prd/0001-triage-assistant.md) |
 | starting a new service from this template | [using this template](docs/handbook/using-this-template.md) → [code style](docs/handbook/code-style.md) → [tech stack](docs/handbook/tech-stack.md) → the rules below |
 | a new developer | Day one (below) → [dev environment](docs/handbook/dev-environment.md) → [daily work](docs/handbook/daily-work.md) → [testing](docs/handbook/testing.md) → the gotchas below |
 | reviewing a PR | the rules and the gotchas below; [testing](docs/handbook/testing.md) (what each endpoint needs) |
@@ -84,12 +84,12 @@ host, a secret store on a platform.
 ```
 apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals, the retrieval benchmark), tests/{unit,integration}, migrations/
 apps/web/        React + Vite UI (Node 24); nginx config for production
-tools/           mock-llm (a provider stand-in with failure modes, chat and embeddings), py-spy and load-tool images
+tools/           mock-llm (a provider stand-in with failure modes, chat and embeddings), the TLS edge image
 labs/            hands-on exercises, one fault at a time: rag-debugging (each stage of runbook retrieval)
-tests/           e2e (Playwright through production nginx), load (k6, Locust, vegeta, JMeter, Artillery)
+tests/           e2e (Playwright through production nginx), load (k6)
 infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
-scripts/         deploy, backup, restore, failure drills, fresh-host test, SQL helpers, debug scripts
-docs/            overview.md, handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ ard/ rfc/ rfq/ design-docs/ (templates + this project's own)
+scripts/         deploy, backup, restore, failure drills, SQL helpers
+docs/            overview.md, handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ rfc/ (templates + this project's own)
 compose*.yaml    base / dev (auto-merged) / prod shape / test / debug overlays
 Makefile         every command; `make` lists them
 ```
@@ -316,6 +316,9 @@ something bites.
   replaced the edge on a GHCR host. A v0.1.0 edge would have stayed, with
   no `/auth` route. Ask compose (`config --images`), and fail when the
   answer is empty.
+- **A value compose does not list never reaches the container.** 22 of
+  the api's settings could not be changed from `.env`: `make lint` now
+  checks every setting is listed.
 - **A rollback ran the old image's migrations**, and old Alembic has never
   heard of the new revision: "Can't locate revision". The deploy failed
   safely, but rolling back was impossible across any migration. Now a
@@ -335,8 +338,6 @@ something bites.
   relative times.
 - **Container-created files in bind mounts come out owned by root.** Run
   as your UID (`AS_ME`), or `make fix-perms`.
-- **Docker-in-Docker needs a volume for `/var/lib/docker`**: overlay
-  can't stack on overlay.
 - **Postgres refuses a data directory from an older major version**
   (16 → 17): dump/restore or `pg_upgrade`. The `postgres:18` image also
   moved `PGDATA`.
@@ -368,8 +369,6 @@ something bites.
   failed nothing.
 - **Let's Encrypt stopped sending expiry emails (2025)**: monitor
   certificate expiry yourself.
-- **Pebble's release `v2.10.1` is image tag `2.10.1`**: GitHub release
-  names and image tags don't always match.
 - **nginx buffers responses**: SSE arrived all at once. Set
   `proxy_buffering off` on the stream location, and send
   `X-Accel-Buffering: no`. ([networking](docs/handbook/networking.md))
@@ -748,6 +747,9 @@ Measured building the traces; the evidence is in
 - **`SQLAlchemyInstrumentor` is a process-wide singleton:** a second
   `instrument()` is ignored. Instrument in startup, uninstrument in
   shutdown.
+- **One tracer provider per process, and after gunicorn forks.** The
+  batch processor's thread must live in the worker: install it in the
+  lifespan. Tests install one in-memory provider for the whole run.
 - **The SQL commenter writes the trace id into every statement,** so no
   two match, and prepared-statement caches (asyncpg, PgBouncer) churn.
   Leave it off.
@@ -829,16 +831,13 @@ Measured building the traces; the evidence is in
   1.5 ms evenly spread, 29 ms in clumps. After sign-in doubled the
   per-request cost, 200 users pacing 1 req/s in step saw p50 182 ms,
   against 3 ms for the same rate spread out.
-- **Every tool needs the session**: a cookie header from `make session`
-  (k6 `SESSION_COOKIE`, JMeter `-Jcookie`, vegeta's targets file), and
-  `Origin` on POSTs.
-- **A saturated load generator measures itself**: Artillery needed 534%
-  CPU for 200 req/s.
-- **k6 and Artillery phone home by default.**
+- **Load needs the session**: a cookie header from `make session` (k6
+  `SESSION_COOKIE`), and `Origin` on POSTs.
+- **A saturated load generator measures itself**: one tool needed 534%
+  CPU to offer 200 req/s; k6 needed 5%.
+- **k6 phones home by default:** `--no-usage-report`.
 - **Rate limits turn a load test into a 429 test**: raise them for the
   run.
-- **JMeter and Artillery report whole milliseconds**, which can't
-  resolve a 1.5 ms service.
 
 ### Operations
 - **Recreating a single container refuses requests for the whole
@@ -847,8 +846,8 @@ Measured building the traces; the evidence is in
 - **Replacing the only nginx refuses connections for ~0.3 s**; only a
   load balancer removes that.
 - **A backup on the same disk dies with it, and an untested restore is a
-  hope**: copy dumps off the host, and rehearse
-  (`DUMP=... make fresh-host-test`).
+  hope**: copy dumps off the host, and rehearse a restore on a clean
+  host.
 - **The first bottleneck came from missing data, not missing
   hardware**: a missing index, invisible until 2 M rows.
 
@@ -930,6 +929,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - traces with OpenTelemetry and the GenAI conventions, no content by default (0018)
 - an append-only audit trail of what the assistant reads, and who wrote it (0019)
 - an agent mode beside the pipeline, and its read-only tools over MCP (0020)
+- trimming the template to what a project uses (0021)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -943,8 +943,8 @@ oversight:
   Prometheus itself. Nothing notices when the VM or the edge is down.
 - **A second host.** One VM has single points of failure (listed in
   failure modes).
-- **Let's Encrypt for real**: rehearsed against Pebble (`make
-  acme-test`); a real domain is the step left.
+- **Let's Encrypt for real**: rehearsed against Pebble, its test CA; a
+  real domain is the step left.
 - **Image and secret scanning** in CI (GitHub's secret scanning with push
   protection is on).
 - **Quality evals on a schedule** against the production model, and
@@ -976,6 +976,4 @@ oversight:
 | How is it built and run, and why, in depth? | this file and `docs/handbook/` |
 | Why was X decided? | `docs/adr/` |
 | What do I do when Y happens? | `docs/runbooks/` |
-| What are we building next, and should we? | `docs/prd/`, `docs/rfc/`, `docs/design-docs/` (templates in each) |
-| Is the architecture fit to go live? | `docs/ard/` (the architecture review) |
-| What do we ask vendors to quote? | `docs/rfq/` |
+| What are we building next, and should we? | `docs/prd/`, `docs/rfc/` (a template in each) |

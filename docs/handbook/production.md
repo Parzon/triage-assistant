@@ -51,14 +51,14 @@ backups.
   - SSH only from the company network, or through the cloud's session
     manager (no port 22 at all).
 - **Certificates:** Caddy gets and renews them from Let's Encrypt. It
-  was rehearsed against Pebble, the test CA (`make acme-test`). The
+  was rehearsed against Pebble, Let's Encrypt's test CA. The
   first real renewal is about 60 days after the first certificate:
   put a calendar reminder on it.
 - **Backups leave the host.** A dump on the VM's disk dies with the VM.
   Copy each one to object storage with a retention rule.
 
 **Done when:**
-- `make fresh-host-test` passes on the VM;
+- `make prod-up` brings the stack up on the VM from the checkout;
 - the site serves a publicly trusted certificate;
 - `make drills` matches the failure-mode matrix;
 - a backup copied off the VM restores onto a fresh VM, with the time
@@ -98,8 +98,8 @@ provider".
 
   Alert text, runbook text and questions leave your network, to the chat
   model and to the embedding model ([security](security.md)).
-  [RFQ-0001](../rfq/0001-llm-inference.md) is the request to send
-  vendors.
+  Ask vendors for zero data retention, quota, region and price in
+  writing, before choosing.
 - **Evals first:**
   - calibrate the judge;
   - run the whole suite with `--repeat 10`, and the leak case with

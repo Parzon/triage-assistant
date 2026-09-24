@@ -17,8 +17,8 @@ browser ──:443 HTTPS──► edge (Caddy) ──http://web:8080──► ng
 - **One bridge network per compose project**
   (`triage-assistant-prod_default`). Services find each other by
   **service name** through Docker's DNS server at `127.0.0.11`, which
-  every container's `/etc/resolv.conf` points at (`make netshoot`, then
-  `dig api`).
+  every container's `/etc/resolv.conf` points at (`docker compose exec
+  api getent hosts db`).
 - **A stopped container disappears from DNS.** Clients see a
   name-resolution error (`socket.gaierror`, "Temporary failure in name
   resolution"), not "connection refused". The api maps it to 503.
@@ -99,8 +99,8 @@ Caddy (`tools/edge`, ADR-0012) terminates HTTPS in front of nginx.
   - `SITE_ADDRESS` set to a domain: Let's Encrypt over ACME, obtained on
     first use and renewed by Caddy.
   - `localhost`: Caddy's local CA, with 12-hour leaf certificates.
-  - `make acme-test` rehearses the ACME exchange against Pebble, Let's
-    Encrypt's test CA.
+  - the ACME exchange was rehearsed against Pebble, Let's Encrypt's test
+    CA.
 - **Measured here:**
   - TLS 1.3 and HTTP/2; plain HTTP answered with `308` to HTTPS; HTTP/3
     advertised (`alt-svc`).
