@@ -13,9 +13,11 @@ the identity provider itself.
 
 import asyncio
 import os
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import pytest
+import uvicorn
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
@@ -181,3 +183,21 @@ async def mock_llm(settings: Settings) -> AsyncIterator[MockLLM]:
     yield mock
     await mock.reset()
     await mock._http.aclose()
+
+
+@pytest.fixture
+async def live_server(settings: Settings) -> AsyncIterator[str]:
+    """The app on a real socket: needed to observe a real client hang-up."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    server = uvicorn.Server(uvicorn.Config(create_app(settings), log_level="warning"))
+    task = asyncio.create_task(server.serve(sockets=[sock]))
+    for _ in range(500):  # bounded: a server that never starts fails, not hangs
+        if server.started:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise RuntimeError("test server did not start")
+    yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+    server.should_exit = True
+    await task

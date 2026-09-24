@@ -13,7 +13,9 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict
 
-from app.llm import Finish, LLMClient, LLMEmptyAnswer, LLMError, LLMTimeout, Usage
+from opentelemetry import trace
+
+from app.llm import Finish, LLMClient, LLMEmptyAnswer, LLMError, LLMTimeout, PromptRef, Usage
 from app.metrics import (
     chat_citations,
     llm_active_streams,
@@ -27,6 +29,7 @@ from app.redact import redact
 from app.runbooks import Hit
 from app.schemas import AlertOut
 from app.sse import HEARTBEAT, sse
+from app.tracing import trace_id
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +81,14 @@ Recent alerts of the asker's teams, newest first:
 Runbook sections of the asker's teams, most relevant first:
 {runbooks}"""
 
+# Bump the version with every change to SYSTEM_PROMPT, and add a row to the
+# prompt history (the AI engineering chapter). It goes on every model span
+# (gen_ai.prompt.version), in app_info and in eval reports, so a change in
+# answers can be lined up with the prompt that made them. The hash is
+# checked against the version by a unit test: an edit without a bump fails.
+PROMPT_VERSION = "v6"
+PROMPT = PromptRef.of("triage", SYSTEM_PROMPT, PROMPT_VERSION)
+
 # Bounds prompt size (cost, latency, context window) whatever lands in an alert.
 MAX_ALERT_CHARS = 300
 # Any standalone R<number>: asked for [R1], gpt-oss:20b also wrote (R1),
@@ -115,6 +126,15 @@ def build_messages(
     ]
     if redactions:
         prompt_redactions.inc(redactions)
+    # On the request's span: how much context the model got. Counts, never
+    # the text (app/tracing.py).
+    trace.get_current_span().set_attributes(
+        {
+            "app.prompt.alerts": len(alerts),
+            "app.prompt.sections": len(sections),
+            "app.prompt.redactions": redactions,
+        }
+    )
     system = SYSTEM_PROMPT.format(
         alerts="\n".join(lines) or "(none)",
         runbooks="\n\n".join(runbooks) or "(no runbook sections)",
@@ -168,7 +188,7 @@ async def answer_events(
     async def produce() -> None:
         try:
             async with asyncio.timeout(stream_timeout_s):
-                async for item in llm.stream(messages):
+                async for item in llm.stream(messages, PROMPT):
                     await queue.put(item)
         except TimeoutError:
             await queue.put(LLMTimeout("the answer took too long"))
@@ -182,6 +202,8 @@ async def answer_events(
     answer: list[str] = []
     usage: Usage | None = None
     finish: str | None = None
+    cited: list[dict[str, object]] = []
+    invalid: list[str] = []
     # Anything that ends the stream without reaching "ok" or an error code -
     # a client hang-up, i.e. cancellation or aclose() - counts as cancelled.
     outcome = "cancelled"
@@ -190,6 +212,8 @@ async def answer_events(
         "meta",
         {
             "request_id": request_id,
+            # Tracing on: the id to look the answer up by in Jaeger.
+            "trace_id": trace_id(),
             "model": llm.model,
             "alerts_in_context": alerts_in_context,
             "runbooks_in_context": len(sections),
@@ -263,6 +287,16 @@ async def answer_events(
             },
         )
     finally:
+        # On the request's span, the answer as a whole: what came back, and
+        # what it cited (the model's own span has its tokens and timing).
+        trace.get_current_span().set_attributes(
+            {
+                "app.chat.outcome": outcome,
+                "app.chat.retrieval": retrieval or "off",
+                "app.chat.citations": len(cited),
+                "app.chat.invalid_citations": len(invalid),
+            }
+        )
         # Normal end, error, or the client hung up (cancellation or aclose):
         # stop reading the model, which closes the provider connection.
         producer.cancel()

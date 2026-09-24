@@ -1,0 +1,10 @@
+# Traces in Grafana too (Explore → Jaeger), next to the metrics. Jaeger's
+# own UI (:16686) has what Grafana lacks: comparing two traces side by side.
+apiVersion: 1
+datasources:
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false

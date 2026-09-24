@@ -19,6 +19,16 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The release this api runs (deploy.sh exports IMAGE_TAG): on traces
+      # (service.version) and in app_info.
+      APP_VERSION: ${IMAGE_TAG:-dev}
+      # Traces (ADR-0018): off unless an OTLP endpoint is set. make obs-up
+      # sets it to the jaeger service below.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
+      # Questions, prompts and answers on spans (redacted): development only.
+      TRACE_CONTENT: ${TRACE_CONTENT:-false}
       # The app role, through PgBouncer. Plain postgresql:// - the app picks
       # the async driver itself.
       DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
@@ -336,6 +346,22 @@ services:
     # arrives as a file under /run/secrets instead.
     secrets:
       - alertmanager_webhook_token
+    restart: unless-stopped
+    logging: *logging
+
+  # Traces (ADR-0018). The api sends OTLP/HTTP to :4318 when
+  # OTEL_EXPORTER_OTLP_ENDPOINT is set; the UI is :16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: ["observability"]
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    volumes:
+      - ./infra/observability/jaeger:/etc/jaeger:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:13133/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     logging: *logging
 

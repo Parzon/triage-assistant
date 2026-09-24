@@ -27,6 +27,7 @@ from pydantic import SecretStr
 from app.cli import mint_session
 from app.config import Settings, get_settings
 from app.llm import OpenAICompatibleClient
+from app.tracing import configure_tracing, shutdown_tracing
 from evals.calibration import calibrate, calibration_markdown, load_labelled
 from evals.cases import load_cases
 from evals.retrieval import load_corpus, load_questions, retrieval_markdown, run_retrieval
@@ -195,6 +196,18 @@ async def retrieval_main(args: argparse.Namespace, base: Settings) -> int:
 
 async def main_async(args: argparse.Namespace) -> int:
     base = get_settings()
+    # With OTEL_EXPORTER_OTLP_ENDPOINT set (make obs-up), each case's run is
+    # a trace: its checks as events, and, through the api, the service's
+    # own spans under it.
+    if configure_tracing(base.model_copy(update={"otel_service_name": "triage-assistant-evals"})):
+        try:
+            return await _main(args, base)
+        finally:
+            shutdown_tracing()  # exports what is still buffered
+    return await _main(args, base)
+
+
+async def _main(args: argparse.Namespace, base: Settings) -> int:
     if args.calibrate_judge:
         return await calibrate_main(args, base)
     if args.target == "retrieval":

@@ -197,6 +197,15 @@ services:
           memory: 128m
     memswap_limit: 128m
 
+  jaeger:
+    ports:
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    memswap_limit: 512m
+
   cadvisor:
     deploy:
       resources:

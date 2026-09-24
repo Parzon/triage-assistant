@@ -16,6 +16,7 @@ runbooks of their teams, exactly as with alerts.
 """
 
 import hashlib
+import json
 import logging
 import re
 import time
@@ -24,6 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from opentelemetry import trace
+from opentelemetry.util.types import AttributeValue
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,9 +36,11 @@ from app.llm import Embedder, LLMError
 from app.metrics import embedding_requests, retrieval_duration
 from app.models import Runbook, RunbookChunk, Team
 from app.redact import redact
+from app.tracing import text_parts
 from app.vector import to_text
 
 log = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # About 400 tokens: specific enough to rank, long enough to hold a step
 # with its context. The RAG debugging lab shows what too small and too
@@ -292,8 +297,9 @@ _QUERY_TERMS = """
 # measured on 50,000 sections in 100 teams, a one-team caller's semantic
 # search behind that OR (and row-level security's own) got the HNSW index:
 # 0 results without iterative scans (all 40 candidates were other teams'),
-# 20 in 71 ms with them. The plain "team_id = ANY(...)" lets the planner read
-# the team's rows by its index and sort them exactly: 20 in 1.6 ms.
+# 20 in 32-71 ms with them. The plain "team_id = ANY(...)" lets the planner
+# read the team's rows by its index and sort them exactly: 20 in 0.8-1.6 ms
+# (three runs of make rag-overfiltering-lab).
 _ALL_TEAMS = "TRUE"
 _SOME_TEAMS = "c.team_id = ANY(CAST(:team_ids AS bigint[]))"
 _KEYWORD = """
@@ -394,7 +400,64 @@ async def search_runbooks(
 
     Commits the session's open transaction first - the sign-in check's
     read, in a route - so no pooled connection waits while the embedding
-    model works (up to EMBEDDING_TIMEOUT_S)."""
+    model works (up to EMBEDDING_TIMEOUT_S).
+
+    Traced as one span (the GenAI conventions' retrieval), with the
+    question's embedding and the SQL as children. It records which
+    sections came back, by id and rank: enough to see what the model was
+    given, and to read the sections themselves through the api, under the
+    asker's access. Their text stays out (app/tracing.py)."""
+    attributes: dict[str, AttributeValue] = {
+        "gen_ai.operation.name": "retrieval",
+        "gen_ai.data_source.id": "runbooks",
+        "gen_ai.retrieval.top_k": k,
+        "app.retrieval.requested_mode": mode,
+        "app.retrieval.teams": -1 if team_ids is None else len(team_ids),
+        "app.retrieval.embedding_key": embedding_key(settings),
+    }
+    if settings.trace_content:
+        attributes["gen_ai.retrieval.query.text"] = text_parts(query)
+    with tracer.start_as_current_span("retrieval runbooks", attributes=attributes) as span:
+        retrieval = await _search(db, embedder, settings, query, team_ids, k=k, mode=mode)
+        span.set_attributes(
+            {
+                "app.retrieval.mode": retrieval.mode,
+                "app.retrieval.hits": len(retrieval.hits),
+                # The conventions list documents as opt-in: in some systems
+                # an id is itself sensitive (a file name). Here it is a number
+                # that resolves only through row-level security.
+                "gen_ai.retrieval.documents": json.dumps(
+                    [
+                        {
+                            "id": str(hit.chunk_id),
+                            "score": round(hit.score, 5),
+                            "runbook_id": hit.runbook_id,
+                            "keyword_rank": hit.keyword_rank,
+                            "semantic_rank": hit.semantic_rank,
+                            "distance": None if hit.distance is None else round(hit.distance, 4),
+                        }
+                        for hit in retrieval.hits
+                    ]
+                ),
+            }
+        )
+        if retrieval.embedding_error:
+            span.set_attribute("app.retrieval.embedding_error", retrieval.embedding_error)
+        if settings.trace_content:
+            span.set_attribute("app.retrieval.headings", [hit.heading for hit in retrieval.hits])
+        return retrieval
+
+
+async def _search(
+    db: AsyncSession,
+    embedder: Embedder,
+    settings: Settings,
+    query: str,
+    team_ids: Sequence[int] | None,
+    *,
+    k: int,
+    mode: Mode,
+) -> Retrieval:
     await db.commit()
     start = time.perf_counter()
     embedding: list[float] | None = None

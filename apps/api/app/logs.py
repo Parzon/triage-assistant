@@ -4,7 +4,8 @@ stdout because the container runtime collects it (docker logs, CloudWatch,
 Loki) - files inside a container are invisible to all of them. JSON so a
 log backend can filter on fields (request_id, route, status) instead of
 grepping text. Every line carries the request id of the request that
-produced it, so one request can be followed across nginx and the api.
+produced it, so one request can be followed across nginx and the api, and,
+when tracing is on, the trace id, which opens the same request in Jaeger.
 """
 
 import json
@@ -13,6 +14,8 @@ import logging.config
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
+
+from opentelemetry import trace
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
@@ -29,6 +32,10 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "request_id": request_id_var.get(),
         }
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            payload["trace_id"] = format(span_context.trace_id, "032x")
+            payload["span_id"] = format(span_context.span_id, "016x")
         for key, value in vars(record).items():
             if key not in _STANDARD_ATTRS and not key.startswith("_"):
                 payload[key] = value

@@ -19,7 +19,19 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", frozen=True)
 
     app_env: Literal["dev", "test", "prod"] = "dev"
+    # The release this process runs: compose passes IMAGE_TAG. Reported on
+    # traces (service.version) and in app_info.
+    app_version: str = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    # --- Traces (app/tracing.py, ADR-0018). Off unless an OTLP endpoint is
+    # set; the SDK also reads the other standard OTEL_* variables itself.
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "triage-assistant-api"
+    # Questions, prompts, answers and runbook headings on spans, redacted.
+    # Development only: a trace store is readable by everyone who debugs,
+    # across every team.
+    trace_content: bool = False
     # Path prefix the reverse proxy strips (nginx and the Vite dev proxy
     # both serve the api under /api). Used for generated URLs: /docs,
     # the OpenAPI schema, redirects.

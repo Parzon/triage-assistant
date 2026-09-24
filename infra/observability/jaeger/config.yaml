@@ -1,0 +1,48 @@
+# Jaeger v2 (built on the OpenTelemetry Collector) for a single host: OTLP
+# in, traces kept in memory, the UI on :16686 (ADR-0018). The image's own
+# default is the same shape, plus receivers this service never uses and a
+# 100,000-trace store that outgrows a small container.
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    resource:
+      service.name: jaeger
+    logs:
+      level: info
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+  jaeger_query:
+    storage:
+      traces: memstore
+  jaeger_storage:
+    backends:
+      memstore:
+        memory:
+          # The newest traces only, and a restart empties it: for looking at
+          # what just happened, not for last month. Longer retention needs a
+          # real backend (Badger on disk, Elasticsearch, Cassandra).
+          max_traces: 20000
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: memstore
