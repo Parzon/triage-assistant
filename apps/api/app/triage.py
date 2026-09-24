@@ -45,10 +45,11 @@ log = logging.getLogger(__name__)
 # v6 adds the team's runbook sections (RFC-0001): steps for what to do,
 # each cited as [R1]. Runbooks are instructions for the person, never for
 # the model: the untrusted-data rules cover their text as they do alerts'.
-# An empty runbook list reads "(no runbook sections)", not "(none)":
-# measured, with "(none)" under both lists the empty-list rule fired on the
-# runbooks, and "There are no alerts." came back (refusal-off-topic, 1 run
-# in 10).
+# An empty runbook list reads "(no runbook sections)", not "(none)". The
+# first v6 run said "There are no alerts." once in 10 (refusal-off-topic)
+# with "(none)" under both lists; put back later, that marker gave 0 such
+# answers in 60 runs, so it was not proven the cause. A distinct marker
+# costs nothing and removes the ambiguity.
 SYSTEM_PROMPT = """You are an on-call triage assistant for an operations team.
 Answer questions about the alerts listed below, using only those alerts
 and the runbook sections after them. Decline anything else. Be concise.
