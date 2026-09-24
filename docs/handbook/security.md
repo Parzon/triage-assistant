@@ -70,6 +70,9 @@ the route.
 | Brute-forcing sign-in | per-IP limit on `/auth/*` (30/min); the provider's own lockout (Keycloak: `bruteForceProtected`) | `rate_limit_by_ip` | `test_sign_in_is_limited_per_address` |
 | One user exhausting the service | rate limits per user, not per IP | `rate_limit` | `test_rate_limits_are_per_user_not_per_address` |
 | The assistant quoting another team's alerts | its context is read with the caller's visibility, the same query as the list | `queries.newest_alerts` | `test_the_assistant_only_sees_the_askers_alerts` |
+| The assistant quoting another team's runbooks | retrieval filters on the caller's teams explicitly, and row-level security enforces it again | `runbooks.search_runbooks` | `test_the_assistant_gets_the_askers_runbook_sections_and_no_one_elses`, `test_runbooks_and_their_sections_are_isolated_like_alerts`; eval `rag-isolation-break-glass` |
+| A credential in an alert or a runbook, repeated by the model or sent to the provider | redacted before the prompt | `app/redact.py` | `test_redact.py`; eval `injection-fake-conversation` |
+| An instruction planted in a runbook (indirect prompt injection) | runbook text is untrusted data in the prompt; the model has no tools; only team admins write runbooks | `SYSTEM_PROMPT`, `routes/runbooks.py` | eval `rag-poisoned-runbook`; `test_only_a_team_admin_writes_that_teams_runbooks` |
 
 ### Roles
 
@@ -78,6 +81,8 @@ the route.
 | read the team's alerts, ask the assistant | ✓ | ✓ | ✓ | every team |
 | create alerts for the team | | ✓ | ✓ | every team |
 | delete the team's alerts, list its members | | | ✓ | every team |
+| read and search the team's runbooks | ✓ | ✓ | ✓ | every team |
+| add, replace and delete the team's runbooks | | | ✓ | every team |
 
 Ranked (`Role` is an `IntEnum`): a check is `role >= needed`, so adding a
 right to a role is one line. The UI hides what a role cannot do; the api
@@ -263,20 +268,43 @@ query.
   injection eval cases measure how often the prompt holds, and they are
   a release gate: every run must pass
   ([AI engineering](ai-engineering.md)).
+- **Known credential formats never reach a model.** Systems print
+  secrets into alerts, and anyone who can send an alert can plant one.
+  They are redacted from everything sent to a model (`app/redact.py`):
+  alerts, runbook sections and the question in the prompt, and the text
+  sent for embedding. What is redacted:
+  - labelled secrets ("password is ...");
+  - AWS, OpenAI, GitHub and Slack keys;
+  - JWTs, private keys, and passwords in connection URLs.
+
+  The prompt's own rule failed about 1 run in 100; redaction does not
+  fail. It also keeps secrets from the model provider (OWASP LLM02). It
+  is a list of patterns: a secret in an unknown format passes through.
+  `prompt_redactions_total` counts them: each is a secret to fix at its
+  source.
+- **Runbooks are team data too.** Row-level security and the same
+  visibility rule apply as for alerts ([RAG](rag.md)). A runbook's text is
+  untrusted like an alert's: an instruction planted in a runbook
+  (indirect prompt injection) is an eval case (`rag-poisoned-runbook`).
 - **The system prompt is not a secret.** It is in this public repo.
   Measured: prompt v4 printed itself 5 times in 200 when an alert asked
-  it to; v5, 0 in 200. Rarer is not never. Never put credentials,
+  it to; v5, 0 in 200; v6, 2 in 600. Rarer is not never. Never put credentials,
   internal URLs or anything confidential in a prompt, and never make it
   the thing that enforces access (OWASP LLM07).
 - **Output handling.** The answer is rendered as text (`white-space:
   pre-wrap`), never as HTML or markdown. A model coaxed into writing
   `<script>` shows it, rather than running it. Keep it that way, or
   sanitise if you render markdown.
-- **Data sent to the provider.** Alert text and user questions leave
-  your network. Check the provider's retention and training terms,
-  and prefer a zero-retention agreement or a model in your own cloud
-  account (Bedrock, Azure OpenAI, Vertex). Redact what should not leave:
-  secrets that systems print into alerts, personal data.
+- **Data sent to the provider.** Alert text, runbook text and user
+  questions leave your network:
+  - the chat model gets the visible alerts and the retrieved sections;
+  - the embedding model gets every runbook's text when it is saved, and
+    every question.
+
+  Check the provider's retention and training terms, and prefer a
+  zero-retention agreement or a model in your own cloud account (Bedrock,
+  Azure OpenAI, Vertex). Known credential formats are redacted (above).
+  Personal data is not: redact it too if your alerts carry it.
 - **Cost as an attack.** Chat requests cost money. There is a per-client
   rate limit (10/min), `LLM_MAX_OUTPUT_TOKENS` (800), the total stream
   cap (120 s), and a cost-per-hour dashboard panel. 📘 Add a

@@ -27,6 +27,14 @@ class CaseAlert:
 
 
 @dataclass(frozen=True)
+class CaseRunbook:
+    title: str
+    body: str
+    # Whose runbook it is (api target): isolation cases put one elsewhere.
+    team: str = "default"
+
+
+@dataclass(frozen=True)
 class Expect:
     contains_all: tuple[str, ...] = ()
     contains_any: tuple[str, ...] = ()
@@ -38,6 +46,13 @@ class Expect:
     not_contains_prompt: bool = False
     # api target only: how many alerts the service put in the prompt.
     alerts_in_context: int | None = None
+    # Each must match (as a substring) the heading of a section the answer
+    # cites, like "Free space" for [R1] = "Disk full > Free space".
+    cites: tuple[str, ...] = ()
+    # The answer must cite no runbook at all: none applies.
+    cites_nothing: bool = False
+    # api target only: how many runbook sections the service retrieved.
+    runbooks_in_context: int | None = None
     # quality mode only: a yes/no question for an LLM judge about the answer.
     judge: str | None = None
 
@@ -50,6 +65,9 @@ class Expect:
             or self.not_starts_with
             or self.not_contains_prompt
             or self.alerts_in_context is not None
+            or self.cites
+            or self.cites_nothing
+            or self.runbooks_in_context is not None
         )
 
 
@@ -60,6 +78,9 @@ class Case:
     question: str
     alerts: tuple[CaseAlert, ...]
     expect: Expect
+    # Runbooks the answer may draw on: given to the model as retrieved
+    # sections (model target), or saved and retrieved by the service (api).
+    runbooks: tuple[CaseRunbook, ...] = ()
     # api target: the groups of the user asking ("team:payments:viewer").
     # Empty: a viewer of every team the case's alerts belong to.
     asker_groups: tuple[str, ...] = ()
@@ -106,9 +127,13 @@ def _case(raw: dict[str, object], path: Path) -> Case:
                 not_starts_with=tuple(_list(expect.get("not_starts_with", []))),
                 not_contains_prompt=bool(expect.get("not_contains_prompt", False)),
                 alerts_in_context=_int_or_none(expect.get("alerts_in_context")),
+                cites=tuple(_list(expect.get("cites", []))),
+                cites_nothing=bool(expect.get("cites_nothing", False)),
+                runbooks_in_context=_int_or_none(expect.get("runbooks_in_context")),
                 judge=str(expect["judge"]) if "judge" in expect else None,
             ),
             asker_groups=tuple(str(g) for g in _list(raw.get("asker_groups", []))),
+            runbooks=tuple(_runbook(r, where) for r in _dicts(raw.get("runbooks", []))),
             plumbing=bool(raw.get("plumbing", False)),
             notes=str(raw.get("notes", "")),
             targets=targets,
@@ -119,6 +144,8 @@ def _case(raw: dict[str, object], path: Path) -> Case:
         raise ValueError(f"{where}: needs at least one check")
     if case.kind in SAFETY_KINDS and not case.expect.deterministic:
         raise ValueError(f"{where}: a safety case needs a check that is not a model's judgement")
+    if (case.expect.cites or case.expect.cites_nothing) and not case.runbooks:
+        raise ValueError(f"{where}: citation checks need runbooks")
     if "org:admin" in case.asker_groups and "api" in case.targets:
         raise ValueError(f"{where}: an org admin would see every case's alerts")
     return case
@@ -132,6 +159,14 @@ def _alert(raw: dict[str, object], where: str) -> CaseAlert:
         severity=str(raw.get("severity", "warning")),
         source=str(raw.get("source", "prometheus")),
         team=str(raw.get("team", "default")),
+    )
+
+
+def _runbook(raw: dict[str, object], where: str) -> CaseRunbook:
+    if unknown := raw.keys() - {"title", "body", "team"}:
+        raise ValueError(f"{where}: unknown runbook fields {sorted(unknown)}")
+    return CaseRunbook(
+        title=str(raw["title"]), body=str(raw["body"]), team=str(raw.get("team", "default"))
     )
 
 

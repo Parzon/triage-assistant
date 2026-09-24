@@ -7,7 +7,7 @@ import pytest
 
 from app.llm import LLMError
 from evals.calibration import calibrate, calibration_markdown, load_labelled
-from evals.cases import Case, CaseAlert, Expect, load_cases
+from evals.cases import Case, CaseAlert, CaseRunbook, Expect, load_cases
 from evals.checks import score
 from evals.run import Judge, Result, gate, markdown, regressions, run, summarize
 from evals.targets import Answer, collect
@@ -53,6 +53,15 @@ def test_the_committed_cases_load_and_cover_every_kind() -> None:
         (
             '[[case]]\nid="a"\nkind="injection"\nquestion="q"\n[case.expect]\njudge="Safe?"',
             "not a model's judgement",
+        ),
+        (
+            '[[case]]\nid="a"\nkind="grounding"\nquestion="q"\n[case.expect]\ncites=["x"]',
+            "citation checks need runbooks",
+        ),
+        (
+            '[[case]]\nid="a"\nkind="grounding"\nquestion="q"\n'
+            'runbooks=[{title="t", body="b", owner="x"}]\n[case.expect]\nnot_contains=["x"]',
+            "unknown runbook fields",
         ),
     ],
 )
@@ -229,10 +238,92 @@ async def test_calibration_catches_a_judge_that_always_says_yes(tmp_path: Path) 
     assert calibration_markdown(summary).endswith("**FAIL**")
 
 
-def test_regressions_are_cases_that_passed_before() -> None:
-    before = {"cases": [{"id": "a", "passed": True}, {"id": "b", "passed": False}]}
-    now = {"cases": [{"id": "a", "passed": False}, {"id": "b", "passed": False}]}
-    assert regressions(now, before) == ["a"]
+RUNBOOK = CaseRunbook("Disk full", "## Check\nRun df.\n\n## Free space\nDelete old logs.")
+
+
+def test_citations_must_match_and_none_may_be_invented() -> None:
+    c = case(runbooks=(RUNBOOK,), expect=Expect(cites=("> Free space",)))
+    good = score(c, "Free space [R2].", citations=["Disk full > Free space"])
+    assert all(check.passed for check in good)
+    wrong = score(c, "Check [R1].", citations=["Disk full > Check"])
+    assert [check.name for check in wrong if not check.passed] == [
+        "cites a section matching '> Free space'"
+    ]
+    invented = score(c, "See [R7].", citations=[], invalid_citations=["R7"])
+    assert "cites only sections it was given" in [ch.name for ch in invented if not ch.passed]
+
+
+def test_cites_nothing_fails_any_citation() -> None:
+    c = case(runbooks=(RUNBOOK,), expect=Expect(cites_nothing=True))
+    assert all(ch.passed for ch in score(c, "No runbook covers this.", citations=[]))
+    assert not all(ch.passed for ch in score(c, "Free space [R2].", citations=["Disk full"]))
+
+
+async def test_the_model_target_reads_citations_like_the_service() -> None:
+    from evals.targets import ModelTarget, context_sections
+
+    c = case(runbooks=(RUNBOOK,))
+    assert [s.heading for s in context_sections(c)] == [
+        "Disk full > Check",
+        "Disk full > Free space",
+    ]
+    answer = await ModelTarget(ScriptedLLM("Free space first [R2], never [R5].")).ask(c)
+    assert answer.citations == ("Disk full > Free space",)
+    assert answer.invalid_citations == ("R5",)
+
+
+def test_the_retrieval_benchmark_loads_and_checks_its_labels(tmp_path: Path) -> None:
+    from evals.retrieval import load_corpus, load_questions
+
+    corpus = load_corpus(EVALS / "runbooks")
+    assert {r.team for r in corpus} == {"payments", "platform"}
+    questions = load_questions(EVALS / "retrieval.toml", corpus)
+    assert any(not q.relevant for q in questions)  # negatives exist
+    typo = tmp_path / "q.toml"
+    typo.write_text('[[question]]\nid="x"\nquery="q"\nrelevant=["Disk full > Fre space"]\n')
+    with pytest.raises(ValueError, match="no such section"):
+        load_questions(typo, corpus)
+
+
+def test_retrieval_metrics() -> None:
+    from evals.retrieval import first_relevant, summarize_mode
+
+    assert first_relevant(["a", "b", "c"], ["c", "b"]) == 2
+    assert first_relevant(["a"], ["z"]) is None
+
+    def row(qid: str, rank: int | None, relevant: bool = True) -> dict[str, object]:
+        return {
+            "id": qid,
+            "relevant": ["x"] if relevant else [],
+            "rank": rank,
+            "top_distance": 0.6,
+            "relevant_distance": 0.3 if rank else None,
+            "latency_s": 0.01,
+        }
+
+    m = summarize_mode([row("a", 1), row("b", 3), row("c", None), row("n", None, False)], k=5)
+    assert (m["recall@1"], m["recall@3"], m["recall@5"]) == (1 / 3, 2 / 3, 2 / 3)
+    assert m["mrr"] == round((1 + 1 / 3) / 3, 3)
+    assert m["missed"] == ["c"]
+    assert m["negative_top_distance"] == {"min": 0.6, "median": 0.6, "max": 0.6}
+
+
+def test_a_regression_is_significantly_more_failures_not_one() -> None:
+    def outcome(case_id: str, passes: int, runs: int = 10) -> dict[str, object]:
+        return {"id": case_id, "passes": passes, "runs": runs, "passed": passes == runs}
+
+    before = {"cases": [outcome("once", 10), outcome("often", 10), outcome("new", 10)]}
+    now = {"cases": [outcome("once", 9), outcome("often", 5), outcome("unknown", 0)]}
+    # 0/10 -> 1/10 failed: noise (p = 0.5). 0/10 -> 5/10: a regression.
+    assert regressions(now, before) == ["often (0/10 -> 5/10 failed, p=0.016)"]
+
+
+def test_fisher_matches_a_known_value() -> None:
+    from evals.run import fisher_worse
+
+    # 5 failures in 200 against 0 in 200: the leak comparison in the docs.
+    assert round(fisher_worse(5, 200, 0, 200), 3) == 0.030
+    assert fisher_worse(0, 10, 0, 10) == 1.0
 
 
 async def test_the_report_names_what_failed_and_why() -> None:

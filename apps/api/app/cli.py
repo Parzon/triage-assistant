@@ -11,6 +11,12 @@ revoke`): they use the app's own settings and database role.
   python -m app.cli revoke --email alice@example.com
       Ends every session of a user now. Role changes in the identity
       provider apply at the next sign-in; this makes them immediate.
+
+  python -m app.cli reembed
+      Embeds again every runbook embedded another way than today's settings
+      say (model, dimensions, document prefix). Until then, retrieval ignores
+      those sections' vectors - keyword search still finds them - so run it
+      after changing any EMBEDDING_* setting but the query prefix.
 """
 
 import os
@@ -26,12 +32,14 @@ import argparse
 import asyncio
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
-from app.db import create_engine, create_sessionmaker
-from app.models import User
+from app.db import create_engine, create_sessionmaker, set_transaction_settings
+from app.llm import OpenAICompatibleClient
+from app.models import Runbook, Team, User
 from app.oidc import Identity
+from app.runbooks import embedding_key, save_runbook
 from app.sessions import session_cookie, sign_in, sign_out_everywhere
 
 CLI_ISSUER = "urn:triage-assistant:cli"
@@ -65,6 +73,34 @@ async def revoke(email: str) -> int:
     return ended
 
 
+async def reembed() -> tuple[int, int]:
+    """(runbooks embedded again, runbooks in total)."""
+    settings = get_settings()
+    if settings.embedding_model is None:
+        raise SystemExit("EMBEDDING_MODEL is not set: runbook search is off")
+    key = embedding_key(settings)
+    engine = create_engine(settings)
+    llm = OpenAICompatibleClient(settings)
+    try:
+        async with create_sessionmaker(engine)() as db:
+            # Every team's runbooks: an operator command, like a migration.
+            await set_transaction_settings(db, {"app.org_admin": "on"})
+            total = await db.scalar(select(func.count()).select_from(Runbook)) or 0
+            stale = (
+                await db.execute(
+                    select(Runbook.title, Runbook.body, Runbook.source_url, Team)
+                    .join(Team, Team.id == Runbook.team_id)
+                    .where(Runbook.embedding_key != key)
+                )
+            ).all()
+            for title, body, source_url, team in stale:
+                await save_runbook(db, llm, settings, team, title, body, source_url)
+    finally:
+        await llm.aclose()
+        await engine.dispose()
+    return len(stale), total
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -79,13 +115,17 @@ def main(argv: list[str] | None = None) -> None:
     session.add_argument("--hours", type=float, default=1.0)
     revoke_cmd = commands.add_parser("revoke", help="end every session of a user")
     revoke_cmd.add_argument("--email", required=True)
+    commands.add_parser("reembed", help="embed again the runbooks embedded another way")
     args = parser.parse_args(argv)
 
     if args.command == "session":
         print(asyncio.run(mint_session(args.email, args.group, args.hours)))
-    else:
+    elif args.command == "revoke":
         ended = asyncio.run(revoke(args.email))
         print(f"ended {ended} session(s) of {args.email}", file=sys.stderr)
+    else:
+        done, total = asyncio.run(reembed())
+        print(f"embedded again {done} of {total} runbook(s)", file=sys.stderr)
 
 
 if __name__ == "__main__":

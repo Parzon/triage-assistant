@@ -116,6 +116,25 @@ tests:
               summary: "more than 10% of answers are cut off by the output limit"
               runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#llmanswerstruncated"
 
+  - name: Retrieval falling back to keywords warns, a blip does not
+    interval: 1m
+    input_series:
+      - series: 'retrieval_duration_seconds_count{mode="hybrid"}'
+        values: "0+2x40"
+      - series: 'retrieval_duration_seconds_count{mode="keyword_only"}'
+        values: "0+8x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RetrievalDegraded
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: RetrievalDegraded
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "most runbook searches fall back to keywords: the embedding model fails, or needs make reembed"
+              runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#retrievaldegraded"
+
   - name: A removed api service is caught by absent()
     interval: 15s
     input_series:

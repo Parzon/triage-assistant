@@ -3,7 +3,8 @@
 AI Ops / incident triage assistant: an API that ingests alerts into
 Postgres, owned by teams, and a streaming chat UI for asking an LLM about
 them. People sign in with the organisation's identity provider (OIDC) and
-see only their teams' alerts; so does the assistant answering them. It is also
+see only their teams' alerts; so does the assistant answering them, which
+gives the steps from the team's own runbooks and cites each section. It is also
 the team's reference template for taking an AI idea to a production-shaped
 service — see [`gold_standard_development_guide.md`](gold_standard_development_guide.md).
 The project on one page: [`docs/overview.md`](docs/overview.md). Starting
@@ -33,16 +34,22 @@ Out of the box the assistant answers with a mock model. For a real one,
 point `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in `.env` at any
 OpenAI-compatible provider, or run a model on your own GPU (the `ollama`
 profile, see `.env.example`). `make evals` then measures the answers:
-grounded in the alerts, refusing what they do not say, resisting prompt
-injection, never crossing teams ([AI engineering](docs/handbook/ai-engineering.md)).
+grounded in the alerts and runbooks, refusing what they do not say,
+resisting prompt injection, never crossing teams
+([AI engineering](docs/handbook/ai-engineering.md)).
+
+Runbook search needs an embedding model (`EMBEDDING_MODEL`; the mock
+has one). How it works, what was measured, and a hands-on debugging lab:
+[RAG](docs/handbook/rag.md).
 
 ## Structure
 
 ```
-apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the model's evals
+apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the model's evals, the retrieval benchmark
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, profiler and load-tool images
 tests/               end-to-end (Playwright) and load tests
+labs/                hands-on exercises: rag-debugging
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
 scripts/             deploy, backup/restore, failure drills, fresh-host test
 compose.yaml         services shared by every environment

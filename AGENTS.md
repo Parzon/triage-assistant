@@ -5,7 +5,10 @@ AI Ops / Incident Triage Assistant. FastAPI backend (`apps/api`),
 Postgres + PgBouncer + Valkey (Redis protocol), a streaming chat backed by
 any OpenAI-compatible model, React + Vite frontend (`apps/web`), all run
 with Docker Compose. The AI-specific logic is `apps/api/app/triage.py`
-(prompt + streaming); the provider seam is `apps/api/app/llm.py`.
+(prompt + streaming); the provider seam is `apps/api/app/llm.py`; runbook
+retrieval (hybrid search in Postgres with pgvector, ADR-0017) is
+`apps/api/app/runbooks.py`; credentials are redacted before any model call
+by `apps/api/app/redact.py`.
 Locally the model is `tools/mock-llm` (OpenAI-compatible, tunable
 latency and failure modes). Sign-in is OIDC against the organisation's
 identity provider (locally the `keycloak` service, demo users alice, bob,
@@ -76,6 +79,11 @@ Run `make` to list every target. The ones you need most:
   judge against labelled answers. A real model locally: add `ollama` to
   `COMPOSE_PROFILES`, `make ollama-pull m=gpt-oss:20b`, point `LLM_*` at it
   (`.env.example`). CI runs plumbing mode with the mock.
+- Runbook search (RAG, docs/handbook/rag.md): after changing `EMBEDDING_MODEL`,
+  `EMBEDDING_DIMENSIONS` or `EMBEDDING_DOCUMENT_PREFIX`, run `make reembed` (add
+  `ENV=prod`). Before merging a retrieval or embedding change: `make evals
+  a="--target retrieval"` (recall@k, MRR), before/after in the PR. Hands-on
+  debugging: `labs/rag-debugging/` (`make rag-overfiltering-lab`).
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults
@@ -128,7 +136,10 @@ Access control, for every change that touches data:
   SECURITY`, policies reading `app.*_team_ids`, and database-level tests
   (`test_row_level_security.py`), in the same migration.
 - The model's context comes from the same visibility query as the list:
-  never give the assistant data the asker could not read.
+  never give the assistant data the asker could not read. Runbook search
+  filters by the caller's teams explicitly (a plain `team_id = ANY(...)`):
+  under an approximate vector index, a filter left to row-level security
+  alone can return nothing (docs/handbook/rag.md).
 - Never log tokens, cookies, authorization codes or alert text; log the
   user's id, not their email.
 - Tests: `sign_in_as("team:<slug>:<role>")` for a signed-in client;
@@ -143,7 +154,7 @@ Access control, for every change that touches data:
   the PR description first.
 - Don't edit a merged `docs/adr/*.md` file — write a new ADR that
   supersedes it instead.
-- Don't weaken, delete or re-label an eval case or a calibration answer to
-  make a run pass. A failing case is a claim to investigate: read the
+- Don't weaken, delete or re-label an eval case, a calibration answer or a
+  retrieval question to make a run pass. A failing case is a claim to investigate: read the
   answer and the judge's reason, and change a check only when the check is
   shown wrong, in its own commit, saying why in the case's `notes`.

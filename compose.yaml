@@ -33,9 +33,19 @@ services:
       LLM_MODEL: ${LLM_MODEL:-mock-1}
       # Reasoning models only (low | medium | high); empty = not sent.
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
+      # Runbook search (ADR-0017): embeddings from the same endpoint. Empty
+      # EMBEDDING_MODEL = runbooks off. Real models and their prefixes:
+      # .env.example.
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
+      EMBEDDING_QUERY_PREFIX: ${EMBEDDING_QUERY_PREFIX:-}
+      EMBEDDING_DOCUMENT_PREFIX: ${EMBEDDING_DOCUMENT_PREFIX:-}
+      # Runbook sections per answer (0: alerts only).
+      RAG_CONTEXT_CHUNKS: ${RAG_CONTEXT_CHUNKS:-4}
       # Per client per minute. Load tests raise them (make load).
       ALERTS_RATE_LIMIT: ${ALERTS_RATE_LIMIT:-60}
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}
+      RUNBOOKS_RATE_LIMIT: ${RUNBOOKS_RATE_LIMIT:-60}
       # Shared with Alertmanager (secret below); empty = webhook disabled.
       ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:-}
       # Sign-in (OIDC, ADR-0013). Defaults: the bundled Keycloak below, which
@@ -239,7 +249,13 @@ services:
     logging: *logging
 
   db:
-    image: postgres:17
+    # PostgreSQL 17 with the pgvector extension (runbook search, ADR-0017).
+    # The official postgres:17 image plus one extension: the same Debian 13
+    # and glibc 2.41, so text collations - and every index built on them -
+    # are unchanged (a different glibc would make Postgres warn about a
+    # collation version mismatch, and text indexes need a REINDEX).
+    # Pinned in full; bumped by hand, like every stateful image.
+    image: pgvector/pgvector:0.8.6-pg17-trixie
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

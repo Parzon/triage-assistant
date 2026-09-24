@@ -147,6 +147,46 @@ describe('Chat', () => {
     expect(await screen.findByText(/cut short/)).toBeInTheDocument()
   })
 
+  it('lists the runbook sections the answer cites', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('meta', {
+      request_id: 'r1',
+      model: 'm',
+      alerts_in_context: 1,
+      runbooks_in_context: 2,
+      retrieval: 'hybrid',
+    })
+    stream.send('token', { delta: 'Free space first [R1].' })
+    stream.send('done', {
+      usage: null,
+      ttft_ms: 10,
+      duration_ms: 20,
+      finish_reason: 'stop',
+      citations: [{ ref: 'R1', runbook_id: 7, title: 'Disk full', heading: 'Disk full > Free space' }],
+      invalid_citations: [],
+    })
+    stream.close()
+    const sources = await screen.findByRole('region', { name: 'Referenced runbook sections' })
+    expect(sources).toHaveTextContent('R1 Disk full > Free space')
+    expect(screen.getByRole('status')).toHaveTextContent('2 runbook sections')
+  })
+
+  it('says so when runbooks were searched by keyword only', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('meta', {
+      request_id: 'r1',
+      model: 'm',
+      alerts_in_context: 1,
+      runbooks_in_context: 1,
+      retrieval: 'keyword_only',
+    })
+    stream.close()
+    expect(await screen.findByText(/searched by keyword only/)).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Referenced runbook sections' })).not.toBeInTheDocument()
+  })
+
   it('shows an empty answer from the model as an error, not as done', async () => {
     const stream = controllableStream()
     await ask()

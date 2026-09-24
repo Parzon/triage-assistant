@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import set_transaction_settings
-from app.models import Alert
+from app.models import Alert, Runbook, RunbookChunk
 from app.queries import newest_alerts
 from tests.integration.conftest import SignIn
 
@@ -128,3 +128,51 @@ async def test_every_alert_must_name_its_team(app: FastAPI, teams: dict[str, int
         db.add(Alert(source="x", severity="info", message="no team"))
         with pytest.raises(DBAPIError, match="team_id"):
             await db.flush()
+
+
+@pytest.fixture
+async def runbook_teams(app: FastAPI, sign_in_as: SignIn) -> dict[str, int]:
+    """One runbook in each of payments and platform, saved through the api."""
+    admin = await sign_in_as("team:payments:admin", "team:platform:admin", email="rb@example.com")
+    for team in ("payments", "platform"):
+        body = {"team": team, "title": "Restart", "body": f"## Restart\nRestart the {team} app."}
+        assert (await admin.post("/runbooks", json=body)).status_code == 200
+    async with app.state.engine.connect() as conn:
+        return dict((await conn.execute(text("SELECT slug, id FROM teams"))).tuples().all())
+
+
+async def test_runbooks_and_their_sections_are_isolated_like_alerts(
+    app: FastAPI, runbook_teams: dict[str, int]
+) -> None:
+    payments = runbook_teams["payments"]
+    async with caller(app, read_team_ids=ids(payments)) as db:
+        assert set((await db.scalars(select(Runbook.team_id))).all()) == {payments}
+        assert set((await db.scalars(select(RunbookChunk.team_id))).all()) == {payments}
+    async with app.state.sessionmaker() as db:  # nobody said who is asking
+        assert (await db.scalars(select(RunbookChunk.id))).all() == []
+
+
+async def test_only_team_admins_write_runbooks_at_the_database_too(
+    app: FastAPI, runbook_teams: dict[str, int]
+) -> None:
+    payments = ids(runbook_teams["payments"])
+    # A responder may write the team's alerts, not its runbooks.
+    async with caller(app, read_team_ids=payments, write_team_ids=payments) as db:
+        db.add(
+            Runbook(
+                team_id=runbook_teams["payments"],
+                title="forged",
+                body="x",
+                body_sha256="x",
+                embedding_key="m",
+            )
+        )
+        with pytest.raises(DBAPIError, match="row-level security"):
+            await db.flush()
+    # A payments admin cannot delete platform's sections, even when asked to.
+    async with caller(
+        app, read_team_ids=payments, write_team_ids=payments, admin_team_ids=payments
+    ) as db:
+        platform = RunbookChunk.team_id == runbook_teams["platform"]
+        deleted = await db.execute(delete(RunbookChunk).where(platform).returning(RunbookChunk.id))
+        assert deleted.all() == []

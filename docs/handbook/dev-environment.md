@@ -26,7 +26,7 @@ Not needed, and deliberately so: Python, Node, uv, npm, psql, a local
 Postgres. Tool versions live in the images:
 - `ghcr.io/astral-sh/uv:0.12.18` with Python 3.13 for the api
 - `node:24` for the web
-- `postgres:17`, `valkey/valkey:8.1-alpine`
+- `pgvector/pgvector:0.8.6-pg17-trixie` (PostgreSQL 17 with pgvector), `valkey/valkey:8.1-alpine`
 - `quay.io/keycloak/keycloak:26.7.4`, the bundled identity provider
 
 A developer with the wrong local Node version cannot break anything.

@@ -72,7 +72,7 @@ stage 4):
 | Usefulness | ≥ 70% of rated answers rated helpful | the answer-feedback feature (F6, not built yet) |
 | Faster triage | the time from page to first correct hypothesis falls 25% against a baseline | incident timelines and game days; **measure the baseline first** |
 | Isolation | 0 cross-team exposures | isolation evals every release; access tests in CI; audit of reports |
-| AI safety | safety eval cases pass 100% of runs; the instruction leak rate stays under 1.5% (95% bound, 200 runs) | `make evals` per prompt or model change (ADR-0016) |
+| AI safety | safety eval cases pass 100% of runs; the instruction leak rate's 95% upper bound stays under 1.5% (0 leaks in 200 runs shows it; each leak seen needs more runs) | `make evals` per prompt or model change (ADR-0016) |
 | Reliability | 99.5% availability; time to first word p95 < 3 s | the SLOs ([production](../handbook/production.md)) |
 | Cost | under a per-user monthly figure, set after the RFQ | tokens × price, on the cost panel |
 
@@ -86,6 +86,8 @@ stage 4):
   early.
 - As an **on-call engineer**, I want a plain "the alerts do not say"
   when they don't, so I never chase an invented cause.
+- As an **on-call engineer**, I want the steps from my team's runbook,
+  with the section named, so I can act at once and check the source.
 - As an **on-call engineer**, I want to stop a long answer, so I am not
   kept waiting for text I no longer need.
 - As a **responder**, I want to add an alert by hand, so an issue seen
@@ -114,7 +116,7 @@ stage 4):
 | F4 | The alert list, newest first, across the teams the user can see | ✅ |
 | F5 | The assistant: streamed answers from the asker's visible alerts only; stop at any time | ✅ |
 | F6 | Answer feedback (helpful or not, with an optional note) | 📘 needed for the pilot |
-| F7 | Answers that cite the team's runbooks | 📘 [RFC-0001](../rfc/0001-answers-grounded-in-runbooks.md) |
+| F7 | Answers that cite the team's runbooks | ✅ [RFC-0001](../rfc/0001-answers-grounded-in-runbooks.md), ADR-0017. Team admins upload runbooks through the api; a sync from the wiki 📘 |
 | F8 | Retention: alerts and sessions deleted after an agreed period; a per-user deletion path | 📘 needs legal's period |
 
 **Non-functional:**
@@ -122,10 +124,10 @@ stage 4):
 | # | Requirement | Status |
 |---|---|---|
 | N1 | Availability 99.5% a month | 📘 measured once in production; one host is a single point of failure |
-| N2 | Alert list p95 < 300 ms; time to first word p95 < 3 s | ✅ ~4 ms at 500 req/s; 0.2 s with a local model |
+| N2 | Alert list p95 < 300 ms; time to first word p95 < 3 s | ✅ ~4 ms at 500 req/s; first word p50 0.28 s, p95 1.6 s with runbooks, with a local model |
 | N3 | Access enforced in the service and in the database; invisible data answers 404 | ✅ ADR-0013, ADR-0014 |
 | N4 | Prompt and model changes gated by evals | ✅ ADR-0016 |
-| N5 | Alert text goes to a model provider only under zero-data-retention terms, or to a model in the company's cloud | 📘 [RFQ-0001](../rfq/0001-llm-inference.md) |
+| N5 | Alert and runbook text goes to a model provider (answers and embeddings) only under zero-data-retention terms, or to a model in the company's cloud. Credentials in them are redacted first (✅) | 📘 [RFQ-0001](../rfq/0001-llm-inference.md) |
 | N6 | Every alert that can fire has a runbook section; dashboards and alert rules are code | ✅ |
 | N7 | Usable with a keyboard and a screen reader | partial: tests find controls by role; no audit yet |
 
@@ -137,6 +139,7 @@ stage 4):
 | v0.2.0: company sign-in; teams own alerts | ✅ |
 | v0.3.0: the database enforces team isolation | ✅ |
 | v0.4.0: evals gate AI changes; prompt v5 | ✅ |
+| v0.5.0: answers cite the team's runbooks (F7); credentials redacted from the prompt | ✅ |
 | Stages 1–3: a cloud host with HTTPS, the company identity provider, a hosted model under agreed terms | 📘 about 3 weeks of work, plus vendor and security lead times |
 | Stage 4: a pilot team; answer feedback (F6) | 📘 2–4 weeks |
 | Stage 5: general availability, team by team; a second host | 📘 after the pilot's review |

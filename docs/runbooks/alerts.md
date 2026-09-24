@@ -155,6 +155,22 @@ provider's status page, and the key's quota in the provider console.
 size: `CHAT_CONTEXT_ALERTS` alerts go into every prompt. Then our
 event-loop lag (a busy api delays tokens too).
 
+## RetrievalDegraded
+
+**Users:** answers still come, but grounded in worse runbook sections:
+keyword search alone misses questions worded differently from the
+runbook. Nothing looks broken.
+**Check:**
+- `embedding_requests_total{kind="query"}` by outcome: an `llm_*` error
+  means the embedding model fails or is slow (`EMBEDDING_TIMEOUT_S`).
+- The api log: "no section has a current vector" means the embedding
+  settings changed (model, dimensions or document prefix) and the stored
+  vectors were made the old way.
+
+**Fix:** for the model, as for LLMErrors. For the settings: `make reembed
+ENV=prod`. It embeds every runbook again; keyword search serves in the
+meantime.
+
 ## LLMAnswersTruncated
 
 **Users:** answers stop mid-sentence, with "The answer was cut short: it

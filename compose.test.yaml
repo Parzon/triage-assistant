@@ -14,6 +14,8 @@ services:
       LLM_MAX_RETRIES: "0"
       SSE_HEARTBEAT_S: "0.2"
       MOCK_LLM_ADMIN_URL: http://mock-llm:8020/_admin
+      # Runbook search on, whatever .env says: the mock serves embeddings.
+      EMBEDDING_MODEL: mock-embed
       # The sign-in tests play the browser: the app at https://test (the
       # in-process test client - Secure cookies, as in production), the
       # identity provider at an address both sides can reach.

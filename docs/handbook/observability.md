@@ -29,6 +29,8 @@ production one). Grafana, Prometheus and Alertmanager listen on
 | in flight | `http_requests_in_progress`, `llm_active_streams` | |
 | the model | `llm_requests_total{outcome}`, `llm_time_to_first_token_seconds`, `llm_stream_duration_seconds`, `llm_tokens_total{kind}` | outcome is `ok`, `truncated` (delivered, but cut off by `LLM_MAX_OUTPUT_TOKENS`), `cancelled` (the user left) or an `llm_*` error code (`llm_empty_answer`: finished without a word); tokens × price = cost |
 | rate limiter | `ratelimit_decisions_total{scope, decision}` | `fail_open` = Valkey did not answer in time, request allowed |
+| runbook search | `retrieval_duration_seconds{mode}`, `embedding_requests_total{kind, outcome}` | mode `hybrid`, or `keyword_only`: the question not embedded, or no current vectors (alert `RetrievalDegraded`) |
+| answers | `chat_citations_total{validity}`, `prompt_redactions_total` | an `invalid` citation is a number the model invented; each redaction is a secret that reached an alert or a runbook |
 | sign-in | `auth_logins_total{outcome}` | callbacks from the identity provider: `ok`, `access_denied`, `invalid_state`, `expired`, `login_failed`, `invalid_token`, `idp_unavailable` |
 | access | `auth_rejections_total{reason}` | requests refused before any route: `no_session`, `expired`, `cross_origin` (a CSRF attempt, or a script without `Origin`) |
 | the identity provider | `identity_provider_up` | 1 if it answered the api's last check (every 30 s per worker); the lowest across workers (`livemin`) |

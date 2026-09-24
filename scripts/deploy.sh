@@ -40,6 +40,24 @@ healthy() {  # healthy <container> <seconds>: 0 once healthy, 1 if unhealthy or 
   done
 }
 
+# The database's image is not a release image: it comes from the compose
+# files (v0.5.0 moved it to pgvector's build of the same PostgreSQL 17).
+# Replacing it restarts Postgres, a few seconds of errors, so it is a
+# deliberate step, never a side effect of a deploy. Without it, the
+# migration fails on an extension the old image lacks.
+db=$(containers db)
+if [ -n "$db" ]; then
+  running=$(docker inspect -f '{{.Config.Image}}' "$db")
+  wanted=$("${COMPOSE[@]}" config --images db | head -n1)
+  if [ "$running" != "$wanted" ]; then
+    echo "the database runs $running; these compose files want $wanted." >&2
+    echo "Replace it first (Postgres restarts: a few seconds of errors), then deploy again:" >&2
+    echo "  ${COMPOSE[*]} up -d --no-deps db" >&2
+    echo "Rolling back? Keep the database's image: deploy the old tag from this checkout." >&2
+    exit 1
+  fi
+fi
+
 if [ "${PULL:-1}" = 1 ]; then
   step "pull $IMAGE_TAG"
   "${COMPOSE[@]}" pull --quiet api web migrate edge

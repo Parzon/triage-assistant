@@ -3,15 +3,16 @@
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import httpx2
 
 from app.llm import Finish, LLMClient, LLMError, Usage
+from app.runbooks import Hit, split_sections
 from app.schemas import AlertOut
-from app.triage import build_messages
+from app.triage import build_messages, citations
 from evals.cases import Case
 
 
@@ -27,6 +28,12 @@ class Answer:
     error: str | None = None
     # "stop", "length" (cut off by the output limit)...: why the model stopped.
     finish_reason: str | None = None
+    # Headings of the runbook sections the answer cites, and the numbers it
+    # cited that were not in its context (invented). None: no runbooks.
+    citations: tuple[str, ...] | None = None
+    invalid_citations: tuple[str, ...] = ()
+    # What the service retrieved (api target), else None.
+    runbooks_in_context: int | None = None
 
 
 class Target(Protocol):
@@ -49,6 +56,29 @@ def context_alerts(case: Case) -> list[AlertOut]:
             created_at=now - timedelta(minutes=n),
         )
         for n, a in enumerate(case.alerts)
+    ]
+
+
+def context_sections(case: Case) -> list[Hit]:
+    """The case's runbooks as retrieved sections - all of them, in order, as
+    if retrieval were perfect: the model target measures generation alone."""
+    now = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+    return [
+        Hit(
+            chunk_id=n,
+            runbook_id=r,
+            team=runbook.team,
+            title=runbook.title,
+            heading=section.heading,
+            content=section.content,
+            updated_at=now,
+            score=0.0,
+            keyword_rank=None,
+            semantic_rank=None,
+            distance=None,
+        )
+        for r, runbook in enumerate(case.runbooks, 1)
+        for n, section in enumerate(split_sections(runbook.title, runbook.body), 1)
     ]
 
 
@@ -95,7 +125,18 @@ class ModelTarget:
         self._llm = llm
 
     async def ask(self, case: Case) -> Answer:
-        return await collect(self._llm, build_messages(case.question, context_alerts(case)))
+        sections = context_sections(case)
+        answer = await collect(
+            self._llm, build_messages(case.question, context_alerts(case), sections)
+        )
+        if not sections:
+            return answer
+        cited, invalid = citations(answer.text, sections)
+        return replace(
+            answer,
+            citations=tuple(str(c["heading"]) for c in cited),
+            invalid_citations=tuple(invalid),
+        )
 
 
 # (groups, email) -> a session cookie "name=value"
@@ -135,13 +176,24 @@ class ApiTarget:
     async def ask(self, case: Case) -> Answer:
         self._cases += 1
         n = self._cases
-        teams = {a.team for a in case.alerts}
+        teams = {a.team for a in case.alerts} | {r.team for r in case.runbooks}
         # A seeder per case: rate limits count per user, and one seeder for a
         # whole run hit the alerts limit (429) within a minute.
         seeder = await self._sessions(
             ("org:admin", *(f"team:{self._team(n, t)}:viewer" for t in sorted(teams))),
             f"evals-seeder-{self._run}-{n}@example.com",
         )
+        for runbook in case.runbooks:
+            saved = await self._http.post(
+                "/runbooks",
+                json={
+                    "team": self._team(n, runbook.team),
+                    "title": runbook.title,
+                    "body": runbook.body,
+                },
+                headers={"Cookie": seeder, "Origin": self._origin},
+            )
+            saved.raise_for_status()
         for alert in reversed(case.alerts):  # oldest first: the list is newest first
             response = await self._http.post(
                 "/alerts",
@@ -193,6 +245,9 @@ class ApiTarget:
                         error = f"{data.get('code')}: {data.get('message')}"
         usage = done.get("usage") if isinstance(done.get("usage"), dict) else None
         in_context = meta.get("alerts_in_context")
+        runbooks = meta.get("runbooks_in_context")
+        cited = done.get("citations")
+        invalid = done.get("invalid_citations")
         return Answer(
             "".join(parts),
             time.perf_counter() - start,
@@ -202,4 +257,9 @@ class ApiTarget:
             alerts_in_context=int(in_context) if isinstance(in_context, int) else None,
             error=error or (None if done else "stream_incomplete"),
             finish_reason=str(done["finish_reason"]) if done.get("finish_reason") else None,
+            citations=(
+                tuple(str(c["heading"]) for c in cited) if isinstance(cited, list) else None
+            ),
+            invalid_citations=tuple(str(i) for i in invalid) if isinstance(invalid, list) else (),
+            runbooks_in_context=runbooks if isinstance(runbooks, int) else None,
         )

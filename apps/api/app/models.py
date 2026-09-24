@@ -7,16 +7,21 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     Identity,
     Index,
+    Integer,
     LargeBinary,
     Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.vector import Vector
 
 SEVERITIES = ("info", "warning", "high", "critical")
 ROLES = ("viewer", "responder", "admin")
@@ -26,6 +31,10 @@ TEAM_SLUG = r"^[a-z0-9][a-z0-9-]{0,62}$"
 # or sent by Alertmanager without a `team` label). Created by the migration
 # that introduced teams.
 DEFAULT_TEAM = "default"
+# Every stored embedding has this many dimensions: the column's type. An
+# embedding model with another native size must be asked for this one
+# (EMBEDDING_DIMENSIONS), or a migration must change the column.
+EMBEDDING_DIM = 768
 
 
 class Base(DeclarativeBase):
@@ -157,3 +166,68 @@ class Alert(Base):
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     external_id: Mapped[str | None] = mapped_column(Text)
+
+
+class Runbook(Base):
+    """A team's runbook, in Markdown, searched section by section
+    (RunbookChunk) to ground the assistant's answers (ADR-0017). Every member
+    of the team reads it; only its admins write it. Row-level security, as
+    on alerts."""
+
+    __tablename__ = "runbooks"
+    __table_args__ = (UniqueConstraint("team_id", "title", name="uq_runbooks_team_id_title"),)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE", name="fk_runbooks_team_id")
+    )
+    title: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    # A re-upload with the same text and the same embedding key changes
+    # nothing: no chunks rewritten, no embedding calls paid for.
+    body_sha256: Mapped[str] = mapped_column(Text)
+    # How its sections were embedded (runbooks.embedding_key): a different
+    # key means `python -m app.cli reembed`.
+    embedding_key: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunbookChunk(Base):
+    """One section of a runbook: the unit of retrieval. team_id repeats the
+    runbook's, so row-level security and retrieval filter without a join."""
+
+    __tablename__ = "runbook_chunks"
+    __table_args__ = (
+        Index("ix_runbook_chunks_runbook_id", "runbook_id"),
+        Index("ix_runbook_chunks_team_id", "team_id"),
+        # Keyword half of hybrid retrieval: full-text search.
+        Index("ix_runbook_chunks_search", "search", postgresql_using="gin"),
+        # Meaning half: approximate nearest neighbours by cosine distance.
+        Index(
+            "ix_runbook_chunks_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    runbook_id: Mapped[int] = mapped_column(
+        ForeignKey("runbooks.id", ondelete="CASCADE", name="fk_runbook_chunks_runbook_id")
+    )
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE", name="fk_runbook_chunks_team_id")
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    # The heading path, "Disk full > Free space": what a citation shows.
+    heading: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    search: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', heading || ' ' || content)", persisted=True),
+        deferred=True,
+    )
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), deferred=True)
+    # Vectors are comparable only when made the same way (model, size,
+    # document prefix): retrieval uses only sections whose key is today's.
+    embedding_key: Mapped[str] = mapped_column(Text)

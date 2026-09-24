@@ -56,11 +56,30 @@ describe('streamChat', () => {
         ),
       ),
     )
+    // A server without runbooks sends no runbook fields: they default.
     expect(await all(streamChat('q'))).toEqual([
-      { type: 'meta', requestId: 'r', model: 'm', alertsInContext: 3 },
+      { type: 'meta', requestId: 'r', model: 'm', alertsInContext: 3, runbooksInContext: 0, retrieval: null },
       { type: 'token', delta: 'Hi\n' },
-      { type: 'done', ttftMs: 12.5, durationMs: 40, completionTokens: 2, finishReason: 'stop' },
+      { type: 'done', ttftMs: 12.5, durationMs: 40, completionTokens: 2, finishReason: 'stop', citations: [] },
     ])
+  })
+
+  it('carries the runbook context and the citations', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseBody(
+          'event: meta\ndata: {"request_id":"r","model":"m","alerts_in_context":0,"runbooks_in_context":2,"retrieval":"hybrid"}\n\n' +
+            'event: done\ndata: {"usage":null,"ttft_ms":1,"duration_ms":2,"finish_reason":"stop",' +
+            '"citations":[{"ref":"R2","runbook_id":7,"title":"Disk full","heading":"Disk full > Free space"}]}\n\n',
+        ),
+      ),
+    )
+    const [meta, done] = await all(streamChat('q'))
+    expect(meta).toMatchObject({ runbooksInContext: 2, retrieval: 'hybrid' })
+    expect(done).toMatchObject({
+      citations: [{ ref: 'R2', runbookId: 7, title: 'Disk full', heading: 'Disk full > Free space' }],
+    })
   })
 
   it('passes stream errors through as events', async () => {
