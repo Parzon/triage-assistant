@@ -611,9 +611,9 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
 - **Safety cases never rest on the judge alone.** It reads output from
   a model that may have been injected.
 - **A GPU container can lose its GPU and keep running.** Ollama fell back
-  to the CPU, about 50 times slower, with no error; `nvidia-smi` inside
-  said "Failed to initialize NVML". `ollama ps` shows the processor.
-  Recreate the container.
+  to the CPU with no error: a minute's work had not finished in ten.
+  `nvidia-smi` inside said "Failed to initialize NVML". `ollama ps`
+  shows the processor. Recreate the container.
 
 ### Runbook retrieval (RAG)
 Measured with nomic-embed-text and gpt-oss:20b; the evidence is in

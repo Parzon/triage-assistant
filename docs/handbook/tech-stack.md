@@ -126,9 +126,10 @@ with row-level security (ADR-0014).
 **pgvector** adds a `vector` type, distance operators (`<=>` is cosine
 distance) and approximate indexes (HNSW, IVFFlat) to Postgres: runbook
 search runs next to the data and under the same row-level security
-(ADR-0017). The image, `pgvector/pgvector:0.8.6-pg17-trixie`, is the
-same Debian, glibc and PostgreSQL build as `postgres:17`, so the data
-directory and collations carry over. Alternatives: a dedicated vector
+(ADR-0017). The image, `pgvector/pgvector:0.8.6-pg17-trixie`, runs the
+same PostgreSQL build as `postgres:17` (17.11-1.pgdg13+2) on the same
+Debian 13 and glibc 2.41, so the data directory and collations carry
+over. Alternatives: a dedicated vector
 database (Qdrant, Weaviate, OpenSearch), which adds a second datastore,
 a second backup, and a second copy of team membership.
 - **Trap:** an approximate index hands back its nearest rows first, and
@@ -136,6 +137,11 @@ a second backup, and a second copy of team membership.
   one-team search found nothing. The service sends an explicit team
   filter; iterative scans (0.8+) cover unfiltered searches
   ([RAG](rag.md)).
+- **Trap: a third-party image lags the official one.** At v0.5.0, the
+  pgvector image carried glibc `2.41-12+deb13u3`, while `postgres:17`
+  already had the `deb13u4` security update. Watch its rebuilds, or build
+  `FROM postgres:17` and install `postgresql-17-pgvector` from the PGDG
+  repository yourself.
 - **No new package:** SQLAlchemy has no vector type, and `app/vector.py`
   defines one in under 60 lines (the text wire format). The `pgvector` Python
   package does the same.

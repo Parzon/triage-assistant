@@ -233,13 +233,24 @@ vector extension. The data directory is untouched.
 ```
 cd /srv/triage-assistant && git fetch --tags && git checkout v0.5.0
 docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml up -d --no-deps db
+# only on hosts running the mock model: its new embeddings endpoint
+docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml up -d --build mock-llm
 make deploy tag=0.5.0
 ```
 
-Postgres restarts, so requests fail for a few seconds. `make deploy`
-compares the running database's image with the compose files first, and
-stops with these instructions if they differ. When rolling back, keep
-the newer database image: it runs the older release too.
+Postgres restarts, so requests fail for a few seconds. ✅ Measured on
+this box's v0.4.0 → v0.5.0 upgrade, under steady signed-in reads and
+streamed answers (302,951 requests):
+- **replacing the database:** healthy again in 5.5 s. The api answered a
+  JSON 503 for about 4 s (268 requests), and nothing hung;
+- **rebuilding the mock:** cut the 2 answers it was streaming;
+- **the deploy:** 0 failed, and the edge was left running.
+
+`make deploy` compares the running database's image with the compose
+files first, and stops with these instructions if they differ. When
+rolling back, keep the newer database image: it runs the older release
+too. ✅ Measured: v0.5.0 → v0.4.0 (the deploy skipped the migrations)
+failed 0 of 101,880 requests, and back to v0.5.0, 0 of 102,183.
 
 **Rollback:** `make deploy tag=<previous>`. It rolls back the code, never
 the schema (ADR-0015). When the database is at a revision the older image

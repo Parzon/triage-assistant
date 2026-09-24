@@ -360,8 +360,9 @@ pause pays the load time.
 
 **A container can lose its GPU without failing.** Here, an Ollama
 container that had used the GPU for a day started loading models 100% on
-the CPU, and a calibration run was about 50 times slower. Inside it,
-`nvidia-smi` said "Failed to initialize NVML: Unknown Error". The host
+the CPU: 39 judge calls that take about a minute had not finished
+after 10 minutes. Inside it, `nvidia-smi` said "Failed to initialize
+NVML: Unknown Error". The host
 still saw the GPU. This matches a known NVIDIA Container Toolkit failure:
 running GPU containers lose their device permissions after certain host
 systemd reloads. The trigger here was not established. Nothing errored:
