@@ -22,7 +22,7 @@ S    ?=
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore acme-test fresh-host-test drills image-check session revoke reembed seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
-        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals
+        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals rag-overfiltering-lab
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -114,6 +114,14 @@ ollama-pull: ## Download a model into the local Ollama: make ollama-pull m=llama
 	@test -n "$(m)" || { echo 'usage: make ollama-pull m=<model>'; exit 2; }
 	$(DEV) --profile ollama up -d --wait ollama
 	$(DEV) --profile ollama exec ollama ollama pull $(m)
+
+# --- The RAG debugging lab (labs/rag-debugging/README.md) ---------------------------
+
+rag-overfiltering-lab: ## Vector search behind a team filter, four ways, on 50,000 lab sections (dev db; ~3 min)
+	$(DEV) exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-seed.sql
+	$(DEV) exec -T db sh -c 'export TEAM_ID=$$(psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT id FROM teams WHERE slug = '"'"'lab-t42'"'"'"); \
+	  PGPASSWORD="$$APP_DB_PASSWORD" psql -q -h localhost -U "$$APP_DB_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-query.sql
+	$(DEV) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-cleanup.sql
 
 # --- Evals (apps/api/evals; docs/handbook/ai-engineering.md) -------------------------
 # In the running dev api: the service's own settings, prompt and model client.

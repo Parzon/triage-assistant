@@ -1,7 +1,7 @@
 -- 100 teams x 500 runbook sections with random 768-dimension vectors: enough
 -- rows that the planner uses the HNSW index, while each team owns 1% of them.
 -- Run as the schema owner (row-level security does not apply to it):
---   make overfiltering-lab   (see README.md)
+--   make rag-overfiltering-lab   (labs/rag-debugging/README.md)
 INSERT INTO teams (slug, name)
 SELECT 'lab-t' || g, 'Lab team ' || g FROM generate_series(1, 100) g
 ON CONFLICT (slug) DO NOTHING;
