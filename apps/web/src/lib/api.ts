@@ -40,8 +40,25 @@ export async function toApiError(res: Response): Promise<ApiError> {
   )
 }
 
+/** A runbook section an answer cited, as [R1] in its text. */
+export interface Citation {
+  ref: string
+  runbookId: number
+  title: string
+  /** The heading path, "Disk full > Free space". */
+  heading: string
+}
+
 export type ChatEvent =
-  | { type: 'meta'; requestId: string; model: string; alertsInContext: number }
+  | {
+      type: 'meta'
+      requestId: string
+      model: string
+      alertsInContext: number
+      runbooksInContext: number
+      /** "hybrid", "keyword_only" (the question could not be embedded), or null (runbooks off). */
+      retrieval: string | null
+    }
   | { type: 'token'; delta: string }
   | {
       type: 'done'
@@ -50,6 +67,7 @@ export type ChatEvent =
       completionTokens: number | null
       /** "length": the answer was cut off by the output limit. */
       finishReason: string | null
+      citations: Citation[]
     }
   | { type: 'error'; code: string; message: string; requestId: string }
 
@@ -78,6 +96,8 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
           requestId: payload.request_id,
           model: payload.model,
           alertsInContext: payload.alerts_in_context,
+          runbooksInContext: payload.runbooks_in_context ?? 0,
+          retrieval: payload.retrieval ?? null,
         }
         break
       case 'token':
@@ -91,6 +111,14 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
           durationMs: payload.duration_ms,
           completionTokens: payload.usage?.completion_tokens ?? null,
           finishReason: payload.finish_reason ?? null,
+          citations: (payload.citations ?? []).map(
+            (c: { ref: string; runbook_id: number; title: string; heading: string }) => ({
+              ref: c.ref,
+              runbookId: c.runbook_id,
+              title: c.title,
+              heading: c.heading,
+            }),
+          ),
         }
         break
       case 'error':

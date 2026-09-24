@@ -77,6 +77,23 @@ class Settings(BaseSettings):
     # gpt-oss:20b at "low": 65-308 tokens instead of 460-800.
     llm_reasoning_effort: Literal["low", "medium", "high"] | None = None
     chat_context_alerts: int = Field(20, ge=0)
+
+    # --- Runbook search (RFC-0001, ADR-0017): embeddings from the same
+    # OpenAI-compatible endpoint as the model. Unset = runbooks are off: the
+    # /runbooks routes answer 503 and the assistant sees alerts only.
+    embedding_model: str | None = None
+    # Sent as `dimensions` when set: asks a model with another native size
+    # for the database's (models.EMBEDDING_DIM), where the model supports it.
+    embedding_dimensions: int | None = Field(None, ge=1)
+    # Task prefixes some models are trained with, e.g. nomic-embed-text:
+    # "search_query: " and "search_document: ". Without them, recall drops.
+    embedding_query_prefix: str = ""
+    embedding_document_prefix: str = ""
+    # A question's embedding is on the chat's critical path: past this,
+    # retrieval falls back to keyword search rather than delay the answer.
+    embedding_timeout_s: float = Field(5.0, gt=0)
+    # Runbook sections put in the prompt; 0 = none (alerts only).
+    rag_context_chunks: int = Field(4, ge=0, le=20)
     # SSE comment sent when nothing else has been for this long, so proxies
     # and load balancers (idle timeouts of ~60s) keep the stream open while
     # the model is still thinking.
@@ -149,6 +166,11 @@ class Settings(BaseSettings):
     @property
     def oidc_redirect_uri(self) -> str:
         return f"{self.public_url}/api/auth/callback"
+
+    @field_validator("embedding_model", "embedding_dimensions", mode="before")
+    @classmethod
+    def _empty_embedding_means_off(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("alertmanager_webhook_token", mode="before")
     @classmethod

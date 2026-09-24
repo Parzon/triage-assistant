@@ -6,7 +6,8 @@ Swapping providers means another class with the same two methods; nothing
 else in the service changes.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -15,6 +16,7 @@ from openai import AsyncOpenAI, Timeout, omit
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.config import Settings
+from app.models import EMBEDDING_DIM
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,36 @@ class LLMClient(Protocol):
     async def aclose(self) -> None: ...
 
 
+class Embedder(Protocol):
+    # None: embeddings are off (EMBEDDING_MODEL unset).
+    embedding_model: str | None
+
+    async def embed(
+        self, texts: Sequence[str], *, timeout_s: float | None = None
+    ) -> list[list[float]]: ...
+
+
+@contextmanager
+def _provider_errors(what: str) -> Iterator[None]:
+    """The SDK maps transport failures to its own exceptions, both before
+    and during a stream; these become ours. Order matters: APITimeoutError
+    is a subclass of APIConnectionError."""
+    try:
+        yield
+    except openai.APITimeoutError as exc:
+        raise LLMTimeout(f"{what} took too long to respond") from exc
+    except openai.RateLimitError as exc:
+        raise LLMRateLimited("the model provider is rate limiting us") from exc
+    except (openai.APIConnectionError, openai.InternalServerError) as exc:
+        raise LLMUnavailable("the model provider is unavailable") from exc
+    except openai.APIStatusError as exc:
+        # 400/401/403/404: our request or configuration is wrong (key,
+        # model name, parameters) - retrying will not help.
+        raise LLMError(f"the model provider rejected the request ({exc.status_code})") from exc
+    except openai.APIError as exc:  # e.g. an error event inside the stream
+        raise LLMUnavailable("the model provider failed mid-answer") from exc
+
+
 class OpenAICompatibleClient:
     def __init__(self, settings: Settings, *, temperature: float | None = None) -> None:
         self.model = settings.llm_model
@@ -77,6 +109,8 @@ class OpenAICompatibleClient:
             if settings.llm_reasoning_effort
             else {}
         )
+        self.embedding_model = settings.embedding_model
+        self._embedding_dimensions = settings.embedding_dimensions
         self._client = AsyncOpenAI(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key.get_secret_value(),
@@ -93,7 +127,7 @@ class OpenAICompatibleClient:
         )
 
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage | Finish]:
-        try:
+        with _provider_errors("the model"):
             stream = await self._client.chat.completions.create(
                 model=self.model,
                 # The seam speaks plain role/content dicts (provider-neutral);
@@ -119,21 +153,38 @@ class OpenAICompatibleClient:
                             yield choice.delta.content
                         if choice.finish_reason:
                             yield Finish(choice.finish_reason)
-        # The SDK maps transport failures to its own exceptions both before
-        # and during the stream. Order matters: APITimeoutError is a
-        # subclass of APIConnectionError.
-        except openai.APITimeoutError as exc:
-            raise LLMTimeout("the model took too long to respond") from exc
-        except openai.RateLimitError as exc:
-            raise LLMRateLimited("the model provider is rate limiting us") from exc
-        except (openai.APIConnectionError, openai.InternalServerError) as exc:
-            raise LLMUnavailable("the model provider is unavailable") from exc
-        except openai.APIStatusError as exc:
-            # 400/401/403/404: our request or configuration is wrong (key,
-            # model name, parameters) - retrying will not help.
-            raise LLMError(f"the model provider rejected the request ({exc.status_code})") from exc
-        except openai.APIError as exc:  # e.g. an error event inside the stream
-            raise LLMUnavailable("the model provider failed mid-answer") from exc
+
+    async def embed(
+        self, texts: Sequence[str], *, timeout_s: float | None = None
+    ) -> list[list[float]]:
+        """One vector per text, in order, EMBEDDING_DIM long each."""
+        if self.embedding_model is None:
+            raise LLMError("runbook search is off: EMBEDDING_MODEL is not set")
+        client = self._client
+        if timeout_s is not None:
+            # On the chat's critical path: fail fast, no retries.
+            client = client.with_options(timeout=timeout_s, max_retries=0)
+        with _provider_errors("the embedding model"):
+            response = await client.embeddings.create(
+                model=self.embedding_model,
+                input=list(texts),
+                # Floats, not the SDK's base64 default (decoded with numpy
+                # when installed): every compatible server speaks floats.
+                encoding_format="float",
+                dimensions=omit
+                if self._embedding_dimensions is None
+                else self._embedding_dimensions,
+            )
+        vectors = [item.embedding for item in sorted(response.data, key=lambda d: d.index)]
+        if len(vectors) != len(texts):
+            raise LLMError(f"asked for {len(texts)} embeddings, got {len(vectors)}")
+        if wrong := {len(v) for v in vectors} - {EMBEDDING_DIM}:
+            raise LLMError(
+                f"the embedding model returned {min(wrong)} dimensions; the database stores "
+                f"{EMBEDDING_DIM}. Set EMBEDDING_DIMENSIONS={EMBEDDING_DIM} if the model can "
+                "shorten its vectors (Matryoshka), or choose another model"
+            )
+        return vectors
 
     async def aclose(self) -> None:
         await self._client.close()

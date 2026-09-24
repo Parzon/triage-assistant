@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { ApiError, streamChat } from '../lib/api'
+import { ApiError, type Citation, streamChat } from '../lib/api'
 
 type Status = 'idle' | 'waiting' | 'streaming' | 'done' | 'stopped' | 'error'
 
@@ -14,6 +14,9 @@ interface Failure {
 interface Meta {
   requestId: string
   alertsInContext: number
+  runbooksInContext: number
+  retrieval: string | null
+  citations?: Citation[]
   ttftMs?: number | null
   durationMs?: number | null
   truncated?: boolean
@@ -52,7 +55,12 @@ export function Chat() {
     try {
       for await (const event of streamChat(message, controller.current.signal)) {
         if (event.type === 'meta') {
-          setMeta({ requestId: event.requestId, alertsInContext: event.alertsInContext })
+          setMeta({
+            requestId: event.requestId,
+            alertsInContext: event.alertsInContext,
+            runbooksInContext: event.runbooksInContext,
+            retrieval: event.retrieval,
+          })
         } else if (event.type === 'token') {
           setStatus('streaming')
           // Tokens carry their own spacing and newlines: append verbatim.
@@ -65,6 +73,7 @@ export function Chat() {
                 ttftMs: event.ttftMs,
                 durationMs: event.durationMs,
                 truncated: event.finishReason === 'length',
+                citations: event.citations,
               },
           )
           setStatus('done')
@@ -123,6 +132,7 @@ export function Chat() {
       <p className="status" role="status">
         {STATUS_TEXT[status]}
         {meta && ` · ${meta.alertsInContext} alerts in context`}
+        {meta?.retrieval && ` · ${meta.runbooksInContext} runbook sections`}
         {meta?.ttftMs != null && ` · first token ${Math.round(meta.ttftMs)} ms`}
       </p>
 
@@ -131,6 +141,23 @@ export function Chat() {
       </div>
       {meta?.truncated && (
         <p className="muted">The answer was cut short: it reached the length limit.</p>
+      )}
+      {meta?.citations && meta.citations.length > 0 && (
+        <section aria-label="Sources" className="sources">
+          <h3>Sources</h3>
+          <ul>
+            {meta.citations.map((c) => (
+              <li key={c.ref}>
+                <code>{c.ref}</code> {c.heading}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {meta?.retrieval === 'keyword_only' && (
+        <p className="muted">
+          Runbooks were searched by keyword only: the embedding model did not answer in time.
+        </p>
       )}
 
       {failure && (

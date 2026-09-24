@@ -14,13 +14,19 @@ drop_mid_stream | empty_answer), fail_rate (0..1, share of requests that
 fail). empty_answer streams no text and stops with finish_reason "length":
 what a reasoning model does when its thinking uses the whole output limit.
 A max_tokens below the reply's length truncates it, with "length" too.
+POST /v1/embeddings answers with a hashed bag of words: deterministic, and
+texts sharing words point in similar directions, so retrieval tests mean
+something without a model. embed_fail_mode (none | http_429 | http_500 |
+hang) breaks embeddings alone, leaving chat working.
 The API key "invalid-key" (or none) gets a 401, like a real provider.
 GET /_admin/stats counts requests and streams - including streams the
 client abandoned, which is how cancellation is proven to reach the provider.
 """
 
 import asyncio
+import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -36,6 +42,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_late
 from pydantic import BaseModel, ConfigDict
 
 FAIL_MODES = {"none", "http_429", "http_500", "hang", "drop_mid_stream", "empty_answer"}
+EMBED_FAIL_MODES = {"none", "http_429", "http_500", "hang"}
+EMBEDDING_DIM = 768
 
 
 @dataclass
@@ -44,6 +52,7 @@ class Behaviour:
     tokens_per_s: float = float(os.environ.get("MOCK_TOKENS_PER_S", "50"))
     fail_mode: str = os.environ.get("MOCK_FAIL_MODE", "none")
     fail_rate: float = float(os.environ.get("MOCK_FAIL_RATE", "1.0"))
+    embed_fail_mode: str = os.environ.get("MOCK_EMBED_FAIL_MODE", "none")
 
 
 @dataclass
@@ -53,6 +62,8 @@ class Stats:
     streams_completed: int = 0
     streams_cancelled: int = 0
     active_streams: int = 0
+    embedding_requests: int = 0
+    embedded_texts: int = 0
 
 
 behaviour = Behaviour()
@@ -209,6 +220,59 @@ async def stream(
         active.dec()
 
 
+class EmbeddingRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    model: str
+    input: str | list[str]
+    encoding_format: str | None = None
+    dimensions: int | None = None
+
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def embed_text(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
+    """The hashing trick: each word adds +1 or -1 at a position its hash
+    picks. Unit length, so cosine similarity measures shared words."""
+    vector = [0.0] * dim
+    for word in _WORD.findall(text.lower()):
+        digest = hashlib.blake2b(word.encode(), digest_size=8).digest()
+        vector[int.from_bytes(digest[:4], "big") % dim] += 1.0 if digest[4] & 1 else -1.0
+    norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+    return [v / norm for v in vector]
+
+
+@app.post("/v1/embeddings", response_model=None)
+async def embeddings(
+    body: EmbeddingRequest, authorization: str | None = Header(default=None)
+) -> JSONResponse | dict[str, Any]:
+    stats.embedding_requests += 1
+    key = (authorization or "").removeprefix("Bearer ").strip()
+    if not key or key == "invalid-key":
+        return openai_error(401, "invalid API key", "invalid_api_key")
+    if behaviour.embed_fail_mode == "http_429":
+        return openai_error(429, "rate limit reached for requests", "rate_limit_exceeded")
+    if behaviour.embed_fail_mode == "http_500":
+        return openai_error(500, "the server had an error", "server_error")
+    if behaviour.embed_fail_mode == "hang":
+        await asyncio.sleep(3600)
+    texts = [body.input] if isinstance(body.input, str) else body.input
+    stats.embedded_texts += len(texts)
+    dim = body.dimensions or EMBEDDING_DIM
+    data = [
+        {"object": "embedding", "index": i, "embedding": embed_text(text, dim)}
+        for i, text in enumerate(texts)
+    ]
+    tokens = sum(len(text.split()) for text in texts)
+    return {
+        "object": "list",
+        "data": data,
+        "model": body.model,
+        "usage": {"prompt_tokens": tokens, "total_tokens": tokens},
+    }
+
+
 @app.get("/v1/models")
 async def models() -> dict[str, Any]:
     return {"object": "list", "data": [{"id": "mock-1", "object": "model", "owned_by": "mock"}]}
@@ -233,6 +297,9 @@ async def get_config() -> dict[str, Any]:
 async def set_config(update: dict[str, Any]) -> JSONResponse:
     if "fail_mode" in update and update["fail_mode"] not in FAIL_MODES:
         return JSONResponse({"error": f"fail_mode must be one of {sorted(FAIL_MODES)}"}, 400)
+    if "embed_fail_mode" in update and update["embed_fail_mode"] not in EMBED_FAIL_MODES:
+        allowed = sorted(EMBED_FAIL_MODES)
+        return JSONResponse({"error": f"embed_fail_mode must be one of {allowed}"}, 400)
     for key, value in update.items():
         if hasattr(behaviour, key):
             setattr(behaviour, key, type(getattr(behaviour, key))(value))

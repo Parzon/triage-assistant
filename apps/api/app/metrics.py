@@ -80,6 +80,26 @@ llm_active_streams = Gauge(
     "llm_active_streams", "Answers being streamed right now.", multiprocess_mode="livesum"
 )
 
+embedding_requests = Counter(
+    "embedding_requests_total",
+    "Embedding calls, by what was embedded (documents: a runbook written; query: a "
+    "question asked) and outcome: ok or an llm_* error code.",
+    ["kind", "outcome"],
+)
+chat_citations = Counter(
+    "chat_citations_total",
+    "Runbook sections cited by answers: valid (in the answer's context) or invalid (a "
+    "number the model invented). Invalid ones are a hallucination signal.",
+    ["validity"],
+)
+retrieval_duration = Histogram(
+    "retrieval_duration_seconds",
+    "Runbook retrieval for one question, the query's embedding included, by mode: hybrid, "
+    "or keyword_only when the embedding failed or timed out.",
+    ["mode"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
+)
+
 event_loop_lag = Histogram(
     "event_loop_lag_seconds",
     "How late the event loop runs a timer: the wait any callback has before it can start.",

@@ -18,7 +18,7 @@ from app.metrics import watch_event_loop_lag
 from app.middleware import RequestContextMiddleware
 from app.oidc import OIDCClient, watch_identity_provider
 from app.ratelimit import RateLimiter
-from app.routes import alerts, auth, chat, health
+from app.routes import alerts, auth, chat, health, runbooks
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -81,4 +81,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(alerts.router)
     app.include_router(chat.router)
+    app.include_router(runbooks.router)
     return app
