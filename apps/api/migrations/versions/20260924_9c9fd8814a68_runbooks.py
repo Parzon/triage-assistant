@@ -50,7 +50,7 @@ def upgrade() -> None:
         sa.Column("source_url", sa.Text(), nullable=True),
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("body_sha256", sa.Text(), nullable=False),
-        sa.Column("embedding_model", sa.Text(), nullable=False),
+        sa.Column("embedding_key", sa.Text(), nullable=False),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
@@ -78,7 +78,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("embedding", Vector(768), nullable=False),
-        sa.Column("embedding_model", sa.Text(), nullable=False),
+        sa.Column("embedding_key", sa.Text(), nullable=False),
         sa.ForeignKeyConstraint(
             ["runbook_id"],
             ["runbooks.id"],

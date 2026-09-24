@@ -183,10 +183,12 @@ class Runbook(Base):
     title: Mapped[str] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
-    # A re-upload with the same text and the same embedding model changes
+    # A re-upload with the same text and the same embedding key changes
     # nothing: no chunks rewritten, no embedding calls paid for.
     body_sha256: Mapped[str] = mapped_column(Text)
-    embedding_model: Mapped[str] = mapped_column(Text)
+    # How its sections were embedded (runbooks.embedding_key): a different
+    # key means `python -m app.cli reembed`.
+    embedding_key: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -226,6 +228,6 @@ class RunbookChunk(Base):
         deferred=True,
     )
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), deferred=True)
-    # Vectors from different models are not comparable: retrieval only
-    # uses chunks embedded by the model it asks with.
-    embedding_model: Mapped[str] = mapped_column(Text)
+    # Vectors are comparable only when made the same way (model, size,
+    # document prefix): retrieval uses only sections whose key is today's.
+    embedding_key: Mapped[str] = mapped_column(Text)

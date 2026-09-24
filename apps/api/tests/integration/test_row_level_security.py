@@ -164,7 +164,7 @@ async def test_only_team_admins_write_runbooks_at_the_database_too(
                 title="forged",
                 body="x",
                 body_sha256="x",
-                embedding_model="m",
+                embedding_key="m",
             )
         )
         with pytest.raises(DBAPIError, match="row-level security"):

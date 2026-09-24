@@ -120,6 +120,17 @@ def _limit(heading: str, content: str, max_words: int) -> list[Section]:
     return [Section(f"{heading} ({n}/{len(parts)})", part) for n, part in enumerate(parts, 1)]
 
 
+def embedding_key(settings: Settings) -> str:
+    """How vectors are made: the model, the size asked for, and a hash of the
+    document prefix. Stored with every vector; vectors with another key are
+    not comparable, so retrieval ignores them until they are re-embedded
+    (`python -m app.cli reembed`). A prefix change alone moves every vector:
+    measured, embeddinggemma with and without its prompts gave distances
+    0.06 apart on the same text."""
+    prefix = hashlib.sha256(settings.embedding_document_prefix.encode()).hexdigest()[:8]
+    return f"{settings.embedding_model}|{settings.embedding_dimensions or 'native'}|{prefix}"
+
+
 def document_text(section: Section) -> str:
     """What is embedded: the heading path gives a short section its topic."""
     return f"{section.heading}\n\n{section.content}"
@@ -161,22 +172,22 @@ async def save_runbook(
     source_url: str | None,
 ) -> Saved:
     """Create the runbook, or replace its text (same team and title)."""
-    model = embedder.embedding_model
-    if model is None:
+    if embedder.embedding_model is None:
         raise LLMError("runbook search is off: EMBEDDING_MODEL is not set")
+    key = embedding_key(settings)
     digest = hashlib.sha256(body.encode()).hexdigest()
     sections = split_sections(title, body)
 
     existing = (
         await db.execute(
             select(
-                Runbook.id, Runbook.body_sha256, Runbook.embedding_model, Runbook.source_url
+                Runbook.id, Runbook.body_sha256, Runbook.embedding_key, Runbook.source_url
             ).where(Runbook.team_id == team.id, Runbook.title == title)
         )
     ).one_or_none()
     if existing is not None and (existing[1], existing[2], existing[3]) == (
         digest,
-        model,
+        key,
         source_url,
     ):
         return Saved(existing[0], len(sections), changed=False)
@@ -194,7 +205,7 @@ async def save_runbook(
             title=title,
             body=body,
             body_sha256=digest,
-            embedding_model=model,
+            embedding_key=key,
             source_url=source_url,
         )
         .on_conflict_do_update(
@@ -202,7 +213,7 @@ async def save_runbook(
             set_={
                 "body": body,
                 "body_sha256": digest,
-                "embedding_model": model,
+                "embedding_key": key,
                 "source_url": source_url,
                 "updated_at": text("now()"),
             },
@@ -222,7 +233,7 @@ async def save_runbook(
                     "heading": section.heading,
                     "content": section.content,
                     "embedding": vector,
-                    "embedding_model": model,
+                    "embedding_key": key,
                 }
                 for n, (section, vector) in enumerate(zip(sections, vectors, strict=True))
             ],
@@ -300,7 +311,7 @@ semantic AS (
     FROM (
         SELECT c.id, c.embedding <=> CAST(CAST(:embedding AS text) AS vector) AS distance
         FROM runbook_chunks c
-        WHERE c.embedding_model = :model AND {teams}
+        WHERE c.embedding_key = :embedding_key AND {teams}
         ORDER BY c.embedding <=> CAST(CAST(:embedding AS text) AS vector)
         LIMIT :candidates
     ) s
@@ -414,7 +425,7 @@ async def search_runbooks(
     if team_ids is not None:
         params["team_ids"] = list(team_ids)
     if embedding is not None:
-        params |= {"embedding": to_text(embedding), "model": embedder.embedding_model}
+        params |= {"embedding": to_text(embedding), "embedding_key": embedding_key(settings)}
     sql = _SQL[("keyword" if done == "keyword_only" else done, team_ids is not None)]
     rows = (await db.execute(text(sql), params)).all()
     retrieval_duration.labels(done).observe(time.perf_counter() - start)

@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore acme-test fresh-host-test drills image-check session revoke seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        backup restore acme-test fresh-host-test drills image-check session revoke reembed seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals
 
 help: ## List all targets
@@ -277,6 +277,9 @@ drills: ## Failure drills on the prod stack, one fault at a time: make drills [d
 session: ## Print a session cookie ("name=value"): make session [email=you@example.com] [groups="team:default:admin org:admin"] [ENV=prod]
 	@docker exec $(API_C) python -m app.cli session --email $(or $(email),script@example.com) \
 	  $(foreach g,$(or $(groups),team:default:viewer),--group $(g)) --hours $(or $(hours),4)
+
+reembed: ## After changing EMBEDDING_* (but the query prefix): embed the runbooks again [ENV=prod]
+	@docker exec $(API_C) python -m app.cli reembed
 
 revoke: ## End every session of a user now (after removing their access at the provider): make revoke email=... [ENV=prod]
 	@test -n "$(email)" || { echo 'usage: make revoke email=<address> [ENV=prod]'; exit 2; }

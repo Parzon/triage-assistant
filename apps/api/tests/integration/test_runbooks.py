@@ -3,9 +3,11 @@ write, read and search them; saves that cost nothing when nothing changed;
 search that falls back to keywords when the embedding model fails; and the
 assistant getting the asker's runbook sections, and no one else's."""
 
+import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from app.cli import reembed
 from app.main import create_app
 from tests.integration.conftest import MockLLM, SignIn, signed_in, started
 from tests.integration.test_chat import events_of
@@ -132,6 +134,24 @@ async def test_an_org_admin_searches_every_team(sign_in_as: SignIn) -> None:
     org = await sign_in_as("org:admin")
     found = await org.post("/runbooks/search", json={"query": "free disk space", "k": 10})
     assert {hit["team"] for hit in found.json()["hits"]} == {"payments", "platform"}
+
+
+async def test_changing_how_vectors_are_made_needs_a_reembed(
+    app: FastAPI, sign_in_as: SignIn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin = await sign_in_as("team:payments:admin")
+    await save(admin, "payments", "Disk full")
+    # A new document prefix: the stored vectors were made another way.
+    changed = app.state.settings.model_copy(update={"embedding_document_prefix": "doc: "})
+    app.state.settings = changed
+    semantic = {"query": "free disk space", "mode": "semantic"}
+    assert (await admin.post("/runbooks/search", json=semantic)).json()["hits"] == []
+
+    monkeypatch.setattr("app.cli.get_settings", lambda: changed)
+    assert await reembed() == (1, 1)
+    hits = (await admin.post("/runbooks/search", json=semantic)).json()["hits"]
+    assert hits[0]["heading"] == "Disk full > Free space"
+    assert await reembed() == (0, 1)  # nothing left to do
 
 
 async def test_search_falls_back_to_keywords_when_the_embedding_model_fails(

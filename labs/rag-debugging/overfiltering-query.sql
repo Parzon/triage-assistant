@@ -11,18 +11,18 @@ SELECT set_config('app.read_team_ids', '{' || :team_id || '}', true) \g /dev/nul
 \echo '--- 1. iterative scans off (pgvector before 0.8)'
 SET LOCAL hnsw.iterative_scan = off;
 EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON)
-  SELECT c.id FROM runbook_chunks c WHERE c.embedding_model = 'lab-random'
+  SELECT c.id FROM runbook_chunks c WHERE c.embedding_key = 'lab-random'
   ORDER BY c.embedding <=> :'v'::vector LIMIT 20;
 
 \echo '--- 2. iterative scans on (relaxed_order): what the service sets'
 SET LOCAL hnsw.iterative_scan = relaxed_order;
 EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON)
-  SELECT c.id FROM runbook_chunks c WHERE c.embedding_model = 'lab-random'
+  SELECT c.id FROM runbook_chunks c WHERE c.embedding_key = 'lab-random'
   ORDER BY c.embedding <=> :'v'::vector LIMIT 20;
 
 \echo '--- 3. exact: no index, every row compared'
 SET LOCAL enable_indexscan = off;
 EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON)
-  SELECT c.id FROM runbook_chunks c WHERE c.embedding_model = 'lab-random'
+  SELECT c.id FROM runbook_chunks c WHERE c.embedding_key = 'lab-random'
   ORDER BY c.embedding <=> :'v'::vector LIMIT 20;
 ROLLBACK;
