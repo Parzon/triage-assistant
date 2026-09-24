@@ -138,7 +138,8 @@ evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/
+lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, every setting reachable
+	@python3 scripts/check_settings.py
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
 	$(DEV) run --rm --no-deps web npm run lint
