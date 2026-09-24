@@ -26,8 +26,9 @@ settings that came out of this.
    percentiles, and saturation. Saturation is the event-loop lag, CPU
    per container, and the database pools.
 5. **Find the bottleneck with the right tool.** Database time:
-   `make db-top-queries` then `EXPLAIN (ANALYZE, BUFFERS)`. api CPU:
-   `make py-spy-record`. A blocked worker: `make py-spy-dump`.
+   `make db-top-queries` then `EXPLAIN (ANALYZE, BUFFERS)`. api CPU: a
+   sampling profiler (py-spy made the profile below). A blocked worker:
+   asyncio debug mode.
 6. **Change one thing, measure again, keep the numbers.** Every fix
    below has a before and an after under the same load.
 
@@ -137,8 +138,8 @@ it stops being a precise instrument.
 
 ## Where the CPU goes: profiling streaming
 
-`make py-spy-record` at 300 concurrent streams (2,276 samples, workers
-57% busy):
+py-spy (a sampling profiler) at 300 concurrent streams, 2,276 samples,
+workers 57% busy:
 
 ```
 openai SDK          40.1%    starlette/fastapi   4.5%
@@ -146,8 +147,6 @@ httpx2 / httpcore2  21.9%    our code            2.5%
 asyncio loop        18.2%    sqlalchemy          2.2%
 pydantic             5.0%    SSE json + logging  2.5%
 ```
-
-![Flame graph of the api under streaming load](../images/api-flame.svg)
 
 **Reading a flame graph:** each box is a function, and its *width* is
 the share of samples in which it was on the stack. Wide boxes are where
@@ -287,9 +286,9 @@ no latency spike.
   FastAPI 207 ms, the openai SDK 175 ms. Every deploy, scale-out and
   replacement of a crashed worker pays it.
 - **Memory per request:** no growth, measured with tracemalloc over 1,000
-  and 4,000 requests (`scripts/debug/memory_growth.py`). The debugging
-  chapter shows how to read it, and the two mistakes that made the first
-  version report a false leak.
+  and 4,000 requests: the same ~48 KiB both times, a bounded cache. The
+  first attempt reported a false leak: without `gc.collect()` before each
+  snapshot, objects in reference cycles still look allocated.
 
 ## Checklist for the next investigation
 
@@ -302,7 +301,6 @@ no latency spike.
       measures itself
 - [ ] `make db-top-queries` reset before (`pg_stat_statements_reset()`)
       and read after
-- [ ] `make py-spy-record` during the steady state, if the api's CPU is
-      the limit
+- [ ] A profile during the steady state, if the api's CPU is the limit
 - [ ] One change at a time; before and after numbers in the PR; an ADR
       if it changes a default

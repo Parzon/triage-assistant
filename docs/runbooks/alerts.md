@@ -94,8 +94,9 @@ behind a migration.
 
 **Users:** everything on the api is slow; timeouts fire early (rate
 limiter fail-opens, pool timeouts) while CPU may look moderate.
-**Check:** `make py-spy-dump`: is a worker inside a synchronous call? Then
-CPU per container (the dashboard), and `make py-spy-top`.
+**Check:** CPU per container (the dashboard), then a slow request's trace
+(`make trace id=...`): a worker blocked in a synchronous call shows as a
+gap no span explains. Locally, asyncio debug mode names the blocking call.
 **Seen before:**
 - Saturation at 500 concurrent streams on 2 CPUs.
 - A synchronous HTTP client inside async code (`/health` took 4.8 s).
@@ -124,7 +125,7 @@ then 503 after 5 s (`pool_timeout`).
 **Check:** the "App database pools" panel. **In use near max with low
 traffic means leaked connections.** That's requests stuck forever,
 which the drills produced before ADR-0010: a timed-out query whose
-cancellation Postgres never acknowledged. `make py-spy-dump` and
+cancellation Postgres never acknowledged. `make db-activity` and
 `make gunicorn c="show workers"`.
 **Fix, short term:** `make deploy tag=<current tag>` replaces the workers
 without refusing requests. **Long term:** find what leaks; the ADR
@@ -220,8 +221,8 @@ off the host. Prometheus is capped at 2 GB, and container logs at
 
 **Users:** nothing yet. Next comes an OOM kill.
 **Check:** the dashboard's memory-by-container panel: a steady climb (a
-leak) or a step (a larger working set after a deploy)?
-`scripts/debug/memory_growth.py` shows growth per request.
+leak) or a step (a larger working set after a deploy)? `tracemalloc`
+snapshots show growth per request (the debugging chapter).
 
 ## ContainerOOMKilled
 

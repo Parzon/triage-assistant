@@ -1,4 +1,4 @@
-// Locust's workload shape in k6: VUS users, each holding its own connection
+// Paced users (Locust's workload shape): VUS users, each holding its own connection
 // and pacing one request per second (a closed model). Same average rate as
 // compare.js at RATE=VUS, very different arrival pattern - used to show that
 // the workload shape, not the tool, changes the result.

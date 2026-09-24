@@ -20,7 +20,7 @@ standard guidance for the other platforms, not exercised here.
 | curl | `make drills` | for drills |
 
 ✅ A clean Docker host with only bash, make and curl added brings the
-whole production stack up from a checkout (`make fresh-host-test`).
+whole production stack up from a checkout.
 
 Not needed, and deliberately so: Python, Node, uv, npm, psql, a local
 Postgres. Tool versions live in the images:
@@ -66,9 +66,7 @@ Containers need a Linux VM on a Mac. The options:
 - **Apple Silicon (arm64):** every image in the stack publishes a native
   arm64 variant: Python, Node, nginx, Postgres, Valkey, PgBouncer,
   Prometheus, Grafana, cAdvisor, the exporters and Keycloak (✅ checked
-  in the registries' manifests). The one exception is the Artillery load-test
-  image, which is amd64-only and runs under emulation: its numbers are
-  meaningless there.
+  in the registries' manifests).
 - **File sharing is the slow part.** The dev stack bind-mounts the
   source for hot reload, but keeps `.venv` and `node_modules` in volumes
   inside the VM. The thousands of dependency files never cross the
@@ -149,46 +147,14 @@ Traps that only show up across systems:
   for npm. That's a Dockerfile change: keep it in a local override, not
   in the shared Dockerfiles.
 
-## Editor: dev containers ✅
+## Editor
 
-The editor needs the project's packages for completion, type checking
-and debugging. Rather than installing Python and Node on every laptop,
-open the code *inside* the running containers:
-
-- **VS Code:** install the Dev Containers extension. Run `make up`, then
-  "Dev Containers: Reopen in Container" and pick **api (Python 3.13)** or
-  **web (Node 24)**.
-- **JetBrains Gateway** and **GitHub Codespaces** read the same files
-  (`.devcontainer/api/devcontainer.json`, `.devcontainer/web/devcontainer.json`).
-
-Each config attaches to the `make up` stack as a non-root user: `dev` in
-the api container, `node` in the web one. The api image's `dev` user is
-built with your UID and GID (`make` passes `DEV_UID`/`DEV_GID`), so on
-Linux files you create stay yours.
-
-✅ Verified with the Dev Containers CLI, against a running dev stack:
-- In the api container: user `dev`; Python imports; ruff; a new file in
-  the source tree belongs to UID 1000.
-- In the web container: user `node`; Node 24; `node_modules` resolves;
-  `tsc` 6.0.3.
-
-Upgrading a checkout from before the non-root dev image? Run `make
-fix-perms` once: caches written when the container ran as root
-(`.mypy_cache`) are otherwise unwritable, and mypy fails with an "INTERNAL
-ERROR".
-
-Without dev containers, the fallback is to install uv and Node on the
-host: `cd apps/api && uv sync` gives the editor a local `.venv`, and `npm
-ci` in `apps/web` a local `node_modules`. Inside the containers those
-paths are volumes, so nothing leaks either way.
-
-`.vscode/extensions.json` recommends the extensions, and
-`.vscode/launch.json` attaches the debugger to the containerised api
-(`make debug-up`; the debugging chapter).
-
-`make hooks` installs a pre-push hook that runs lint, types and unit
-tests in containers (~10 s) before anything leaves your machine. CI still
-runs everything.
+The editor needs the project's packages for completion, type checking and
+debugging. Rather than installing Python and Node on every laptop, attach
+the editor to the running container: in VS Code, "Dev Containers: Attach
+to Running Container", then pick the api or web container of `make up`.
+The api image's `dev` user has your UID and GID (`make` passes
+`DEV_UID`/`DEV_GID`), so on Linux files you create stay yours.
 
 ## Ports on your machine
 

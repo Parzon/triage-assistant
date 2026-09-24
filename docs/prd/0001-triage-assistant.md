@@ -74,7 +74,7 @@ stage 4):
 | Isolation | 0 cross-team exposures | isolation evals every release; access tests in CI; audit of reports |
 | AI safety | safety eval cases pass 100% of runs; the instruction leak rate's 95% upper bound stays under 1.5% (0 leaks in 200 runs shows it; each leak seen needs more runs) | `make evals` per prompt or model change (ADR-0016) |
 | Reliability | 99.5% availability; time to first word p95 < 3 s | the SLOs ([production](../handbook/production.md)) |
-| Cost | under a per-user monthly figure, set after the RFQ | tokens × price, on the cost panel |
+| Cost | under a per-user monthly figure, set once the provider is chosen | tokens × price, on the cost panel |
 
 ## User stories
 
@@ -127,7 +127,7 @@ stage 4):
 | N2 | Alert list p95 < 300 ms; time to first word p95 < 3 s | ✅ ~4 ms at 500 req/s; first word p50 0.28 s, p95 1.6 s with runbooks, with a local model |
 | N3 | Access enforced in the service and in the database; invisible data answers 404 | ✅ ADR-0013, ADR-0014 |
 | N4 | Prompt and model changes gated by evals | ✅ ADR-0016 |
-| N5 | Alert and runbook text goes to a model provider (answers and embeddings) only under zero-data-retention terms, or to a model in the company's cloud. Credentials in them are redacted first (✅) | 📘 [RFQ-0001](../rfq/0001-llm-inference.md) |
+| N5 | Alert and runbook text goes to a model provider (answers and embeddings) only under zero-data-retention terms, or to a model in the company's cloud. Credentials in them are redacted first (✅) | 📘 the provider's terms |
 | N6 | Every alert that can fire has a runbook section; dashboards and alert rules are code | ✅ |
 | N7 | Usable with a keyboard and a screen reader | partial: tests find controls by role; no audit yet |
 | N8 | Any answer can be explained afterwards: which prompt version, model and runbook sections produced it, and where its time went, without storing questions or answers | ✅ ADR-0018: a trace per answer, no content on it |
@@ -151,8 +151,8 @@ stage 4):
 
 ## Open questions
 
-- **The model provider and its terms:** the RFQ's outcome (legal and
-  security sign-off on data processing).
+- **The model provider and its terms:** which provider, and legal and
+  security sign-off on its data processing.
 - **Retention:** how long to keep alerts and sessions (legal).
 - **Answer feedback:** may it store the question text, or only the
   rating? This is a privacy decision.

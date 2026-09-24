@@ -96,7 +96,7 @@ them is rotated, not just deleted.
   state-changing calls need `Origin`. Alertmanager's webhook kept its
   bearer token.
 - **Backups:** `make backup`, copied off the host. A backup counts once
-  you have restored it (`DUMP=... make fresh-host-test`).
+  you have restored it (`make restore`).
 
 ## Moving to a managed platform 📘
 

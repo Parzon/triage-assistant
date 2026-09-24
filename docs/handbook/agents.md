@@ -255,20 +255,6 @@ The report counts `model_calls` and `tool_calls`, for the run and for each
 answer. 📘 Not built: checks on the path itself ("must search the runbooks
 before giving steps").
 
-## Gotchas met here
+## Gotchas
 
-- **Tool calls stream differently by provider.** OpenAI sends a call's
-  name, then its arguments in fragments; Ollama sends each call whole, in
-  one chunk. Accumulate by the call's index until `finish_reason`
-  (`app/llm.py`).
-- **The stdio transport owns stdout.** Anything else printed there breaks
-  the protocol: logs go to stderr.
-- **A hint in the prompt becomes a filter.** "Critical alerts matter
-  most" turned into `severity=critical` on every call, which hid the
-  answer.
-- **An equality check on context reads differently for an agent.** "Alerts
-  in context == 1" catches a leak in the pipeline. An agent that reads
-  *less* fails it too. The `tool.called` rows tell the two apart.
-- **An agent's context is known only at the end.** The stream's first
-  event cannot say how much it will read: `done` reports the final
-  counts, and the eval harness reads them there.
+In the guide's list, with every other gotcha met here: [Agents and MCP](../../gold_standard_development_guide.md#agents-and-mcp).

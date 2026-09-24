@@ -205,41 +205,7 @@ on disk, Elasticsearch, Tempo on object storage) 📘.
 
 ## Gotchas
 
-Each met while building this:
-- **A span made current inside an async generator leaks.** It stays
-  current in the caller's code between chunks, and detaching it fails if
-  the caller closes the generator from another context. The model's span
-  is started and ended explicitly, never made current.
-- **Nesting generators to add instrumentation broke cancellation.**
-  Closing the outer generator left the inner one, and the provider's HTTP
-  stream, open until garbage collection. Closing that stream is what stops
-  the provider generating. It is one generator again.
-- **The ASGI instrumentation package adds a span per body chunk** unless
-  told not to (`exclude_spans`). A streamed answer has hundreds of chunks.
-  The server span here is the service's own, in its middleware.
-- **The SQLAlchemy instrumentor is a process-wide singleton.** A second
-  `instrument()` does nothing, and `instrument()` also patches SQLAlchemy's
-  engine factories. Each app instruments its engine at startup, and
-  uninstruments at shutdown (the tests start dozens of apps).
-- **Never turn on the SQL commenter** (`enable_commenter`) with prepared
-  statements. It writes the trace id into each statement's text: no two
-  match, and the statement caches of asyncpg and PgBouncer churn.
-- **`OTEL_EXPORTER_OTLP_TIMEOUT` is milliseconds in the spec, seconds in
-  the Python exporter.** `2000`, following the spec, is half an hour.
-  Hence `TRACE_EXPORT_TIMEOUT_S`, in seconds, passed in code.
-- **One tracer provider per process, and after gunicorn forks.** The batch
-  processor's thread must live in the worker. It is installed in the
-  lifespan. Tests install one in-memory provider for the whole run.
-- **Exemplars do not work in prometheus_client's multiprocess mode**
-  (gunicorn): a "TODO" in the library. Metrics cannot link to traces
-  here. Go from a slow request's log line (`trace_id`), or search Jaeger
-  by duration.
-- **Jaeger 2's old search API is gone.** `/api/services` and
-  `/api/traces?service=` return 404; `/api/traces/<id>` still works. Search
-  through `/api/v3/traces?query.service_name=...` (OTLP JSON).
-- **A value compose does not list never reaches the container.** 22 of the
-  api's settings could not be changed from `.env`. `make lint` now checks
-  every setting is listed.
+In the guide's list, with every other gotcha met here: [Tracing](../../gold_standard_development_guide.md#tracing-opentelemetry).
 
 ## Not built yet 📘
 

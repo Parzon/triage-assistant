@@ -1,5 +1,5 @@
-// k6 side of `make load-compare`: one GET per iteration at a fixed arrival
-// rate, identical to the other tools' scenario.
+// One GET per iteration at a fixed arrival rate (an open model): the
+// evenly spread side of the comparison with paced-users.js.
 import http from 'k6/http'
 import { AUTH } from './session.js'
 

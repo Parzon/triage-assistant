@@ -211,20 +211,6 @@ has read untrusted input, it must be *impossible* for that input to trigger
 a consequential action. General-purpose agents, it argues, cannot give that
 guarantee.
 
-## Gotchas met here
+## Gotchas
 
-- **`INSERT ... RETURNING` under row-level security is checked against the
-  SELECT policy.** Audit rows are readable by org admins only, so an
-  insert that asks for its new id back is refused. `app/audit.py` inserts
-  with `Insert.inline()`, which asks for nothing back.
-- **SQLAlchemy's `implicit_returning=False` is not the fix:** it fetches
-  the next id itself and inserts it, which a `GENERATED ALWAYS` identity
-  column refuses.
-- **Audit rows outlive every test**, since nothing may delete them. Tests
-  find their own rows by action and target, or by a user created for the
-  test. A runbook and an alert can share an id.
-- **A tuning-set score is not a measurement.** Patterns written against a
-  set score well on it by construction. Keep a held-out set, written first
-  and scored once.
-- **`\b` does not separate `_` from letters.** `\bpassword` matches
-  "password" but not `DB_PASSWORD`.
+In the guide's list, with every other gotcha met here: [AI security](../../gold_standard_development_guide.md#ai-security).

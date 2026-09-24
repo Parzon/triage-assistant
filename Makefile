@@ -20,8 +20,8 @@ S    ?=
 
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
-        debug-up debug-down netshoot tcpdump strace trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore acme-test fresh-host-test drills image-check session revoke reembed seed load load-tool load-compare py-spy-dump py-spy-top py-spy-record \
+        debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
+        backup restore drills image-check session revoke reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals rag-overfiltering-lab
 
 help: ## List all targets
@@ -225,7 +225,6 @@ STACK = $(if $(filter prod,$(ENV)),$(PROD),$(DEV))
 # deploy (make deploy) it is api-2, not api-1 - never hardcode the name.
 API_C = $(shell $(STACK) ps -q api | head -1)
 PROD_API = $(shell $(PROD) ps -q api | head -1)
-NETSHOOT := nicolaka/netshoot:v0.14
 
 # `-f` disables the automatic compose.override.yaml merge: list it explicitly.
 debug-up: ## api under debugpy on 127.0.0.1:5678 (VS Code: "Attach to api"), asyncio debug mode on
@@ -234,21 +233,6 @@ debug-up: ## api under debugpy on 127.0.0.1:5678 (VS Code: "Attach to api"), asy
 
 debug-down: ## Back to the normal hot-reload api
 	$(DEV) up -d api
-
-netshoot: ## Shell inside the api container's network namespace (curl, dig, ss, tcpdump...)
-	docker run --rm -it --network container:$(API_C) $(NETSHOOT)
-
-SECS ?= 20
-tcpdump: ## Capture api traffic for SECS seconds -> .captures/api.pcap (open in Wireshark)
-	@mkdir -p .captures && chmod 777 .captures
-	docker run --rm --network container:$(API_C) --cap-add NET_ADMIN --cap-add NET_RAW \
-	  -v "$(CURDIR)/.captures:/cap" $(NETSHOOT) timeout $(SECS) tcpdump -i eth0 -s 0 -w /cap/api.pcap 'tcp port 8010' || true
-	@echo "wrote .captures/api.pcap"
-
-strace: ## Syscall summary of one api worker for SECS seconds (what is it asking the kernel for?)
-	@pid=$$(docker top $(API_C) -o pid,args | awk '/uvicorn|gunicorn/ {p=$$1} END {print p}'); \
-	  echo "tracing host pid $$pid"; \
-	  docker run --rm --pid=host --cap-add SYS_PTRACE $(NETSHOOT) timeout $(SECS) strace -c -f -p $$pid || true
 
 trace: ## Every log line of one request across nginx and the api, then its trace in Jaeger: make trace id=<X-Request-ID>
 	@test -n "$(id)" || { echo 'usage: make trace id=<request id>'; exit 2; }
@@ -278,12 +262,6 @@ backup: ## Dump the database to backups/ (keeps the newest 14) [ENV=prod]
 restore: ## Replace the database with a dump: make restore file=backups/<dump> [ENV=prod]
 	@test -n "$(file)" || { echo 'usage: make restore file=backups/<dump>'; exit 2; }
 	@STACK="$(STACK)" scripts/restore.sh "$(file)"
-
-acme-test: ## Rehearse automatic HTTPS certificates: the edge image gets one over ACME from Pebble (Let's Encrypt's test CA)
-	@scripts/acme-test.sh
-
-fresh-host-test: ## The committed tree on a clean Docker host (DinD): prod-up + every user path [DUMP=backups/x.dump]
-	@scripts/fresh-host-test.sh
 
 drills: ## Failure drills on the prod stack, one fault at a time: make drills [d="redis-hang db-stop"]
 	@scripts/failure-drills.sh "$(d)"
@@ -340,45 +318,6 @@ load: ## k6 scenario through nginx on the prod stack: make load s=chat VUS=100 (
 	  grafana/k6:2.3.0 run --no-usage-report \
 	  $$(docker ps -q -f name='^triage-assistant-prod-prometheus-1$$' | grep -q . && echo -o experimental-prometheus-rw) \
 	  /scripts/k6/$(s).js
-
-# One reference implementation per tool, same scenario (tests/load/<tool>/).
-load-compare: ## Same scenario through k6, vegeta, oha, Locust, Artillery, JMeter; one table (RATE=200 DURATION=30)
-	RATE=$(or $(RATE),200) DURATION=$(or $(DURATION),30) scripts/load-compare.sh
-
-USERS ?= 50
-CLASS ?= AlertReader
-load-tool: ## Run one tool's reference script: make load-tool TOOL=locust CLASS=ChatUser USERS=50
-	@session="$$($(LOAD_SESSION))"; origin="$$($(LOAD_ORIGIN))"; \
-	case "$(TOOL)" in \
-	  locust) docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
-	    -e SESSION_COOKIE="$$session" -e ORIGIN="$$origin" \
-	    locustio/locust:2.46.6 -f /load/locust/locustfile.py $(CLASS) --headless -u $(USERS) -r $(USERS) \
-	    -t $(or $(DURATION),30s) --host http://web:8080 --only-summary ;; \
-	  artillery) docker run --rm --network triage-assistant-prod_default -e ARTILLERY_DISABLE_TELEMETRY=true \
-	    -e SESSION_COOKIE="$$session" \
-	    -v "$(CURDIR)/tests/load:/load:ro" artilleryio/artillery:2.0.34 run /load/artillery/alerts.yml ;; \
-	  jmeter) docker build -q -t triage-assistant-jmeter tools/load/jmeter >/dev/null && \
-	    docker run --rm --network triage-assistant-prod_default -v "$(CURDIR)/tests/load:/load:ro" \
-	    triage-assistant-jmeter -n -t /load/jmeter/alerts.jmx -Jcookie="$$session" ;; \
-	  *) echo "usage: make load-tool TOOL=locust|artillery|jmeter  (k6: make load; all: make load-compare)"; exit 2 ;; \
-	esac
-
-# py-spy joins the api container's PID namespace with CAP_SYS_PTRACE; the
-# api itself keeps cap_drop ALL. C= picks the container (dev: C=triage-assistant-api-1).
-C ?= $(PROD_API)
-PYSPY = docker run --rm --pid=container:$(C) --cap-add SYS_PTRACE
-.py-spy-image:
-	@docker build -q -t triage-assistant-py-spy tools/py-spy >/dev/null
-
-py-spy-dump: .py-spy-image ## Stack of every api process right now: what is it doing, or stuck on?
-	$(PYSPY) triage-assistant-py-spy dump --pid 1 --subprocesses
-
-py-spy-top: .py-spy-image ## Live top-style view of where the api spends time (Ctrl-C to stop)
-	$(PYSPY) -it triage-assistant-py-spy top --pid 1 --subprocesses
-
-py-spy-record: .py-spy-image ## 30s flame graph -> docs/images/api-flame.svg (run load meanwhile)
-	$(PYSPY) -v "$(CURDIR)/docs/images:/out" --entrypoint sh triage-assistant-py-spy -c \
-	  'py-spy record --pid 1 --subprocesses --duration $${SECONDS_:-30} -o /out/api-flame.svg && chown $(shell id -u):$(shell id -g) /out/api-flame.svg'
 
 # --- Dependencies --------------------------------------------------------------
 # Lockfiles are updated inside the container (same uv/npm as CI), as your

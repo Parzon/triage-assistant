@@ -54,8 +54,8 @@ and `/metrics` sums them: `40, 40, 40, 40, 40, 40`. The costs:
 - There are no per-process CPU or memory metrics (cAdvisor provides
   those per container).
 - Every gauge needs a `multiprocess_mode` (`livesum`, `max`...).
-- The client calls `getpid()` on every metric update (visible in
-  `strace`: ~8 per request).
+- The client calls `getpid()` on every metric update (~8 per request,
+  measured with strace).
 - The directory must exist before the first import, and must never be
   set to an empty string.
 

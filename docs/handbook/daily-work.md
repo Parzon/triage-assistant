@@ -345,6 +345,6 @@ until it did, 22 of them could not be set from `.env`.
 | `SITE_ADDRESS` | the TLS edge's name: a domain gets a Let's Encrypt certificate automatically; `localhost` uses Caddy's local CA |
 | `EDGE_BIND`, `EDGE_HTTP_PORT`, `EDGE_HTTPS_PORT` | where the edge publishes HTTP (redirect) and HTTPS; 80/443 on a VM |
 | `HSTS_MAX_AGE` | seconds browsers must use HTTPS only: 0 for localhost, 31536000 for a real domain |
-| `ACME_CA` | the ACME directory (default Let's Encrypt; its staging directory for a first setup; Pebble in `make acme-test`) |
+| `ACME_CA` | the ACME directory (default Let's Encrypt; its staging directory for a first setup) |
 | `API_CPUS` | the api's CPU limit (and so its worker count) |
 | `IMAGE_PREFIX`, `IMAGE_TAG` | which images the production stack runs; `make deploy` records `IMAGE_TAG` |

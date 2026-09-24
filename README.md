@@ -62,11 +62,11 @@ server offers the same tools to a local client such as Claude Code
 ```
 apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the model's evals, the retrieval benchmark
 apps/web/            React + Vite UI (Node 24); nginx config for production
-tools/               mock LLM provider, profiler and load-tool images
+tools/               mock LLM provider, the TLS edge image
 tests/               end-to-end (Playwright) and load tests
 labs/                hands-on exercises: rag-debugging, ai-observability, ai-security, ai-cost
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
-scripts/             deploy, backup/restore, failure drills, fresh-host test
+scripts/             deploy, backup/restore, failure drills
 compose.yaml         services shared by every environment
 compose.override.yaml  dev: hot reload, ports on 127.0.0.1 (auto-merged)
 compose.prod.yaml    production shape: prod images, only the TLS edge published

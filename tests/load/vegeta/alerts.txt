@@ -1,2 +1,0 @@
-GET http://web:8080/api/alerts?limit=50
-Cookie: ${SESSION_COOKIE}

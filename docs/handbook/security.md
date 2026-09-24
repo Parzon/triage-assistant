@@ -198,9 +198,8 @@ query.
   compromised process cannot rewrite it.
 - No dev tools in the production image (no ruff, pytest or uv).
 - CPU and memory limits, with no swap, on every service.
-- Debug tooling (py-spy, strace) runs as a separate container that
-  borrows the target's namespaces on demand. The api never gets
-  `SYS_PTRACE`.
+- The api never gets `SYS_PTRACE`: a profiler or tracer runs as a
+  separate container that borrows its namespaces, on demand.
 
 **The host:**
 - The `docker` group is root-equivalent: only the deploy user is in it.
@@ -349,9 +348,7 @@ security](ai-security.md).
 - ✅ **GitHub Actions pinned to commit SHAs**, not tags. A tag can be
   moved to malicious code, as in the 2025 tj-actions/changed-files
   compromise.
-- ✅ **Pinned versions** of base images and tools, several with checksum
-  verification: the vegeta and JMeter downloads, the oha image by
-  digest.
+- ✅ **Pinned versions** of base images and tools.
 - ✅ **Release images carry provenance and an SBOM** (what went into them),
   stored next to them in GHCR.
 - ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates weekly,

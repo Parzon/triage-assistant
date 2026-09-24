@@ -81,7 +81,7 @@ read that alert anyway.
 |---|---|
 | The AI answers wrongly or is manipulated by alert text | measured with test cases before each change, calibrated automatic grading, safety cases that must pass 100%; no tool that changes anything; answers shown as text only |
 | One team sees another's data | access checks in the service, plus database-level row security, both tested |
-| Alert and runbook text sent to an external AI provider | provider terms with zero data retention ([RFQ-0001](rfq/0001-llm-inference.md)), or a model in the company's own cloud; known credential formats removed before anything is sent |
+| Alert and runbook text sent to an external AI provider | provider terms with zero data retention, or a model in the company's own cloud; known credential formats removed before anything is sent |
 | A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own; every version's author, and every answer's sources, are on record |
 | Cost runaway | per-user rate limits, output limits, a cost panel; a provider budget alarm is stage 3 |
 | One server is a single point of failure | acceptable for a pilot; a second host or a managed platform is stage 5 |
@@ -91,9 +91,7 @@ read that alert anyway.
 | Question | Document |
 |---|---|
 | What are we building, and why? | [PRD-0001](prd/0001-triage-assistant.md) |
-| Is the architecture sound? | [ARD-0001](ard/0001-triage-assistant.md), the architecture review |
 | How was a feature proposed, and what did it cost? | [RFC-0001](rfc/0001-answers-grounded-in-runbooks.md): answers that cite the team's runbooks (accepted and built, with the costs measured) |
 | What should come next? | "Not done yet" in [the guide](../gold_standard_development_guide.md#not-done-yet) |
-| What do we ask model vendors for? | [RFQ-0001](rfq/0001-llm-inference.md) |
 | Why was each technical decision made? | [the ADRs](adr/) (18) |
 | How is it built, run and repaired? | [the guide](../gold_standard_development_guide.md) and the [handbook](handbook/) |
