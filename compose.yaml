@@ -154,6 +154,10 @@ services:
     environment:
       # Unload a model after 5 idle minutes: its GPU memory goes back.
       OLLAMA_KEEP_ALIVE: 5m
+      # How many answers one model generates at once (batched on the GPU).
+      # 1: the rest wait in line; throughput does not grow with load
+      # (labs/ai-cost measures both).
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
     volumes:
       - ollama-models:/root/.ollama
     deploy:

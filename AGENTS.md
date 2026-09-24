@@ -50,6 +50,9 @@ Run `make` to list every target. The ones you need most:
   `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
   owner (the api cannot). Hands-on: `labs/ai-security/` (redaction measured,
   an investigation; docs/handbook/ai-security.md)
+- Cost: tokens per answer and where they go, cost per 1,000 questions,
+  self-hosted throughput: `labs/ai-cost/` (docs/handbook/ai-cost.md).
+  `OLLAMA_NUM_PARALLEL` sets how many answers the local model batches
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
   `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
