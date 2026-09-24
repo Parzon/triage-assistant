@@ -225,6 +225,22 @@ Migrations run while the old version is still serving, so they must be
 backward compatible. Add a column first; stop reading it in one release;
 drop it in the next.
 
+**When a release changes the database's image,** replace the database
+container before the deploy. v0.5.0 did: `postgres:17` became
+`pgvector/pgvector:0.8.6-pg17-trixie`, the same PostgreSQL build with the
+vector extension. The data directory is untouched.
+
+```
+cd /srv/triage-assistant && git fetch --tags && git checkout v0.5.0
+docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml up -d --no-deps db
+make deploy tag=0.5.0
+```
+
+Postgres restarts, so requests fail for a few seconds. `make deploy`
+compares the running database's image with the compose files first, and
+stops with these instructions if they differ. When rolling back, keep
+the newer database image: it runs the older release too.
+
 **Rollback:** `make deploy tag=<previous>`. It rolls back the code, never
 the schema (ADR-0015). When the database is at a revision the older image
 does not know, the deploy says "the database (...) is ahead of <tag>:
