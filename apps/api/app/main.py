@@ -19,7 +19,7 @@ from app.metrics import app_info, watch_event_loop_lag
 from app.middleware import RequestContextMiddleware
 from app.oidc import OIDCClient, watch_identity_provider
 from app.ratelimit import RateLimiter
-from app.routes import alerts, auth, chat, health, runbooks
+from app.routes import alerts, audit, auth, chat, health, runbooks
 from app.tracing import configure_tracing, shutdown_tracing, tracing_on
 from app.triage import PROMPT
 
@@ -106,4 +106,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(alerts.router)
     app.include_router(chat.router)
     app.include_router(runbooks.router)
+    app.include_router(audit.router)
     return app

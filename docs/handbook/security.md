@@ -74,7 +74,10 @@ the route.
 | A credential in an alert or a runbook, repeated by the model or sent to the provider | redacted before the prompt | `app/redact.py` | `test_redact.py`; eval `injection-fake-conversation` |
 | Reading another team's questions or runbooks in the trace store | spans carry ids and counts, never content, unless `TRACE_CONTENT=true` (development) | `app/tracing.py`, the span sites | `test_no_question_prompt_answer_or_runbook_text_reaches_a_span` |
 | Choosing trace ids or forcing sampling from outside | nginx drops incoming `traceparent`, `tracestate` and `baggage` | `apps/web/nginx/snippets/proxy.conf` | — (checked by hand against the production nginx image, with an echo server) |
-| An instruction planted in a runbook (indirect prompt injection) | runbook text is untrusted data in the prompt; the model has no tools; only team admins write runbooks | `SYSTEM_PROMPT`, `routes/runbooks.py` | eval `rag-poisoned-runbook`; `test_only_a_team_admin_writes_that_teams_runbooks` |
+| An instruction planted in a runbook (indirect prompt injection) | runbook text is untrusted data in the prompt; the model has no tools; only team admins write runbooks; every version's author is audited | `SYSTEM_PROMPT`, `routes/runbooks.py`, `app/audit.py` | eval `rag-poisoned-runbook`; `test_only_a_team_admin_writes_that_teams_runbooks`; `test_a_question_records_what_the_model_was_given_and_it_leads_to_the_author` |
+| Rewriting the record of who changed a runbook or an alert, or of what the assistant was given | `audit_events` is append-only for the app's role (UPDATE, DELETE, TRUNCATE revoked) and readable by org admins only (row-level security) | migration `e46b40a7952a`, `app/audit.py` | `test_the_app_role_cannot_rewrite_the_audit_trail`, `test_the_audit_trail_is_invisible_to_anyone_but_an_org_admin` |
+| Markup in an answer loading or running (an image URL carrying data out, a script) | answers are rendered as text; the content security policy allows images and connections to this site only | `Chat.tsx`, `snippets/security-headers.conf` | `Chat.test.tsx`: markup and markdown are shown, not loaded |
+| Text crafted to make redaction slow, on every chat that reads it | every pattern's scan is bounded | `app/redact.py` | `test_hostile_text_is_redacted_in_linear_time` |
 
 ### Roles
 
@@ -258,6 +261,10 @@ query.
 
 ## The model: LLM-specific risks
 
+The chain from what the model reads to what it can affect, what was
+measured, and the rules for the day the assistant gets tools: [AI
+security](ai-security.md).
+
 - **Prompt injection.** Alert text is attacker-controllable: anyone who
   can send an alert, or influence a monitored system's messages, can
   write text that ends up in the prompt. The system prompt tells the
@@ -274,16 +281,22 @@ query.
   secrets into alerts, and anyone who can send an alert can plant one.
   They are redacted from everything sent to a model (`app/redact.py`):
   alerts, runbook sections and the question in the prompt, and the text
-  sent for embedding. What is redacted:
-  - labelled secrets ("password is ...");
-  - AWS, OpenAI, GitHub and Slack keys;
-  - JWTs, private keys, and passwords in connection URLs.
+  sent for embedding. A secret is recognised three ways:
+  - by name: an identifier *ending* with password, secret, token, api_key
+    and the like (`PGPASSWORD=`, `"client_secret":`, `X-Api-Key:`);
+  - by format: 16 token formats (AWS, GitHub, GitLab, Slack, OpenAI,
+    Anthropic, Stripe, Google, npm, PyPI, Hugging Face, SendGrid, Docker
+    Hub, JWTs), and private keys, even cut short;
+  - by position: a URL's `user:password@`, `Authorization` and cookie
+    headers, passwords on command lines.
 
-  The prompt's own rule failed about 1 run in 100; redaction does not
-  fail. It also keeps secrets from the model provider (OWASP LLM02). It
-  is a list of patterns: a secret in an unknown format passes through.
-  `prompt_redactions_total` counts them: each is a secret to fix at its
-  source.
+  Measured: 21 of 24 held-out shapes, 0 of 56 ordinary lines changed
+  (v0.6.0's version: 11 of 24; [AI security](ai-security.md)). The
+  prompt's own rule failed about 1 run in 100; redaction does not fail for
+  what it knows, and it keeps secrets from the model provider (OWASP
+  LLM02). It is a list of patterns: a secret with no known format, name or
+  position passes through. `prompt_redactions_total` counts them: each is
+  a secret to fix at its source.
 - **Runbooks are team data too.** Row-level security and the same
   visibility rule apply as for alerts ([RAG](rag.md)). A runbook's text is
   untrusted like an alert's: an instruction planted in a runbook
@@ -295,8 +308,13 @@ query.
   the thing that enforces access (OWASP LLM07).
 - **Output handling.** The answer is rendered as text (`white-space:
   pre-wrap`), never as HTML or markdown. A model coaxed into writing
-  `<script>` shows it, rather than running it. Keep it that way, or
-  sanitise if you render markdown.
+  `<script>`, or an image whose URL carries data out, shows it rather than
+  running or loading it; `Chat.test.tsx` fails otherwise. Keep it that
+  way, or sanitise and allow no outside images if you render markdown.
+- **An audit trail** (ADR-0019): who wrote each version of a runbook and
+  each alert, and, for every question, which alerts and runbook versions
+  the model was given. Ids and hashes, no text. The api can add to it, not
+  rewrite it ([AI security](ai-security.md)).
 - **Data sent to the provider.** Alert text, runbook text and user
   questions leave your network:
   - the chat model gets the visible alerts and the retrieved sections;

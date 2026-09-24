@@ -39,7 +39,7 @@ An internal service for on-call engineers.
 | Isolation | no cross-team visibility, for users or the model | tests at the api and at the database; isolation evals | ✅ 404 for invisible data; row-level security; evals 3/3 |
 | AI quality and safety | safety cases 100%; quality ≥ 80%; a leak rate < 1.5% (95% bound) | `make evals` with a calibrated judge (ADR-0016) | ✅ prompt v6: every case 10/10 but one 9/10 (not significant); 2 leaks in 600 (bound 1.05%) |
 | Recoverability | RPO ≤ 24 h; RTO < 1 h | daily dumps, restore rehearsals | ✅ restore in 6 s, healthy in 13 s (demo data); 📘 production-size data |
-| Security | no known attack left without a tested control | the security chapter's attack table | ✅ 20 attacks, each with a control; 18 with an automated test (a leaked backup is covered by hashing, untested; nginx stripping trace headers was checked by hand) |
+| Security | no known attack left without a tested control | the security chapter's attack table | ✅ 23 attacks, each with a control; 21 with an automated test (a leaked backup is covered by hashing, untested; nginx stripping trace headers was checked by hand) |
 | Operability | every alert has a runbook; dashboards and rules are code | `make obs-check` in CI | ✅ |
 
 ## 3. Architecture
@@ -80,6 +80,7 @@ The guide's "system on one page" has the details
 | Sessions | security-sensitive | Postgres, as a SHA-256 of the token only | no | 12 h absolute, 2 h idle |
 | Logs | operational | stdout | to the log platform | the platform's retention |
 | Traces | operational: ids, counts, durations, hashes; **no questions, prompts, answers or runbook text** (content capture is development-only) | Jaeger, in memory (the newest 20,000) | to the tracing platform, if configured | until Jaeger restarts; the platform's retention |
+| Audit events | internal: user ids, alert and runbook ids, hashes of their text; the prompt version and model per question; **no questions, answers, alert or runbook text** | Postgres, append-only for the api; org admins read | no | until the schema owner prunes them, on the organisation's policy (`make audit-prune`) |
 
 - **Backups:** a daily `pg_dump` (the newest 14 are kept) and a daily
   disk snapshot (7 days), copied off the host. The recovery point is
@@ -133,7 +134,7 @@ The guide's "system on one page" has the details
 | Embedding model | the same endpoint (ADR-0017); measured with nomic-embed-text (local). Changing it needs `make reembed` |
 | What reaches it | the fixed instructions; up to 20 of the asker's visible alerts (300 characters each); up to 4 sections of the asker's visible runbooks; the question. Known credential formats are redacted from all of it |
 | What it can do | produce text. **No tools**, no actions, no access to anything else |
-| How output is shown | as text, never HTML or markdown execution |
+| How output is shown | as text, never HTML or markdown execution (a UI test fails otherwise); the content security policy allows images from the site only |
 | How quality is measured | 19 versioned eval cases (grounding, refusal, injection, isolation, runbooks). A judge from another model family, calibrated on 34 labelled answers (102 of 102 verdicts agree). A retrieval benchmark (recall@k, MRR). A gate before every prompt or model change, with a statistical regression test (ADR-0016) |
 | Prompt injection | alert and runbook text are untrusted. Injection cases are safety-gated (100%). v6 leaked its instructions 2 times in 600 (95% bound 1.05%); v5, 0 in 200; v4, 5 in 200. The prompt holds no secrets; the architecture bounds the impact |
 | Failure behaviour | provider errors, timeouts, rate limits and empty or cut-off answers each reach the user as a specific message. The rest of the service is unaffected. Each is measured (`llm_requests_total{outcome}`) |

@@ -31,6 +31,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import Actor, record
 from app.config import Settings
 from app.llm import Embedder, LLMError
 from app.metrics import embedding_requests, retrieval_duration
@@ -179,8 +180,12 @@ async def save_runbook(
     title: str,
     body: str,
     source_url: str | None,
+    actor: Actor,
 ) -> Saved:
-    """Create the runbook, or replace its text (same team and title)."""
+    """Create the runbook, or replace its text (same team and title). The
+    write is audited (runbook.saved), in its own transaction: who wrote the
+    text the assistant will read, and its hash - the version a chat was
+    given. Saving the same text again writes nothing, and records nothing."""
     if embedder.embedding_model is None:
         raise LLMError("runbook search is off: EMBEDDING_MODEL is not set")
     key = embedding_key(settings)
@@ -230,6 +235,17 @@ async def save_runbook(
         .returning(Runbook.id)
     )
     runbook_id = (await db.execute(upsert)).scalar_one()
+    await record(
+        db,
+        actor,
+        "runbook.saved",
+        team_id=team.id,
+        target_id=runbook_id,
+        title=title,
+        body_sha256=digest,
+        previous_sha256=None if existing is None else existing[1],
+        sections=len(sections),
+    )
     await db.execute(delete(RunbookChunk).where(RunbookChunk.runbook_id == runbook_id))
     if sections:
         await db.execute(
@@ -260,6 +276,9 @@ class Hit:
     heading: str
     content: str
     updated_at: datetime
+    # The runbook's version: the hash of its text. The audit trail records
+    # it for each section a chat was given (app/audit.py).
+    runbook_sha256: str
     # Reciprocal rank fusion: the sum of 1/(RRF_K + rank) over both lists.
     score: float
     # Each retriever's rank for this section (1 = best); None: not in its list.
@@ -328,6 +347,7 @@ semantic AS (
 )"""
 _RESULT = """
 SELECT c.id, c.runbook_id, t.slug AS team, r.title, c.heading, c.content, r.updated_at,
+       r.body_sha256,
        {score} AS score, {keyword} AS keyword_rank, {semantic},
        {candidates} AS semantic_candidates
 FROM ({ids}) ids
@@ -517,6 +537,7 @@ async def _search(
                 heading=row.heading,
                 content=row.content,
                 updated_at=row.updated_at,
+                runbook_sha256=row.body_sha256,
                 score=float(row.score),
                 keyword_rank=row.keyword_rank,
                 semantic_rank=row.semantic_rank,

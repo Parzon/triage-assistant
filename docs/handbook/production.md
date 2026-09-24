@@ -24,7 +24,9 @@ with a way to prove it is done. Then:
 - runbook search against a local embedding model, on a hand-written
   corpus;
 - a trace per answer (retrieval, the model, their attributes), with its
-  cost measured under load.
+  cost measured under load;
+- an audit trail of who wrote what the assistant reads, and what each
+  question was given, which the api cannot rewrite.
 
 📘 **Not yet:**
 - a cloud VM with a real domain;
@@ -243,7 +245,9 @@ the humans:
   people doing the fixing. In a small team, one person may hold both;
   say so out loud.
 - **Timeline:** write it as you go. The request id in every error
-  (`make trace id=...`) and the dashboards make it reconstructible.
+  (`make trace id=...`) and the dashboards make it reconstructible. For a
+  harmful answer, the audit trail says what the model was given and who
+  wrote it (`make audit`, [AI security](ai-security.md)).
 - **A blameless review within a week, for every SEV1 and SEV2:**
   - what happened;
   - why the system allowed it;

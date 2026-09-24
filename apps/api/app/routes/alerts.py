@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.access import Role, require_role
+from app.audit import ALERTMANAGER, Actor, record, sha256
 from app.db import DbSession, set_transaction_settings
 from app.models import DEFAULT_TEAM, SEVERITIES, Alert, Team
 from app.queries import newest_alerts, team_by_slug, to_out
@@ -38,6 +39,16 @@ async def create_alert(payload: AlertIn, principal: CurrentUser, db: DbSession) 
     require_role(principal, team.id, Role.RESPONDER, "team")
     alert = Alert(team_id=team.id, **payload.model_dump(exclude={"team"}))
     db.add(alert)
+    await db.flush()  # the alert's id, for its audit event
+    await record(
+        db,
+        Actor.of(principal),
+        "alert.created",
+        team_id=team.id,
+        target_id=alert.id,
+        source=alert.source,
+        message_sha256=sha256(alert.message),
+    )
     await db.commit()
     return to_out(alert, team.slug)
 
@@ -119,7 +130,18 @@ async def ingest_alertmanager(
     created = 0
     if rows:
         stmt = insert(Alert).values(rows).on_conflict_do_nothing(index_elements=["external_id"])
-        created = len((await db.execute(stmt.returning(Alert.id))).all())
+        returned = stmt.returning(Alert.id, Alert.team_id, Alert.source, Alert.message)
+        for alert_id, team_id, source, message in (await db.execute(returned)).tuples().all():
+            await record(
+                db,
+                ALERTMANAGER,
+                "alert.created",
+                team_id=team_id,
+                target_id=alert_id,
+                source=source,
+                message_sha256=sha256(message),
+            )
+            created += 1
         await db.commit()
     return {"received": len(payload.alerts), "created": created}
 
@@ -155,6 +177,15 @@ async def delete_alert(alert_id: int, principal: CurrentUser, db: DbSession) -> 
         raise HTTPException(status_code=404, detail="alert not found")
     require_role(principal, alert.team_id, Role.ADMIN, "alert")
     await db.delete(alert)
+    await record(
+        db,
+        Actor.of(principal),
+        "alert.deleted",
+        team_id=alert.team_id,
+        target_id=alert.id,
+        source=alert.source,
+        message_sha256=sha256(alert.message),
+    )
     await db.commit()
     return Response(status_code=204)
 

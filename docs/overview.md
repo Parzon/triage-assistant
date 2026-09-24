@@ -29,7 +29,7 @@ keeps everything else:
 |---|---|
 | On-call engineers | the right alert first, the likely cause (a recent deploy to the same service), the runbook's steps with their source, and a plain "the alerts do not say" instead of a guess |
 | Team leads | per-team ownership: responders add alerts, admins manage them, and nobody sees another team's incidents |
-| Security and compliance | company sign-in; access enforced twice, in the service and in the database; the model never given data the asker could not read; no secrets in code |
+| Security and compliance | company sign-in; access enforced twice, in the service and in the database; the model never given data the asker could not read; credentials removed before any model sees them; an audit trail of who wrote what the assistant reads, and what every answer was given, that the service itself cannot rewrite; no secrets in code |
 | Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([infrastructure Q&A](handbook/infrastructure-qa.md)) |
 | Other engineering teams | a working starting point, and a documented way to adopt it ([using this template](handbook/using-this-template.md)) |
 
@@ -78,7 +78,7 @@ read that alert anyway.
 | The AI answers wrongly or is manipulated by alert text | measured with test cases before each change, calibrated automatic grading, safety cases that must pass 100%; no tools; answers shown as text only |
 | One team sees another's data | access checks in the service, plus database-level row security, both tested |
 | Alert and runbook text sent to an external AI provider | provider terms with zero data retention ([RFQ-0001](rfq/0001-llm-inference.md)), or a model in the company's own cloud; known credential formats removed before anything is sent |
-| A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own |
+| A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own; every version's author, and every answer's sources, are on record |
 | Cost runaway | per-user rate limits, output limits, a cost panel; a provider budget alarm is stage 3 |
 | One server is a single point of failure | acceptable for a pilot; a second host or a managed platform is stage 5 |
 

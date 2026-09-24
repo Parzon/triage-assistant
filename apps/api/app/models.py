@@ -2,6 +2,7 @@
 `alembic check`, which fails when models and migrations disagree."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -18,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.vector import Vector
@@ -231,3 +232,39 @@ class RunbookChunk(Base):
     # Vectors are comparable only when made the same way (model, size,
     # document prefix): retrieval uses only sections whose key is today's.
     embedding_key: Mapped[str] = mapped_column(Text)
+
+
+class AuditEvent(Base):
+    """Who did what: one row per change to what the assistant reads, and per
+    question it was asked (app/audit.py, ADR-0019). Written in the same
+    transaction as the change. The app's role may insert and read rows,
+    never update or delete them: the migration revokes both.
+
+    No foreign keys: a record outlives the user, team, runbook or alert it
+    names."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        CheckConstraint(r"action ~ '^[a-z_]+\.[a-z_]+$'", name="ck_audit_events_action"),
+        CheckConstraint("via IN ('api', 'alertmanager', 'cli')", name="ck_audit_events_via"),
+        # Newest first, and one target's history (a runbook's saves).
+        Index("ix_audit_events_created_at_id", "created_at", "id"),
+        Index("ix_audit_events_target_id", "target_id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # "runbook.saved": what happened, to what kind of thing.
+    action: Mapped[str] = mapped_column(Text)
+    # NULL: not a signed-in user - the Alertmanager webhook, an operator's
+    # command (via says which).
+    actor_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    via: Mapped[str] = mapped_column(Text)
+    team_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The runbook's or the alert's id, by the action's kind.
+    target_id: Mapped[int | None] = mapped_column(BigInteger)
+    # To the request's log lines, and its trace when one was kept.
+    request_id: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(Text)
+    # Ids, counts and hashes; never the text of a question, an answer, an
+    # alert or a runbook.
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default="{}")

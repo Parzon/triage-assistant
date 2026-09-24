@@ -130,6 +130,9 @@ Real incidents in this repo, and the layer that found them:
 | an unsampled request handed out a trace id: at 10% sampling, 9 in 10 found nothing in Jaeger | "trace not found" | the observability lab's sampling exercise; now a unit test |
 | with the trace backend down, each worker's shutdown waited 10 s for the exporter | slower deploys and restarts, and no error | stopping Jaeger, then the api, and timing it |
 | a correction to a code comment was lost: reverting a lab experiment with `git checkout <file>` discarded it too, and the lab kept saying it had been made | a comment still claiming a cause the lab had disproved | reading the code while adding tracing |
+| redaction missed 37 of 54 secrets in the shapes logs carry them (`DB_PASSWORD=`, `"password": "..."`): `\bpassword` never matches after `_` | every unit test green: each tested a whole-word label | a corpus of real log shapes, scored against a held-out set (`labs/ai-security`) |
+| redacting 100,000 characters of "mysql " took 6.4 s, on the event loop: a scan restarted at every word | nothing, until someone writes such a runbook | timing hostile input while measuring redaction; now a linear-time unit test |
+| an audit row could not be inserted: `INSERT ... RETURNING` is checked against the SELECT policy, which only org admins pass | HTTP 500 on every save | the first run through the dev api, before any test; now every write path has an integration test |
 
 Each layer earns its place by finding a class of bug the layer below
 could not.
