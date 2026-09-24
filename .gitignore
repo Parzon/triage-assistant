@@ -30,3 +30,6 @@ test-results/
 .captures/
 # Database dumps (make backup): data, never in git
 backups/
+
+# lab state
+labs/ai-observability/.incident
