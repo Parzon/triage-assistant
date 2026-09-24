@@ -17,6 +17,10 @@ revoke`): they use the app's own settings and database role.
       say (model, dimensions, document prefix). Until then, retrieval ignores
       those sections' vectors - keyword search still finds them - so run it
       after changing any EMBEDDING_* setting but the query prefix.
+
+  python -m app.cli audit [--action runbook.saved] [--target 17] [--hours 24]
+      The audit trail, newest first, one JSON object per line (app/audit.py):
+      who wrote a runbook's versions, what the assistant was given.
 """
 
 import os
@@ -31,9 +35,11 @@ os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
 import argparse
 import asyncio
 import sys
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
+from app.audit import CLI, events, to_out
 from app.config import get_settings
 from app.db import create_engine, create_sessionmaker, set_transaction_settings
 from app.llm import OpenAICompatibleClient
@@ -94,11 +100,30 @@ async def reembed() -> tuple[int, int]:
                 )
             ).all()
             for title, body, source_url, team in stale:
-                await save_runbook(db, llm, settings, team, title, body, source_url)
+                await save_runbook(db, llm, settings, team, title, body, source_url, CLI)
     finally:
         await llm.aclose()
         await engine.dispose()
     return len(stale), total
+
+
+async def audit_trail(
+    action: str | None, target: int | None, actor: int | None, hours: float | None, limit: int
+) -> list[str]:
+    settings = get_settings()
+    engine = create_engine(settings)
+    since = None if hours is None else datetime.now(UTC) - timedelta(hours=hours)
+    try:
+        async with create_sessionmaker(engine)() as db:
+            # Row-level security shows audit rows to org admins only.
+            await set_transaction_settings(db, {"app.org_admin": "on"})
+            stmt = events(
+                action=action, target_id=target, actor_user_id=actor, since=since, limit=limit
+            )
+            rows = (await db.execute(stmt)).tuples().all()
+    finally:
+        await engine.dispose()
+    return [to_out(*row).model_dump_json() for row in rows]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -116,6 +141,12 @@ def main(argv: list[str] | None = None) -> None:
     revoke_cmd = commands.add_parser("revoke", help="end every session of a user")
     revoke_cmd.add_argument("--email", required=True)
     commands.add_parser("reembed", help="embed again the runbooks embedded another way")
+    audit_cmd = commands.add_parser("audit", help="the audit trail, newest first")
+    audit_cmd.add_argument("--action", help="e.g. runbook.saved, chat.asked")
+    audit_cmd.add_argument("--target", type=int, help="a runbook's or an alert's id")
+    audit_cmd.add_argument("--actor", type=int, help="a user's id")
+    audit_cmd.add_argument("--hours", type=float, help="only the last N hours")
+    audit_cmd.add_argument("--limit", type=int, default=50)
     args = parser.parse_args(argv)
 
     if args.command == "session":
@@ -123,6 +154,11 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "revoke":
         ended = asyncio.run(revoke(args.email))
         print(f"ended {ended} session(s) of {args.email}", file=sys.stderr)
+    elif args.command == "audit":
+        lines = asyncio.run(
+            audit_trail(args.action, args.target, args.actor, args.hours, args.limit)
+        )
+        print("\n".join(lines))
     else:
         done, total = asyncio.run(reembed())
         print(f"embedded again {done} of {total} runbook(s)", file=sys.stderr)

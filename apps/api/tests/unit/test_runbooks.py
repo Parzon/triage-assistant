@@ -40,6 +40,7 @@ def hit(n: int, heading: str) -> Hit:
         heading=heading,
         content=f"step {n}",
         updated_at=datetime(2026, 9, 20, tzinfo=UTC),
+        runbook_sha256=f"{n:064x}",
         score=0.03,
         keyword_rank=n,
         semantic_rank=n,

@@ -1,7 +1,7 @@
 """Request and response bodies: the public API contract."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -144,3 +144,29 @@ class SearchOut(BaseModel):
     mode: Literal["hybrid", "keyword", "semantic", "keyword_only"]
     embedding_error: str | None
     hits: list[SearchHit]
+
+
+class AuditEventOut(BaseModel):
+    """One audit event (app/audit.py): who did what, and when."""
+
+    id: int
+    created_at: datetime
+    # "runbook.saved", "chat.asked"...
+    action: str
+    # None: not a signed-in user - via says what it was.
+    actor_user_id: int | None
+    actor_email: str | None
+    via: str
+    team: str | None
+    # The runbook's or the alert's id, by the action.
+    target_id: int | None
+    request_id: str | None
+    trace_id: str | None
+    # Ids, counts and hashes, by action; never question, answer or document text.
+    detail: dict[str, Any]
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEventOut]
+    # Pass as ?before= for the next (older) page; None: no more.
+    next_before: int | None

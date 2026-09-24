@@ -3,6 +3,7 @@ the browser's EventSource can only GET)."""
 
 from fastapi import APIRouter, Depends, Request
 
+from app.audit import Actor, record
 from app.config import Settings
 from app.db import DbSession
 from app.logs import request_id_var
@@ -12,7 +13,7 @@ from app.runbooks import Retrieval, search_runbooks
 from app.schemas import ChatRequest
 from app.sessions import CurrentUser
 from app.sse import SSEResponse
-from app.triage import answer_events, build_messages
+from app.triage import PROMPT, answer_events, build_messages
 
 router = APIRouter(tags=["chat"])
 
@@ -49,9 +50,32 @@ async def chat_stream(
         )
     alerts = await newest_alerts(db, principal.team_ids(), limit=settings.chat_context_alerts)
     sections = retrieval.hits if retrieval else []
+    messages = build_messages(payload.message, alerts, sections)
+    # Recorded before the answer starts, for every question: what the model
+    # is given, for whom (app/audit.py). Ids and versions, never the text;
+    # a failed write fails the request, and no answer goes unrecorded.
+    await record(
+        db,
+        Actor.of(principal),
+        "chat.asked",
+        teams=principal.team_ids(),
+        prompt={"name": PROMPT.name, "version": PROMPT.version, "sha256": PROMPT.sha256},
+        model=state.llm.model,
+        alerts=[alert.id for alert in alerts],
+        sections=[
+            {
+                "chunk_id": hit.chunk_id,
+                "runbook_id": hit.runbook_id,
+                "runbook_sha256": hit.runbook_sha256,
+            }
+            for hit in sections
+        ],
+        retrieval=retrieval.mode if retrieval else None,
+    )
+    await db.commit()
     events = answer_events(
         state.llm,
-        build_messages(payload.message, alerts, sections),
+        messages,
         request_id=request_id_var.get(),
         alerts_in_context=len(alerts),
         stream_timeout_s=settings.llm_stream_timeout_s,

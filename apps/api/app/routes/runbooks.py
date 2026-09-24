@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 
 from app.access import Role, require_role
+from app.audit import Actor, record
 from app.db import DbSession
 from app.errors import ApiError
 from app.llm import Embedder, LLMError
@@ -58,6 +59,7 @@ async def save(
             payload.title,
             payload.body,
             payload.source_url,
+            Actor.of(principal),
         )
     except LLMError as exc:
         raise ApiError(503, exc.code, f"the embedding model failed: {exc}") from exc
@@ -104,6 +106,15 @@ async def delete_runbook(runbook_id: int, principal: CurrentUser, db: DbSession)
     deleted runbook."""
     runbook, _, _ = await _visible(db, principal, runbook_id, Role.ADMIN)
     await db.delete(runbook)
+    await record(
+        db,
+        Actor.of(principal),
+        "runbook.deleted",
+        team_id=runbook.team_id,
+        target_id=runbook.id,
+        title=runbook.title,
+        body_sha256=runbook.body_sha256,
+    )
     await db.commit()
     return Response(status_code=204)
 

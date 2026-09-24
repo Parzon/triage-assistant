@@ -1,5 +1,6 @@
 """Where a case's question goes: the model directly, or the running service."""
 
+import hashlib
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -73,6 +74,7 @@ def context_sections(case: Case) -> list[Hit]:
             heading=section.heading,
             content=section.content,
             updated_at=now,
+            runbook_sha256=hashlib.sha256(runbook.body.encode()).hexdigest(),
             score=0.0,
             keyword_rank=None,
             semantic_rank=None,

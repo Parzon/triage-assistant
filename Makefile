@@ -303,6 +303,18 @@ revoke: ## End every session of a user now (after removing their access at the p
 	@test -n "$(email)" || { echo 'usage: make revoke email=<address> [ENV=prod]'; exit 2; }
 	@docker exec $(API_C) python -m app.cli revoke --email "$(email)"
 
+# --- Audit trail (app/audit.py, ADR-0019) --------------------------------------
+# The api may add audit events, never change or delete them: pruning runs as
+# the schema owner, in the database container.
+
+audit: ## The audit trail, newest first: make audit [a="--action runbook.saved --target 17 --hours 24"] [ENV=prod]
+	@docker exec $(API_C) python -m app.cli audit $(a)
+
+audit-prune: ## Delete audit events older than days= (no default: your retention policy decides) [ENV=prod]
+	@case "$(days)" in ''|*[!0-9]*) echo 'usage: make audit-prune days=<whole days to keep> [ENV=prod]'; exit 2;; esac
+	@$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "DELETE FROM audit_events WHERE created_at < now() - make_interval(days => $(days))"'
+
 # --- Performance lab ------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through
 # nginx, from a container on its network. Raise the rate limits for them:
