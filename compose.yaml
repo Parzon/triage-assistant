@@ -40,6 +40,8 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
       EMBEDDING_QUERY_PREFIX: ${EMBEDDING_QUERY_PREFIX:-}
       EMBEDDING_DOCUMENT_PREFIX: ${EMBEDDING_DOCUMENT_PREFIX:-}
+      # Runbook sections per answer (0: alerts only).
+      RAG_CONTEXT_CHUNKS: ${RAG_CONTEXT_CHUNKS:-4}
       # Per client per minute. Load tests raise them (make load).
       ALERTS_RATE_LIMIT: ${ALERTS_RATE_LIMIT:-60}
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}

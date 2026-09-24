@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Runs lab.py inside the dev api container: its settings, database and api.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+exec docker compose exec -T api python - "$@" < labs/rag-debugging/lab.py

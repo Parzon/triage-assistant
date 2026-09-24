@@ -146,6 +146,9 @@ async def test_changing_how_vectors_are_made_needs_a_reembed(
     app.state.settings = changed
     semantic = {"query": "free disk space", "mode": "semantic"}
     assert (await admin.post("/runbooks/search", json=semantic)).json()["hits"] == []
+    # A hybrid search in name only says so.
+    hybrid = (await admin.post("/runbooks/search", json={"query": "free disk space"})).json()
+    assert (hybrid["mode"], hybrid["embedding_error"]) == ("keyword_only", "no_current_vectors")
 
     monkeypatch.setattr("app.cli.get_settings", lambda: changed)
     assert await reembed() == (1, 1)

@@ -137,6 +137,20 @@ groups:
           summary: "users wait over 10s (p95) for the first word of an answer"
           runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#llmslowfirsttoken"
 
+      # Hybrid retrieval that fell back to keywords: the embedding model
+      # failing or slow (embedding_requests_total{kind="query"} says which),
+      # or the embedding settings changed without `make reembed`. Answers
+      # still come, with worse runbook sections: nobody would notice.
+      - alert: RetrievalDegraded
+        expr: |
+          sum(rate(retrieval_duration_seconds_count{mode="keyword_only"}[15m]))
+            / sum(rate(retrieval_duration_seconds_count{mode=~"hybrid|keyword_only"}[15m])) > 0.5
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "most runbook searches fall back to keywords: the embedding model fails, or needs make reembed"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#retrievaldegraded"
+
       # Delivered, but cut off by LLM_MAX_OUTPUT_TOKENS. A reasoning model
       # thinks inside that limit: gpt-oss:20b at its default effort spent
       # all 800 tokens thinking in 3 answers of 5 (ai-engineering chapter).

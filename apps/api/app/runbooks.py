@@ -318,7 +318,8 @@ semantic AS (
 )"""
 _RESULT = """
 SELECT c.id, c.runbook_id, t.slug AS team, r.title, c.heading, c.content, r.updated_at,
-       {score} AS score, {keyword} AS keyword_rank, {semantic}
+       {score} AS score, {keyword} AS keyword_rank, {semantic},
+       {candidates} AS semantic_candidates
 FROM ({ids}) ids
 JOIN runbook_chunks c ON c.id = ids.id
 JOIN runbooks r ON r.id = c.runbook_id
@@ -337,6 +338,7 @@ def _assemble(mode: str, teams: str) -> str:
     semantic = _SEMANTIC.format(teams=teams)
     if mode == "hybrid":
         return f"WITH {keyword}, {semantic}" + _RESULT.format(  # noqa: S608
+            candidates="(SELECT count(*) FROM semantic)",
             score=f"{_KW_SCORE} + {_SE_SCORE}",
             keyword="kw.rank_no",
             semantic="se.rank_no AS semantic_rank, se.distance",
@@ -345,6 +347,7 @@ def _assemble(mode: str, teams: str) -> str:
         )
     if mode == "keyword":
         return f"WITH {keyword}" + _RESULT.format(  # noqa: S608
+            candidates="NULL::bigint",
             score=_KW_SCORE,
             keyword="kw.rank_no",
             semantic=_NO_SEMANTIC,
@@ -352,6 +355,7 @@ def _assemble(mode: str, teams: str) -> str:
             joins="LEFT JOIN keyword kw ON kw.id = c.id",
         )
     return f"WITH {semantic}" + _RESULT.format(  # noqa: S608
+        candidates="(SELECT count(*) FROM semantic)",
         score=_SE_SCORE,
         keyword="NULL::bigint",
         semantic="se.rank_no AS semantic_rank, se.distance",
@@ -428,6 +432,13 @@ async def search_runbooks(
         params |= {"embedding": to_text(embedding), "embedding_key": embedding_key(settings)}
     sql = _SQL[("keyword" if done == "keyword_only" else done, team_ids is not None)]
     rows = (await db.execute(text(sql), params)).all()
+    if done == "hybrid" and rows and rows[0].semantic_candidates == 0:
+        # The question was embedded, but no section in reach has a vector
+        # made today's way (the embedding key changed without a reembed): a
+        # hybrid search in name only. Said so, so it shows up in the answer's
+        # metadata and in retrieval_duration_seconds{mode="keyword_only"}.
+        done, error = "keyword_only", "no_current_vectors"
+        log.warning("no section has a current vector: run `make reembed`")
     retrieval_duration.labels(done).observe(time.perf_counter() - start)
     return Retrieval(
         hits=[
