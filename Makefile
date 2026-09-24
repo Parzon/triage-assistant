@@ -75,20 +75,26 @@ migration: ## New migration from model changes: make migration m="add alert sour
 # --- Observability --------------------------------------------------------------
 # Profiles from .env plus "observability". Not `--profile observability`: a
 # --profile flag REPLACES the profiles in .env (the mock LLM would drop out).
-WITH_OBS := COMPOSE_PROFILES="$$(sed -n 's/^COMPOSE_PROFILES=//p' .env),observability"
+# Traces go to Jaeger while it runs: the api is recreated with its OTLP
+# endpoint set (unless .env or the shell sets another), and obs-down recreates
+# it without, so it never exports to a stopped Jaeger.
+WITH_OBS := COMPOSE_PROFILES="$$(sed -n 's/^COMPOSE_PROFILES=//p' .env),observability" \
+	OTEL_EXPORTER_OTLP_ENDPOINT="$${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}"
 
-obs-up: ## Start Prometheus, Alertmanager, Grafana + exporters next to the dev stack
+obs-up: ## Start Prometheus, Alertmanager, Grafana, Jaeger + exporters next to the dev stack; traces on
 	$(WITH_OBS) $(DEV) up -d
-	@echo "Grafana http://localhost:$${GRAFANA_PORT:-3000}  Prometheus http://localhost:$${PROMETHEUS_PORT:-9090}"
+	@echo "Grafana http://localhost:$${GRAFANA_PORT:-3000}  Prometheus http://localhost:$${PROMETHEUS_PORT:-9090}  Jaeger http://localhost:$${JAEGER_PORT:-16686}"
 
-obs-down: ## Stop the observability containers (dev stack keeps running)
-	$(WITH_OBS) $(DEV) stop prometheus alertmanager grafana postgres-exporter pgbouncer-exporter redis-exporter node-exporter cadvisor
+obs-down: ## Stop the observability containers (dev stack keeps running; traces off)
+	$(WITH_OBS) $(DEV) stop prometheus alertmanager grafana jaeger postgres-exporter pgbouncer-exporter redis-exporter node-exporter cadvisor
+	$(DEV) up -d api
 
 OBS := $(CURDIR)/infra/observability
-obs-check: ## Validate Prometheus config, unit-test alert rules, validate Alertmanager config
+obs-check: ## Validate Prometheus config, unit-test alert rules, validate Alertmanager and Jaeger configs
 	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/etc/prometheus:ro" prom/prometheus:v3.14.0 check config /etc/prometheus/prometheus.yml
 	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/p:ro" -w /p prom/prometheus:v3.14.0 test rules alerts.test.yml
 	docker run --rm --entrypoint amtool -v "$(OBS)/alertmanager:/c:ro" prom/alertmanager:v0.34.1 check-config /c/alertmanager.yml
+	docker run --rm -v "$(OBS)/jaeger:/etc/jaeger:ro" jaegertracing/jaeger:2.21.0 validate --config /etc/jaeger/config.yaml
 	@python3 -c 'import json, glob; [json.load(open(f)) for f in glob.glob("$(OBS)/grafana/dashboards/*.json")]; print("dashboards: valid JSON")'
 	@python3 $(OBS)/grafana/build_dashboard.py | diff -q - $(OBS)/grafana/dashboards/service.json >/dev/null \
 	  || { echo "service.json is not what build_dashboard.py generates: run make dashboard"; exit 1; }
@@ -132,7 +138,8 @@ evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/
+lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, every setting reachable
+	@python3 scripts/check_settings.py
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
 	$(DEV) run --rm --no-deps web npm run lint
@@ -243,9 +250,12 @@ strace: ## Syscall summary of one api worker for SECS seconds (what is it asking
 	  echo "tracing host pid $$pid"; \
 	  docker run --rm --pid=host --cap-add SYS_PTRACE $(NETSHOOT) timeout $(SECS) strace -c -f -p $$pid || true
 
-trace: ## Every log line of one request across nginx and the api: make trace id=<X-Request-ID>
+trace: ## Every log line of one request across nginx and the api, then its trace in Jaeger: make trace id=<X-Request-ID>
 	@test -n "$(id)" || { echo 'usage: make trace id=<request id>'; exit 2; }
-	@$(STACK) logs --no-log-prefix --no-color web api 2>/dev/null | grep -F '$(id)' | jq -Rc 'fromjson? // .'
+	@lines=$$($(STACK) logs --no-log-prefix --no-color web api 2>/dev/null | grep -F '$(id)'); \
+	  echo "$$lines" | jq -Rc 'fromjson? // .'; \
+	  echo "$$lines" | jq -Rr 'fromjson? | .trace_id? // empty' | sort -u \
+	  | sed "s#^#trace: http://localhost:$${JAEGER_PORT:-16686}/trace/#"
 
 gunicorn: ## gunicorn control socket (prod image): make gunicorn c="show workers" | "show stats" | "worker add 1"
 	docker exec $(PROD_API) gunicornc -s /tmp/gunicorn.ctl -c "$(or $(c),show workers)"

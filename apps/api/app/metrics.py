@@ -80,6 +80,14 @@ llm_active_streams = Gauge(
     "llm_active_streams", "Answers being streamed right now.", multiprocess_mode="livesum"
 )
 
+app_info = Gauge(
+    "app_info",
+    "1 for what this process runs: the release, the prompt (name:version), the model and the "
+    "embedding model. When answers change, line their change up with this one first.",
+    ["version", "prompt", "model", "embedding_model"],
+    multiprocess_mode="max",
+)
+
 embedding_requests = Counter(
     "embedding_requests_total",
     "Embedding calls, by what was embedded (documents: a runbook written; query: a "

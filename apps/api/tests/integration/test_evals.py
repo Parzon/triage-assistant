@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx2
 from fastapi import FastAPI
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.oidc import Identity
 from app.sessions import session_cookie, sign_in
@@ -43,7 +44,9 @@ def session_maker(app: FastAPI) -> SessionMaker:
     return sessions
 
 
-async def test_the_api_target_proves_isolation_through_the_service(app: FastAPI) -> None:
+async def test_the_api_target_proves_isolation_through_the_service(
+    app: FastAPI, spans: InMemorySpanExporter
+) -> None:
     sessions = session_maker(app)
     async with httpx2.AsyncClient(
         transport=httpx2.ASGITransport(app=app), base_url=BASE_URL
@@ -60,6 +63,20 @@ async def test_the_api_target_proves_isolation_through_the_service(app: FastAPI)
         # Another team's runbook never reaches the asker, even when asked for.
         "rag-isolation-break-glass": True,
     }
+    # Each run is a trace: the harness's span, its checks as events, and the
+    # service's own spans under it (the api target sends its traceparent).
+    finished = spans.get_finished_spans()
+    for case in summary["cases"]:
+        for answer in case["answers"]:
+            in_trace = [
+                s for s in finished if format(s.context.trace_id, "032x") == answer["trace_id"]
+            ]
+            names = {s.name for s in in_trace}
+            assert f"eval {case['id']}" in names
+            assert "POST /chat/stream" in names
+            (eval_span,) = [s for s in in_trace if s.name == f"eval {case['id']}"]
+            assert {e.name for e in eval_span.events} == {"gen_ai.evaluation.result"}
+    assert summary["prompt"]["version"] == "v6"
 
 
 async def test_the_retrieval_benchmark_runs_through_the_service(app: FastAPI) -> None:

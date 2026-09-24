@@ -130,6 +130,7 @@ stage 4):
 | N5 | Alert and runbook text goes to a model provider (answers and embeddings) only under zero-data-retention terms, or to a model in the company's cloud. Credentials in them are redacted first (✅) | 📘 [RFQ-0001](../rfq/0001-llm-inference.md) |
 | N6 | Every alert that can fire has a runbook section; dashboards and alert rules are code | ✅ |
 | N7 | Usable with a keyboard and a screen reader | partial: tests find controls by role; no audit yet |
+| N8 | Any answer can be explained afterwards: which prompt version, model and runbook sections produced it, and where its time went, without storing questions or answers | ✅ ADR-0018: a trace per answer, no content on it |
 
 ## Timeline / milestones
 

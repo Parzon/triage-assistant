@@ -21,7 +21,7 @@ recommended, not exercised here.
 
 | Part | Where | What it does |
 |---|---|---|
-| The prompt | `apps/api/app/triage.py`: `SYSTEM_PROMPT`, `build_messages` | What the model sees: the instructions, then the asker's alerts, newest first. The comment above the prompt records every version and why it changed. |
+| The prompt | `apps/api/app/triage.py`: `SYSTEM_PROMPT`, `PROMPT_VERSION`, `build_messages` | What the model sees: the instructions, then the asker's alerts, newest first. The comment above the prompt records every version and why it changed. A unit test pins each version's hash: an edit without a new version fails the build. The version goes on every model span, in `app_info` and in eval reports ([AI observability](ai-observability.md)). |
 | The context | `app/queries.py`, called from `routes/chat.py` | The alerts come from **the same visibility query as the alert list**, so the model is never given data the asker could not read. |
 | Streaming | `answer_events` in `triage.py` | Turns the model's stream into SSE events, and records one outcome per answer: `ok`, `truncated`, `llm_empty_answer`, `llm_timeout`, `cancelled`... |
 | The model seam | `app/llm.py` | One class, `OpenAICompatibleClient`, for every OpenAI-compatible endpoint (OpenAI, Azure OpenAI, Ollama, vLLM, LiteLLM, the mock). It yields text, then `Usage` and `Finish`; it raises a small set of typed errors (ADR-0006). |
@@ -73,6 +73,12 @@ Each run prints a summary and writes a JSON report to
 `apps/api/evals/reports/` (gitignored). The report holds every answer,
 which checks it failed, and the judge's reason. It exits 1 if the gate
 fails.
+
+With tracing on (`make obs-up`), each case's run is a trace: its checks
+are `gen_ai.evaluation.result` events, and through the api target, the
+service's own spans sit under it. The report records each answer's
+`trace_id` and the prompt version: from a failing answer to what it was
+given, in one step (the AI observability lab, exercise 5).
 
 **Two targets:**
 - **model:** the production prompt (`build_messages`) around each case's

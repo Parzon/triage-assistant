@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# The AI observability lab (README.md). `ask` and `trace` run lab.py inside
+# the dev api container; the incident commands recreate the api with one
+# setting changed, and keep which one in .incident until `lab fix`.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+STATE=labs/ai-observability/.incident
+# Tracing stays on (make obs-up's endpoint) through every recreate.
+export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}"
+
+# Each a change someone could plausibly make, or a default that stopped
+# fitting: what they break is only visible in the telemetry.
+WORSE=(
+  "EMBEDDING_TIMEOUT_S=0.001"
+  "RAG_CONTEXT_CHUNKS=1"
+  "LLM_MAX_OUTPUT_TOKENS=60"
+  "EMBEDDING_DOCUMENT_PREFIX=document: "
+)
+SLOW=(
+  "LLM_REASONING_EFFORT=high"
+)
+
+recreate() {  # recreate <VAR=value>...: the api with these on top of .env
+  env "$@" docker compose up -d --wait api >/dev/null 2>&1
+}
+
+case "${1:-}" in
+  ask | trace)
+    exec docker compose exec -T api python - "$@" < labs/ai-observability/lab.py
+    ;;
+  incident)
+    if [ -f "$STATE" ]; then echo "an incident is already running: lab fix first" >&2; exit 1; fi
+    if [ "${2:-worse}" = slow ]; then pool=("${SLOW[@]}"); else pool=("${WORSE[@]}"); fi
+    fault=${pool[RANDOM % ${#pool[@]}]}
+    printf '%s\n' "$fault" > "$STATE"
+    recreate "$fault"
+    echo "Something changed. Ask your question again, and find out what from the telemetry."
+    ;;
+  reveal)
+    [ -f "$STATE" ] && echo "the incident: $(cat "$STATE")" || echo "no incident running"
+    ;;
+  fix)
+    [ -f "$STATE" ] && echo "the incident was: $(cat "$STATE")"
+    rm -f "$STATE"
+    recreate
+    echo "the api is back to .env's settings"
+    ;;
+  set)
+    shift
+    recreate "$@"
+    echo "the api runs with .env's settings${*:+, plus $*}; tracing on"
+    ;;
+  *)
+    echo 'usage: lab ask "<question>" [--as team:lab:viewer] | lab trace <id> [--all]' >&2
+    echo '       lab incident [slow] | lab reveal | lab fix | lab set [VAR=value...]' >&2
+    exit 2
+    ;;
+esac

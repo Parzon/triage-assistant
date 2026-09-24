@@ -8,6 +8,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind, StatusCode
 
 from app.errors import install_error_handlers
 from app.middleware import RequestContextMiddleware
@@ -93,3 +96,56 @@ async def test_failure_after_streaming_started_is_not_masked() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         with pytest.raises(RuntimeError, match="mid-stream failure"):
             await client.get("/stream-then-boom")
+
+
+def server_span(spans: InMemorySpanExporter) -> ReadableSpan:
+    (span,) = [s for s in spans.get_finished_spans() if s.kind is SpanKind.SERVER]
+    return span
+
+
+async def test_each_request_is_a_span_named_after_its_route(
+    client: httpx.AsyncClient, spans: InMemorySpanExporter
+) -> None:
+    response = await client.get("/items/42", headers={"X-Request-ID": "nginx-0123456789abcdef"})
+    span = server_span(spans)
+    # The template, not "/items/42": one name for every item.
+    assert span.name == "GET /items/{item_id}"
+    assert span.attributes is not None
+    assert span.attributes["http.route"] == "/items/{item_id}"
+    assert span.attributes["url.path"] == "/items/42"
+    assert span.attributes["http.response.status_code"] == 200
+    # The request id links the span to the log lines (make trace id=...).
+    assert span.attributes["app.request_id"] == response.headers["x-request-id"]
+    assert span.status.status_code is StatusCode.UNSET
+
+
+async def test_a_callers_trace_context_is_joined(
+    client: httpx.AsyncClient, spans: InMemorySpanExporter
+) -> None:
+    parent_trace, parent_span = "0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331"
+    await client.get("/items/1", headers={"traceparent": f"00-{parent_trace}-{parent_span}-01"})
+    span = server_span(spans)
+    assert format(span.context.trace_id, "032x") == parent_trace
+    assert span.parent is not None
+    assert format(span.parent.span_id, "016x") == parent_span
+
+
+async def test_a_500_marks_its_span_as_an_error_with_the_exception(
+    client: httpx.AsyncClient, spans: InMemorySpanExporter
+) -> None:
+    await client.get("/boom")
+    span = server_span(spans)
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.attributes is not None
+    assert span.attributes["http.response.status_code"] == 500
+    assert [event.name for event in span.events] == ["exception"]
+
+
+async def test_an_unmatched_path_keeps_the_method_as_its_name(
+    client: httpx.AsyncClient, spans: InMemorySpanExporter
+) -> None:
+    await client.get("/nowhere/at/all")
+    span = server_span(spans)
+    assert span.name == "GET"
+    assert span.attributes is not None
+    assert "http.route" not in span.attributes

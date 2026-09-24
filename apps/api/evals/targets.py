@@ -8,11 +8,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import httpx2
+from opentelemetry import propagate
 
-from app.llm import Finish, LLMClient, LLMError, Usage
+from app.llm import Finish, LLMClient, LLMError, PromptRef, Usage
 from app.runbooks import Hit, split_sections
 from app.schemas import AlertOut
-from app.triage import build_messages, citations
+from app.triage import PROMPT, build_messages, citations
 from evals.cases import Case
 
 
@@ -82,7 +83,16 @@ def context_sections(case: Case) -> list[Hit]:
     ]
 
 
-async def collect(llm: LLMClient, messages: list[dict[str, str]]) -> Answer:
+def traced(headers: dict[str, str]) -> dict[str, str]:
+    """`headers` plus the current trace context (traceparent): the api's
+    spans then join the eval's trace, under the case's span."""
+    propagate.inject(headers)
+    return headers
+
+
+async def collect(
+    llm: LLMClient, messages: list[dict[str, str]], prompt: PromptRef | None = None
+) -> Answer:
     """One streamed answer, timed like the service times it."""
     start = time.perf_counter()
     parts: list[str] = []
@@ -90,7 +100,7 @@ async def collect(llm: LLMClient, messages: list[dict[str, str]]) -> Answer:
     usage: Usage | None = None
     finish: str | None = None
     try:
-        async for item in llm.stream(messages):
+        async for item in llm.stream(messages, prompt):
             if isinstance(item, Usage):
                 usage = item
                 continue
@@ -127,7 +137,7 @@ class ModelTarget:
     async def ask(self, case: Case) -> Answer:
         sections = context_sections(case)
         answer = await collect(
-            self._llm, build_messages(case.question, context_alerts(case), sections)
+            self._llm, build_messages(case.question, context_alerts(case), sections), PROMPT
         )
         if not sections:
             return answer
@@ -191,7 +201,7 @@ class ApiTarget:
                     "title": runbook.title,
                     "body": runbook.body,
                 },
-                headers={"Cookie": seeder, "Origin": self._origin},
+                headers=traced({"Cookie": seeder, "Origin": self._origin}),
             )
             saved.raise_for_status()
         for alert in reversed(case.alerts):  # oldest first: the list is newest first
@@ -203,7 +213,7 @@ class ApiTarget:
                     "severity": alert.severity,
                     "message": alert.message,
                 },
-                headers={"Cookie": seeder, "Origin": self._origin},
+                headers=traced({"Cookie": seeder, "Origin": self._origin}),
             )
             response.raise_for_status()
         groups = case.asker_groups or tuple(f"team:{t}:viewer" for t in sorted(teams))
@@ -221,7 +231,7 @@ class ApiTarget:
             "POST",
             "/chat/stream",
             json={"message": question},
-            headers={"Cookie": cookie, "Origin": self._origin},
+            headers=traced({"Cookie": cookie, "Origin": self._origin}),
             timeout=180,
         ) as response:
             if response.status_code != 200:

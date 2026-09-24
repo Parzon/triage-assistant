@@ -175,6 +175,10 @@ The cost, through the service:
   key it was embedded with. Until the re-embed, vector search ignores the
   old sections, keyword search still finds them, and searches report
   `keyword_only (no_current_vectors)`.
+- **One answer's retrieval:** its trace ([AI observability](ai-observability.md))
+  has the retrieval span: mode, embedding error, the embedding key, and
+  each section by id with its keyword and semantic ranks. A section in a
+  good answer's trace, missing from a bad one's, is the usual cause.
 - **Metrics:**
   - `embedding_requests_total{kind, outcome}`;
   - `retrieval_duration_seconds{mode}`;

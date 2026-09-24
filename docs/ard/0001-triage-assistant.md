@@ -4,7 +4,7 @@
 **Authors:** the service's engineers
 **Reviewers:** architecture review board; security; platform
 **Date:** 2026-09-24
-**Related:** [PRD-0001](../prd/0001-triage-assistant.md), [ADR-0001 to ADR-0017](../adr/), [RFC-0001](../rfc/0001-answers-grounded-in-runbooks.md), [RFQ-0001](../rfq/0001-llm-inference.md)
+**Related:** [PRD-0001](../prd/0001-triage-assistant.md), [ADR-0001 to ADR-0018](../adr/), [RFC-0001](../rfc/0001-answers-grounded-in-runbooks.md), [RFQ-0001](../rfq/0001-llm-inference.md)
 
 ## 1. Context and scope
 
@@ -39,7 +39,7 @@ An internal service for on-call engineers.
 | Isolation | no cross-team visibility, for users or the model | tests at the api and at the database; isolation evals | ✅ 404 for invisible data; row-level security; evals 3/3 |
 | AI quality and safety | safety cases 100%; quality ≥ 80%; a leak rate < 1.5% (95% bound) | `make evals` with a calibrated judge (ADR-0016) | ✅ prompt v6: every case 10/10 but one 9/10 (not significant); 2 leaks in 600 (bound 1.05%) |
 | Recoverability | RPO ≤ 24 h; RTO < 1 h | daily dumps, restore rehearsals | ✅ restore in 6 s, healthy in 13 s (demo data); 📘 production-size data |
-| Security | no known attack left without a tested control | the security chapter's attack table | ✅ 18 attacks, each with a control; 17 with a test (a leaked backup is covered by hashing, untested) |
+| Security | no known attack left without a tested control | the security chapter's attack table | ✅ 20 attacks, each with a control; 18 with an automated test (a leaked backup is covered by hashing, untested; nginx stripping trace headers was checked by hand) |
 | Operability | every alert has a runbook; dashboards and rules are code | `make obs-check` in CI | ✅ |
 
 ## 3. Architecture
@@ -79,6 +79,7 @@ The guide's "system on one page" has the details
 | Users: id, email, name, groups | personal data | Postgres | no | forever today (F8 📘) |
 | Sessions | security-sensitive | Postgres, as a SHA-256 of the token only | no | 12 h absolute, 2 h idle |
 | Logs | operational | stdout | to the log platform | the platform's retention |
+| Traces | operational: ids, counts, durations, hashes; **no questions, prompts, answers or runbook text** (content capture is development-only) | Jaeger, in memory (the newest 20,000) | to the tracing platform, if configured | until Jaeger restarts; the platform's retention |
 
 - **Backups:** a daily `pg_dump` (the newest 14 are kept) and a daily
   disk snapshot (7 days), copied off the host. The recovery point is
@@ -120,8 +121,8 @@ The guide's "system on one page" has the details
   - everything else is on the internal network or loopback;
   - every container is non-root, with a read-only root filesystem, no
     capabilities, and CPU and memory limits.
-- **Threat model:** 18 attacks, each mapped to a control, and 17 to a
-  test ([security](../handbook/security.md#each-attack-and-what-stops-it)).
+- **Threat model:** 20 attacks, each mapped to a control, and 18 to an
+  automated test ([security](../handbook/security.md#each-attack-and-what-stops-it)).
   It is self-assessed: an external review is an open condition.
 
 ## 6. AI components
@@ -136,6 +137,7 @@ The guide's "system on one page" has the details
 | How quality is measured | 19 versioned eval cases (grounding, refusal, injection, isolation, runbooks). A judge from another model family, calibrated on 34 labelled answers (102 of 102 verdicts agree). A retrieval benchmark (recall@k, MRR). A gate before every prompt or model change, with a statistical regression test (ADR-0016) |
 | Prompt injection | alert and runbook text are untrusted. Injection cases are safety-gated (100%). v6 leaked its instructions 2 times in 600 (95% bound 1.05%); v5, 0 in 200; v4, 5 in 200. The prompt holds no secrets; the architecture bounds the impact |
 | Failure behaviour | provider errors, timeouts, rate limits and empty or cut-off answers each reach the user as a specific message. The rest of the service is unaffected. Each is measured (`llm_requests_total{outcome}`) |
+| Observability | a trace per answer (ADR-0018): which sections, prompt version and model, tokens, time to first chunk, finish reason; eval runs traced with their verdicts. Measured cost at 100% sampling: p95 2.8 → 5–6 ms at 200 req/s; production samples |
 | Cost control | per-user rate limits, an output limit, a stream time cap, a cost panel |
 
 ## 7. Operations
@@ -144,7 +146,8 @@ The guide's "system on one page" has the details
   requests of 155,659 during a deploy. **Rollback** is the previous tag,
   safe across expand/contract migrations (ADR-0011, ADR-0015).
 - **Monitoring:** RED metrics, event-loop lag, pools, and model outcomes
-  and cost. The alert rules have unit tests and a runbook section each.
+  and cost; a trace per request, with the GenAI conventions' attributes
+  (ADR-0018). The alert rules have unit tests and a runbook section each.
 - **Failure modes:**
   - 22 drills, each with what users saw
     ([failure modes](../handbook/failure-modes.md));
@@ -187,7 +190,7 @@ The guide's "system on one page" has the details
 
 ## 10. Decisions and deviations
 
-- **Decisions:** ADR-0001 to ADR-0017.
+- **Decisions:** ADR-0001 to ADR-0018.
 - **Deviations from common standards:**
   - **No Kubernetes.** Compose on a VM is enough at the measured
     capacity; the platform mapping is documented (infrastructure Q&A).

@@ -8,17 +8,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from redis.asyncio import Redis
 
 from app.config import Settings, get_settings
 from app.db import create_engine, create_sessionmaker, watch_db_pool
 from app.errors import install_error_handlers
 from app.llm import OpenAICompatibleClient
-from app.metrics import watch_event_loop_lag
+from app.metrics import app_info, watch_event_loop_lag
 from app.middleware import RequestContextMiddleware
 from app.oidc import OIDCClient, watch_identity_provider
 from app.ratelimit import RateLimiter
 from app.routes import alerts, auth, chat, health, runbooks
+from app.tracing import configure_tracing, shutdown_tracing, tracing_on
+from app.triage import PROMPT
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -27,7 +30,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
+        # Per worker, after gunicorn's fork (see configure_tracing).
+        owns_tracing = configure_tracing(settings)
+        app_info.labels(
+            settings.app_version,
+            f"{PROMPT.name}:{PROMPT.version}",
+            settings.llm_model,
+            settings.embedding_model or "",
+        ).set(1)
         app.state.engine = create_engine(settings)
+        if tracing_on():
+            # A span per statement, under the request's span: the SQL text
+            # with its placeholders, never the bound values. Not the SQL
+            # commenter (enable_commenter): it writes the trace id into each
+            # statement's text, so no two statements match and the prepared-
+            # statement caches of asyncpg and PgBouncer churn.
+            SQLAlchemyInstrumentor().instrument(
+                engine=app.state.engine.sync_engine, enable_commenter=False
+            )
         app.state.sessionmaker = create_sessionmaker(app.state.engine)
         app.state.redis = Redis.from_url(
             settings.redis_url.get_secret_value(),
@@ -61,6 +81,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.oidc.aclose()
             await app.state.redis.aclose()
             await app.state.engine.dispose()
+            if tracing_on():
+                SQLAlchemyInstrumentor().uninstrument()
+            if owns_tracing:
+                shutdown_tracing()
 
     app = FastAPI(
         title="triage-assistant",

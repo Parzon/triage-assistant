@@ -72,6 +72,8 @@ the route.
 | The assistant quoting another team's alerts | its context is read with the caller's visibility, the same query as the list | `queries.newest_alerts` | `test_the_assistant_only_sees_the_askers_alerts` |
 | The assistant quoting another team's runbooks | retrieval filters on the caller's teams explicitly, and row-level security enforces it again | `runbooks.search_runbooks` | `test_the_assistant_gets_the_askers_runbook_sections_and_no_one_elses`, `test_runbooks_and_their_sections_are_isolated_like_alerts`; eval `rag-isolation-break-glass` |
 | A credential in an alert or a runbook, repeated by the model or sent to the provider | redacted before the prompt | `app/redact.py` | `test_redact.py`; eval `injection-fake-conversation` |
+| Reading another team's questions or runbooks in the trace store | spans carry ids and counts, never content, unless `TRACE_CONTENT=true` (development) | `app/tracing.py`, the span sites | `test_no_question_prompt_answer_or_runbook_text_reaches_a_span` |
+| Choosing trace ids or forcing sampling from outside | nginx drops incoming `traceparent`, `tracestate` and `baggage` | `apps/web/nginx/snippets/proxy.conf` | — (checked by hand against the production nginx image, with an echo server) |
 | An instruction planted in a runbook (indirect prompt injection) | runbook text is untrusted data in the prompt; the model has no tools; only team admins write runbooks | `SYSTEM_PROMPT`, `routes/runbooks.py` | eval `rag-poisoned-runbook`; `test_only_a_team_admin_writes_that_teams_runbooks` |
 
 ### Roles
@@ -305,6 +307,14 @@ query.
   zero-retention agreement or a model in your own cloud account (Bedrock,
   Azure OpenAI, Vertex). Known credential formats are redacted (above).
   Personal data is not: redact it too if your alerts carry it.
+- **Telemetry is a copy of the data.** Traces, like logs, go to more places
+  than the database, under looser access: a trace store shows every
+  team's traces to whoever can open it. So spans hold ids, counts and
+  hashes, never questions, prompts, answers or runbook text. Content
+  capture (`TRACE_CONTENT=true`) is for development: measured, redaction
+  removed a password from a captured question, and left the business fact
+  ("payroll export failed for 1,200 employees") readable across teams
+  ([AI observability](ai-observability.md)).
 - **Cost as an attack.** Chat requests cost money. There is a per-client
   rate limit (10/min), `LLM_MAX_OUTPUT_TOKENS` (800), the total stream
   cap (120 s), and a cost-per-hour dashboard panel. 📘 Add a

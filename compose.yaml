@@ -19,6 +19,17 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The release this api runs (deploy.sh exports IMAGE_TAG): on traces
+      # (service.version) and in app_info.
+      APP_VERSION: ${IMAGE_TAG:-dev}
+      # Traces (ADR-0018): off unless an OTLP endpoint is set. make obs-up
+      # sets it to the jaeger service below.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
+      TRACE_EXPORT_TIMEOUT_S: ${TRACE_EXPORT_TIMEOUT_S:-2}
+      # Questions, prompts and answers on spans (redacted): development only.
+      TRACE_CONTENT: ${TRACE_CONTENT:-false}
       # The app role, through PgBouncer. Plain postgresql:// - the app picks
       # the async driver itself.
       DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
@@ -58,6 +69,33 @@ services:
       OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL-http://keycloak:8080/auth/realms/triage/.well-known/openid-configuration}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-triage-web}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      # The api's other settings (app/config.py; the handbook's settings
+      # reference): passed when .env or the shell sets them, and absent
+      # otherwise, so the code's default applies. A variable compose does not
+      # list never reaches the container, whatever .env says.
+      DOCS_ENABLED:
+      DB_POOL_SIZE:
+      DB_MAX_OVERFLOW:
+      DB_POOL_TIMEOUT_S:
+      DB_CONNECT_TIMEOUT_S:
+      RATELIMIT_TIMEOUT_S:
+      REDIS_MAX_CONNECTIONS:
+      RATELIMIT_WINDOW_S:
+      AUTH_RATE_LIMIT:
+      LLM_CONNECT_TIMEOUT_S:
+      LLM_READ_TIMEOUT_S:
+      LLM_MAX_RETRIES:
+      LLM_STREAM_TIMEOUT_S:
+      SSE_HEARTBEAT_S:
+      LLM_MAX_OUTPUT_TOKENS:
+      CHAT_CONTEXT_ALERTS:
+      EMBEDDING_TIMEOUT_S:
+      OIDC_SCOPES:
+      OIDC_TIMEOUT_S:
+      SESSION_MAX_AGE_S:
+      SESSION_IDLE_TIMEOUT_S:
+      SESSION_COOKIE_SECURE:
+      OTEL_SERVICE_NAME:
       OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
     # Deliberately no depends_on the identity provider either: the api starts
     # without it, and sessions already issued keep working while it is down.
@@ -336,6 +374,22 @@ services:
     # arrives as a file under /run/secrets instead.
     secrets:
       - alertmanager_webhook_token
+    restart: unless-stopped
+    logging: *logging
+
+  # Traces (ADR-0018). The api sends OTLP/HTTP to :4318 when
+  # OTEL_EXPORTER_OTLP_ENDPOINT is set; the UI is :16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: ["observability"]
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    volumes:
+      - ./infra/observability/jaeger:/etc/jaeger:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:13133/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     logging: *logging
 

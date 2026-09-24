@@ -7,7 +7,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.llm import LLMClient
+from opentelemetry import trace
+from opentelemetry.util.types import AttributeValue
+
+from app.llm import LLMClient, PromptRef
+from app.tracing import trace_id
+from app.triage import PROMPT
 from evals.cases import SAFETY_KINDS, Case
 from evals.checks import Check, score
 from evals.targets import Answer, Target, collect, context_alerts, context_sections
@@ -33,6 +38,10 @@ alerts where the criterion needs it. Then end with a line that is exactly
 VERDICT: YES or VERDICT: NO."""
 
 _VERDICT = re.compile(r"VERDICT:\W*(YES|NO)\b", re.IGNORECASE)
+# Versioned by its hash: on the judge's model spans.
+JUDGE = PromptRef.of("eval-judge", JUDGE_PROMPT)
+
+tracer = trace.get_tracer(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,7 +89,7 @@ class Judge:
                 f"<criterion>{case.expect.judge}</criterion>",
             },
         ]
-        judged = await collect(self._llm, messages)
+        judged = await collect(self._llm, messages, JUDGE)
         found = _VERDICT.findall(judged.text)
         passed = found[-1].upper() == "YES" if found else None
         if passed is None:
@@ -99,6 +108,9 @@ class Result:
     gated: bool
     # Why the judge decided as it did: read it when a judge check fails.
     judge_reason: str | None = None
+    # With tracing on: this run's trace, the service's spans included (api
+    # target), to see what the answer was given.
+    trace_id: str | None = None
 
     @property
     def checked(self) -> bool:
@@ -124,24 +136,53 @@ async def run(
         if target.name not in case.targets:
             continue
         for attempt in range(1, repeat + 1):
-            answer = await target.ask(case)
-            verdict = None
-            if judge is not None and case.expect.judge and mode == "quality" and not answer.error:
-                verdict = await judge.verdict(case, answer.text)
-            checks = score(
-                case,
-                answer.text,
-                alerts_in_context=answer.alerts_in_context,
-                judge_verdict=verdict.passed if verdict else None,
-                citations=answer.citations,
-                invalid_citations=answer.invalid_citations,
-                runbooks_in_context=answer.runbooks_in_context,
-            )
-            gated = mode == "quality" or case.plumbing
-            reason = verdict.reason if verdict else None
-            result = Result(case, attempt, answer, checks, gated, reason)
-            if not result.checked:  # never gated: nothing was checked
-                result = Result(case, attempt, answer, checks, gated=False)
+            attributes: dict[str, AttributeValue] = {
+                "app.eval.case": case.id,
+                "app.eval.kind": case.kind,
+                "app.eval.attempt": attempt,
+                "app.eval.target": target.name,
+                "app.eval.mode": mode,
+            }
+            # One trace per run of a case: the question, the service's spans
+            # (the api target propagates the context), the judge's call, and
+            # each check's result as an event on this span.
+            with tracer.start_as_current_span(f"eval {case.id}", attributes=attributes) as span:
+                answer = await target.ask(case)
+                verdict = None
+                if (
+                    judge is not None
+                    and case.expect.judge
+                    and mode == "quality"
+                    and not answer.error
+                ):
+                    verdict = await judge.verdict(case, answer.text)
+                checks = score(
+                    case,
+                    answer.text,
+                    alerts_in_context=answer.alerts_in_context,
+                    judge_verdict=verdict.passed if verdict else None,
+                    citations=answer.citations,
+                    invalid_citations=answer.invalid_citations,
+                    runbooks_in_context=answer.runbooks_in_context,
+                )
+                for check in checks:
+                    span.add_event(
+                        "gen_ai.evaluation.result",
+                        {
+                            "gen_ai.evaluation.name": check.name,
+                            "gen_ai.evaluation.score.label": "pass" if check.passed else "fail",
+                            "gen_ai.evaluation.explanation": check.detail
+                            or (
+                                verdict.reason if verdict and check.name.startswith("judge") else ""
+                            ),
+                        },
+                    )
+                gated = mode == "quality" or case.plumbing
+                reason = verdict.reason if verdict else None
+                result = Result(case, attempt, answer, checks, gated, reason, trace_id())
+                if not result.checked:  # never gated: nothing was checked
+                    result = Result(case, attempt, answer, checks, gated=False, trace_id=trace_id())
+                span.set_attribute("app.eval.passed", result.passed)
             results.append(result)
     return results
 
@@ -198,6 +239,7 @@ def summarize(
                         "judge_reason": r.judge_reason,
                         "citations": r.answer.citations,
                         "invalid_citations": list(r.answer.invalid_citations),
+                        "trace_id": r.trace_id,
                     }
                     for r in runs
                 ],
@@ -215,6 +257,9 @@ def summarize(
         "target": target,
         "mode": mode,
         "model": model,
+        # Which prompt the answers came from: a report from another version
+        # is a comparison between prompts, not a regression of one.
+        "prompt": {"name": PROMPT.name, "version": PROMPT.version, "sha256": PROMPT.sha256},
         "cases": cases,
         "kinds": kinds,
         "latency_s": {"p50": _pct(latency, 50), "p95": _pct(latency, 95)},

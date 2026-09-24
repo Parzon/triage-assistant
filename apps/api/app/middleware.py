@@ -1,4 +1,5 @@
-"""Request context: request id, access log, per-request response headers.
+"""Request context: request id, trace span, access log, per-request
+response headers.
 
 A pure ASGI middleware rather than @app.middleware("http"): the decorator
 form (BaseHTTPMiddleware) returns when the response *starts*, so for a
@@ -11,6 +12,8 @@ import re
 import time
 import uuid
 
+from opentelemetry import context, propagate, trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -20,6 +23,7 @@ from app.metrics import http_duration, http_in_progress, http_requests
 
 log = logging.getLogger(__name__)
 access_log = logging.getLogger("app.access")
+tracer = trace.get_tracer(__name__)
 
 # Accept an upstream id (nginx sets one per request) only if it looks like
 # one; anything else is replaced, so clients cannot inject log content.
@@ -48,6 +52,26 @@ class RequestContextMiddleware:
         start = time.perf_counter()
         status = 500
 
+        # The request's span, the parent of every span it causes. A caller's
+        # trace context (traceparent) is joined: the eval harness sends one,
+        # so a case's checks and the service's spans share a trace. nginx
+        # strips it from outside requests: the internet does not choose our
+        # trace ids or sampling. A pure ASGI span, not the ASGI
+        # instrumentation package: that one adds a span per body chunk
+        # unless told not to, and a streamed answer has hundreds.
+        carrier = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
+        span = tracer.start_span(
+            scope["method"],
+            context=propagate.extract(carrier),
+            kind=SpanKind.SERVER,
+            attributes={
+                "http.request.method": scope["method"],
+                "url.path": scope["path"],
+                "app.request_id": request_id,
+            },
+        )
+        span_token = context.attach(trace.set_span_in_context(span))
+
         async def send_wrapper(message: Message) -> None:
             nonlocal status
             if message["type"] == "http.response.start":
@@ -74,6 +98,7 @@ class RequestContextMiddleware:
             # runs that one in its outermost middleware, after this one has
             # exited, so the 500 would lose its request id.
             log.error("unhandled exception", exc_info=exc)
+            span.record_exception(exc)
             if started:
                 raise  # mid-stream: too late to send a different response
             await error_response(500, "internal_error", "internal error")(
@@ -89,6 +114,17 @@ class RequestContextMiddleware:
             # Who did what: the user id (not the email - logs are copied to
             # more places than the database, so they carry no personal data).
             principal = scope.get("state", {}).get("principal")
+            # Named after the route template once routing has happened
+            # ("POST /chat/stream"): raw paths would make every alert id a
+            # span name of its own.
+            if route != "__unmatched__":
+                span.update_name(f"{scope['method']} {route}")
+                span.set_attribute("http.route", route)
+            span.set_attribute("http.response.status_code", status)
+            if principal is not None:
+                span.set_attribute("user.id", str(principal.user_id))
+            if status >= 500:
+                span.set_status(Status(StatusCode.ERROR))
             access_log.info(
                 "request",
                 extra={
@@ -100,4 +136,6 @@ class RequestContextMiddleware:
                     "user_id": getattr(principal, "user_id", None),
                 },
             )
+            span.end()
+            context.detach(span_token)
             request_id_var.reset(token)

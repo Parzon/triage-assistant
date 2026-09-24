@@ -50,14 +50,17 @@ Run `make` to list every target. The ones you need most:
   `make load-compare` (same scenario through six tools), `make load-tool TOOL=locust`.
   Profile a live worker: `make py-spy-dump` / `py-spy-top` / `py-spy-record`.
 - Monitoring: `make obs-up` (Prometheus :9090, Grafana :3000, Alertmanager
-  :9093 on localhost); `make obs-check` validates configs, unit-tests the
+  :9093, Jaeger :16686 on localhost; it turns tracing on, `make obs-down`
+  off); `make obs-check` validates configs, unit-tests the
   alert rules (`infra/observability/prometheus/alerts.test.yml`) and checks
   the dashboard JSON matches its generator. Dashboard changes go in
   `infra/observability/grafana/build_dashboard.py`, then `make dashboard`.
   New metric labels must be bounded (route templates, never raw paths or
   user input).
 - Debugging: `make debug-up` (breakpoints from VS Code, `.vscode/launch.json`),
-  `make trace id=<request id>` (one request across nginx and the api),
+  `make trace id=<request id>` (one request across nginx and the api, then
+  its Jaeger link), `labs/ai-observability/` (a worse answer, diagnosed from its
+  trace; docs/handbook/ai-observability.md),
   `make db-activity` / `db-locks` / `db-top-queries`, `make netshoot`,
   `make tcpdump`, `make strace` (add `ENV=prod` for the production stack).
 - Releases and hosts: a `vX.Y.Z` tag on main publishes the api, web and edge images (amd64 + arm64) to GHCR
@@ -141,7 +144,11 @@ Access control, for every change that touches data:
   under an approximate vector index, a filter left to row-level security
   alone can return nothing (docs/handbook/rag.md).
 - Never log tokens, cookies, authorization codes or alert text; log the
-  user's id, not their email.
+  user's id, not their email. The same holds for trace spans (ADR-0018):
+  ids, counts and hashes, never questions, prompts, answers or document
+  text. Content goes on spans only behind `TRACE_CONTENT`.
+- Changing `SYSTEM_PROMPT` means bumping `PROMPT_VERSION` and recording its
+  hash (`tests/unit/test_tracing.py`), with the eval runs before and after.
 - Tests: `sign_in_as("team:<slug>:<role>")` for a signed-in client;
   cover 401, 404 for another team, 403 for a role too low, and
   `csrf_failed` for writes (`tests/integration/test_access.py`).

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.llm import Finish, LLMRateLimited, Usage
+from app.llm import Finish, LLMRateLimited, PromptRef, Usage
 from app.schemas import AlertOut, Severity
 from app.sse import HEARTBEAT, sse
 from app.triage import MAX_ALERT_CHARS, answer_events, build_messages
@@ -17,8 +17,12 @@ class FakeLLM:
     def __init__(self, items: list[object], *, delay_s: float = 0, error: Exception | None = None):
         self.items, self.delay_s, self.error = items, delay_s, error
         self.closed = False
+        self.prompt: PromptRef | None = None
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | Usage | Finish]:
+    async def stream(
+        self, messages: list[dict[str, str]], prompt: PromptRef | None = None
+    ) -> AsyncIterator[str | Usage | Finish]:
+        self.prompt = prompt
         try:
             for item in self.items:
                 await asyncio.sleep(self.delay_s)
@@ -71,6 +75,7 @@ async def test_happy_path_is_meta_tokens_done() -> None:
     assert names == ["meta", "token", "token", "done"]
     assert events[0][1] == {
         "request_id": "rid-1",
+        "trace_id": None,  # no request span around a unit test
         "model": "fake-1",
         "alerts_in_context": 2,
         "runbooks_in_context": 0,

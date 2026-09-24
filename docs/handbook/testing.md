@@ -7,8 +7,8 @@ layer caught in this repo. All numbers are from the current `main`.
 
 | Layer | Runs against | Count | Command | Proves |
 |---|---|---|---|---|
-| api unit | nothing (pure Python) | 166 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model, the eval harness's checks, gate and judge parsing, section splitting, citations, credential redaction |
-| api integration | a throwaway stack: real Postgres (with pgvector), PgBouncer, Valkey, Keycloak, mock LLM | 110 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what, through the api and at the database (row-level security); signing in through the real identity provider |
+| api unit | nothing (pure Python) | 181 | `make test-fast` (~4 s) | logic that needs no I/O: worker sizing, cursors, SSE framing, error classification, retry/timeout budgets, every ID-token check against a fake provider, the role model, the eval harness's checks, gate and judge parsing, section splitting, citations, credential redaction, the prompt's version hash, the request span |
+| api integration | a throwaway stack: real Postgres (with pgvector), PgBouncer, Valkey, Keycloak, mock LLM | 115 | `make test-api` (~40 s) | every endpoint's success and failure paths through the real drivers, pools and SQL; who sees what, through the api and at the database (row-level security); signing in through the real identity provider |
 | web unit/component | jsdom (Vitest + React Testing Library) | 52 | `make test-web` | UI states, the sign-in gate, role-dependent UI, the SSE parser, error handling in the API client |
 | end-to-end | the **production** stack in a real browser (Playwright, Chromium), over HTTPS through the TLS edge | 12 | `make prod-up && make e2e` | the parts only a real browser and the proxies show: signing in and out through Keycloak's page, two users seeing different alerts, a cross-site POST refused, incremental streaming through the edge and nginx, Stop cancelling the model call, CSP |
 | image | the production image | 2 checks | `make image-check` | non-root, no dev tools, every module imports on a read-only root filesystem, and the operator CLI runs without touching the server's metrics directory |
@@ -24,7 +24,7 @@ layer caught in this repo. All numbers are from the current `main`.
 `make test` runs the api and web suites exactly as CI does. `make check`
 also runs lint and types. Run it before every push.
 
-**Coverage:** the api has **93.0% line+branch coverage**, the eval harness
+**Coverage:** the api has **92.6% line+branch coverage**, the eval harness
 included (gate: 85%, branch coverage on). The web has **100% of lines and 96.2% of branches** (gates:
 85% lines, 80% branches). The api measures with
 `concurrency = ["greenlet", "thread"]`: without it, coverage loses track
@@ -126,6 +126,10 @@ Real incidents in this repo, and the layer that found them:
 | a one-team runbook search found 0 of 20 sections when teams were many (the vector index returned other teams' rows, then the filter removed them) | an assistant with no runbooks for that team, and no error | only a 50,000-row lab (`make rag-overfiltering-lab`); fixed by an explicit team filter |
 | after an embedding setting changed, "hybrid" search was keyword-only | slightly worse answers; every metric said hybrid | the RAG debugging lab; now reported as `keyword_only`, with an alert |
 | the model repeated a password planted in an alert: 2 runs in 110 under prompt v6, 2 in 200 under a stronger wording | one failure in a 10-run eval, easy to dismiss as noise | the 10-run eval, then 100- and 200-run measurements; fixed by redacting credentials in code (0 in 200) |
+| 22 api settings could not be set from `.env`: compose did not pass them to the container | a value in `.env` changed nothing, silently | building the observability lab (an incident needed one); now `make lint` checks every setting is listed |
+| an unsampled request handed out a trace id: at 10% sampling, 9 in 10 found nothing in Jaeger | "trace not found" | the observability lab's sampling exercise; now a unit test |
+| with the trace backend down, each worker's shutdown waited 10 s for the exporter | slower deploys and restarts, and no error | stopping Jaeger, then the api, and timing it |
+| a correction to a code comment was lost: reverting a lab experiment with `git checkout <file>` discarded it too, and the lab kept saying it had been made | a comment still claiming a cause the lab had disproved | reading the code while adding tracing |
 
 Each layer earns its place by finding a class of bug the layer below
 could not.
