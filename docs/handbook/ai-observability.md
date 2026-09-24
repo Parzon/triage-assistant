@@ -102,6 +102,10 @@ Only ids, counts, durations and hashes. The integration test
 `test_no_question_prompt_answer_or_runbook_text_reaches_a_span` plants
 markers in all of them, and fails if one reaches a span.
 
+A trace is for finding where one request's time went, for a sample of
+requests. The record of who did what, for every request, is the audit
+trail ([AI security](ai-security.md)).
+
 **Why:**
 - **A trace store ignores teams.** The service enforces team isolation
   twice (the queries, row-level security); Jaeger shows every trace to

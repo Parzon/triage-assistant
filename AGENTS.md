@@ -8,7 +8,9 @@ with Docker Compose. The AI-specific logic is `apps/api/app/triage.py`
 (prompt + streaming); the provider seam is `apps/api/app/llm.py`; runbook
 retrieval (hybrid search in Postgres with pgvector, ADR-0017) is
 `apps/api/app/runbooks.py`; credentials are redacted before any model call
-by `apps/api/app/redact.py`.
+by `apps/api/app/redact.py`; who wrote what the assistant reads, and what
+it was given for each question, is recorded by `apps/api/app/audit.py`
+(ADR-0019).
 Locally the model is `tools/mock-llm` (OpenAI-compatible, tunable
 latency and failure modes). Sign-in is OIDC against the organisation's
 identity provider (locally the `keycloak` service, demo users alice, bob,
@@ -44,6 +46,10 @@ Run `make` to list every target. The ones you need most:
   signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)
 - Sessions for scripts: `make session [groups="team:default:admin org:admin"]` prints a
   cookie; `make revoke email=...` ends a user's sessions (add `ENV=prod`)
+- Audit trail: `make audit a="--action runbook.saved --target 17"` (add
+  `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
+  owner (the api cannot). Hands-on: `labs/ai-security/` (redaction measured,
+  an investigation; docs/handbook/ai-security.md)
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
   `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
@@ -149,6 +155,17 @@ Access control, for every change that touches data:
   text. Content goes on spans only behind `TRACE_CONTENT`.
 - Changing `SYSTEM_PROMPT` means bumping `PROMPT_VERSION` and recording its
   hash (`tests/unit/test_tracing.py`), with the eval runs before and after.
+- A write that changes what the assistant reads (runbooks, alerts, a new
+  source) records an audit event with `await record(...)` (`app/audit.py`)
+  in the same transaction, before its commit. Never `db.add(AuditEvent(...))`:
+  row-level security refuses an insert that reads its row back. Audit
+  events hold ids and hashes, never text.
+- A regular expression run on text others write (alerts, runbooks,
+  questions) has every scan bounded, and a test that hostile input stays
+  linear (`test_hostile_text_is_redacted_in_linear_time`).
+- The model gets no tool without docs/handbook/ai-security.md's rules: it
+  acts with the asker's rights, takes the team from the session, asks the
+  person before changing anything, and is audited.
 - Tests: `sign_in_as("team:<slug>:<role>")` for a signed-in client;
   cover 401, 404 for another team, 403 for a role too low, and
   `csrf_failed` for writes (`tests/integration/test_access.py`).

@@ -96,6 +96,11 @@ service's `node_modules` volume is root-owned.
    `rate_limit_by_ip` is for routes used before sign-in.
 5. **Metrics** come for free: the middleware records every request by
    its route *template*, and the access log records the user's id.
+   **An audit event does not:** a write that changes what the assistant
+   reads (a runbook, an alert, a new source) calls `await record(db,
+   Actor.of(principal), "<thing>.<done>", ...)` before its commit, with
+   ids and hashes, never text (`app/audit.py`, ADR-0019). A new action
+   name is added to `audit.Action`.
 6. **Tests:** success, validation, not found, access (401 / 404 / 403 /
    `csrf_failed`), dependency down, rate limit. The checklist is in the
    testing chapter.

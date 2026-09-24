@@ -193,6 +193,12 @@ Each rule exists because breaking it cost something measurable here.
     text: the stores they land in ignore the access rules the service
     enforces. ([AI observability](docs/handbook/ai-observability.md),
     ADR-0018)
+22. **Whoever writes what the model reads is on record.** Every change to
+    runbooks and alerts, and every question with the versions it was
+    given, is an audit event in the change's own transaction, in a table
+    the api can add to but not rewrite. A new way to feed the model (a
+    sync, a tool) records its events too.
+    ([AI security](docs/handbook/ai-security.md), ADR-0019)
 
 ## The handbook
 
@@ -215,6 +221,7 @@ Each rule exists because breaking it cost something measurable here.
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
 | [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
+| [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools; with a hands-on [lab](labs/ai-security/README.md) |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
 | [Infrastructure Q&A](docs/handbook/infrastructure-qa.md) | an infrastructure team's questions: reproducibility, scale, limits, backups, Kubernetes |
@@ -634,6 +641,31 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
   `nvidia-smi` inside said "Failed to initialize NVML". `ollama ps`
   shows the processor. Recreate the container.
 
+### AI security
+The evidence is in [AI security](docs/handbook/ai-security.md) and
+[the lab](labs/ai-security/README.md).
+- **`\bpassword` never matches `DB_PASSWORD`**: `_` is a word character.
+  The first redactor caught 17 of 54 secrets in real log shapes. Match
+  names that *end* with the word, and leave `max_tokens` alone.
+- **Score patterns on a held-out set.** Written against a set, they score
+  well on it by construction: 54 of 54 on the tuning set, 21 of 24 on
+  shapes written first and not used to tune.
+- **An unbounded scan in a regular expression is a denial of service** on
+  text others write. Restarting at every "mysql", 100,000 characters took
+  6.4 s on the event loop. Bound every scan (`{0,200}`), and test with
+  hostile input that the time stays linear.
+- **`INSERT ... RETURNING` is checked against the SELECT policy.** A table
+  only org admins may read refuses inserts that ask for their id back:
+  insert with `Insert.inline()`. `implicit_returning=False` does not help:
+  SQLAlchemy then fetches the id itself, and `GENERATED ALWAYS` refuses
+  it.
+- **Append-only needs the grant revoked, not only a missing policy.**
+  Without an UPDATE policy, row-level security turns an update into "0
+  rows", silently. The revoked grant makes it an error, which gets noticed.
+- **Tests cannot clean an append-only table.** Find each test's rows by
+  action and target, or by a user made for the test; a runbook and an
+  alert can share an id.
+
 ### Runbook retrieval (RAG)
 Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
 [RAG](docs/handbook/rag.md) and [the lab](labs/rag-debugging/README.md).
@@ -869,6 +901,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - evals gate prompt and model changes (0016)
 - runbook retrieval in Postgres, hybrid, under row-level security (0017)
 - traces with OpenTelemetry and the GenAI conventions, no content by default (0018)
+- an append-only audit trail of what the assistant reads, and who wrote it (0019)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -893,6 +926,12 @@ oversight:
 - **An OpenTelemetry Collector:** tail sampling (keep every failing
   trace), and durable trace storage with access control
   ([AI observability](docs/handbook/ai-observability.md)).
+- **Audit history the database owner cannot rewrite:** a copy of each
+  event outside the database, or a hash chain
+  ([AI security](docs/handbook/ai-security.md)).
+- **Tools for the assistant**, and the rules they need first: the user's
+  own rights, confirmation for changes, allow-listed egress, every call
+  audited ([AI security](docs/handbook/ai-security.md)).
 - **Better runbook answers:** a reranker, the neighbouring sections in
   context, shadow mode before a team turns runbooks on, a sync from the
   wiki, and retrieval measured on real questions
