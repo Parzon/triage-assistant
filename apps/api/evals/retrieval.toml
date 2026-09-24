@@ -1,0 +1,140 @@
+# Retrieval benchmark: questions about the runbooks in evals/runbooks/, each
+# labelled with the section(s) that answer it, as heading paths ("Title >
+# Section"). `python -m evals --target retrieval` saves the runbooks through
+# the api, asks every question in every search mode, and reports
+# recall@k and MRR per mode.
+#
+# The asker sees every team of the corpus: other teams' runbooks are
+# distractors here. Isolation between teams is tested elsewhere (the
+# isolation eval cases, and tests/integration/test_runbooks.py).
+#
+# notes says what a question probes:
+# - "paraphrase": shares no telling word with its answer; only meaning finds it.
+# - "identifier": names something exact (a command, a flag, a column).
+# - "negative": no runbook answers it; relevant is empty. For these, the
+#   report shows the best match's cosine distance: can a cutoff separate
+#   them from real matches?
+
+[[question]]
+id = "disk-free-space"
+query = "db-1's disk is at 96%, how do I get space back?"
+relevant = ["Disk full on a database host > Free space"]
+
+[[question]]
+id = "disk-what-uses-space"
+query = "which directories are eating the storage on the postgres box?"
+relevant = ["Disk full on a database host > Check what is using space"]
+notes = "paraphrase: 'storage', 'box' instead of 'disk', 'host'"
+
+[[question]]
+id = "disk-grow-volume"
+query = "cleanup did not help, the disk is still over 90%"
+relevant = ["Disk full on a database host > Expand the volume"]
+
+[[question]]
+id = "pool-cl-waiting"
+query = "SHOW POOLS says cl_waiting keeps growing"
+relevant = ["PgBouncer pool saturated > Confirm the saturation"]
+notes = "identifier: cl_waiting"
+
+[[question]]
+id = "pool-slow-but-idle"
+query = "requests are slow and the database is idle: what is holding them up?"
+relevant = ["PgBouncer pool saturated", "PgBouncer pool saturated > Confirm the saturation"]
+notes = "paraphrase: the symptom, not the component"
+
+[[question]]
+id = "pool-kill-backend"
+query = "how do I kill a session stuck idle in transaction?"
+relevant = ["PgBouncer pool saturated > Relieve the pressure", "PgBouncer pool saturated > Find the slow queries"]
+
+[[question]]
+id = "oom-signal-9"
+query = "gunicorn workers keep dying with signal 9"
+relevant = ["Memory pressure and OOM kills > Recognise an OOM kill"]
+notes = "identifier: signal 9"
+
+[[question]]
+id = "memory-leak"
+query = "RAM usage climbs all day and never comes back down"
+relevant = ["Memory pressure and OOM kills > Find the leak"]
+notes = "paraphrase: 'RAM', 'climbs' for 'memory', 'growth'"
+
+[[question]]
+id = "dns-no-such-host"
+query = "calls between services fail with 'no such host'"
+relevant = ["Name resolution failures", "Name resolution failures > Check the resolver"]
+notes = "identifier: the error message"
+
+[[question]]
+id = "dns-stopped-container"
+query = "why can't the api find the db container by name after it was stopped?"
+relevant = ["Name resolution failures > Common causes"]
+
+[[question]]
+id = "rollback-how"
+query = "how do I go back to the previous release?"
+relevant = ["Roll back a deploy > Roll back"]
+notes = "paraphrase: 'go back', 'release' for 'roll back', 'deploy'"
+
+[[question]]
+id = "rollback-when"
+query = "errors jumped right after we shipped, should we revert?"
+relevant = ["Roll back a deploy > Decide", "Roll back a deploy", "Checkout error rate high > Recent changes"]
+notes = "paraphrase: 'shipped', 'revert'"
+
+[[question]]
+id = "checkout-provider"
+query = "checkout is failing, is the payment provider down?"
+relevant = ["Checkout error rate high > Check the payment provider"]
+
+[[question]]
+id = "checkout-fallback-flag"
+query = "how do I turn on checkout.fallback_provider?"
+relevant = ["Checkout error rate high > Check the payment provider"]
+notes = "identifier: the flag's name"
+
+[[question]]
+id = "cert-invalid"
+query = "browsers say the certificate for pay.example.com is invalid"
+relevant = ["Certificate renewal", "Certificate renewal > Check expiry"]
+
+[[question]]
+id = "cert-acme"
+query = "renewal failed because the ACME challenge cannot reach us"
+relevant = ["Certificate renewal > Renew"]
+notes = "identifier: ACME"
+
+[[question]]
+id = "refunds-pending"
+query = "customers' refunds have been pending for two hours"
+relevant = ["Refunds stuck in pending", "Refunds stuck in pending > Check the queue"]
+
+[[question]]
+id = "refunds-paid-twice"
+query = "if I restart the refund worker, could a customer be paid back twice?"
+relevant = ["Refunds stuck in pending > Restart the worker"]
+notes = "paraphrase: 'paid back twice' for idempotency"
+
+[[question]]
+id = "dead-letter"
+query = "the queue drains and then stops at the same message every time"
+relevant = ["Refunds stuck in pending > Poison messages"]
+
+[[question]]
+id = "neg-wifi"
+query = "how do I reset the office wifi password?"
+relevant = []
+notes = "negative"
+
+[[question]]
+id = "neg-vacation"
+query = "how many vacation days do I have left this year?"
+relevant = []
+notes = "negative"
+
+[[question]]
+id = "neg-kafka"
+query = "how do I rebalance a Kafka consumer group?"
+relevant = []
+notes = "negative: a plausible operations question no runbook covers"

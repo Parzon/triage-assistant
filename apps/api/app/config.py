@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     ratelimit_window_s: int = Field(60, ge=1)
     alerts_rate_limit: int = Field(60, ge=1)
     chat_rate_limit: int = Field(10, ge=1)
+    # Runbook writes and searches, each: a write embeds every section, a
+    # search the question - model calls, so a cost.
+    runbooks_rate_limit: int = Field(60, ge=1)
 
     # --- LLM: any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, LiteLLM,
     # vLLM, Ollama, tools/mock-llm). The SDK's own defaults are a 600s read

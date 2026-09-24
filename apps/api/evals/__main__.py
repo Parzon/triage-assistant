@@ -29,6 +29,7 @@ from app.config import Settings, get_settings
 from app.llm import OpenAICompatibleClient
 from evals.calibration import calibrate, calibration_markdown, load_labelled
 from evals.cases import load_cases
+from evals.retrieval import load_corpus, load_questions, retrieval_markdown, run_retrieval
 from evals.run import Judge, gate, markdown, regressions, run, summarize
 from evals.targets import ApiTarget, ModelTarget, Target
 
@@ -37,7 +38,12 @@ HERE = Path(__file__).parent
 
 def parse(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m evals", description=__doc__.split("\n\n")[0])
-    p.add_argument("--target", choices=["model", "api"], default="model")
+    p.add_argument(
+        "--target",
+        choices=["model", "api", "retrieval"],
+        default="model",
+        help="retrieval: the runbook search benchmark (evals/retrieval.toml), through the api",
+    )
     p.add_argument("--mode", choices=["plumbing", "quality"], default="quality")
     p.add_argument("--cases", type=Path, default=HERE / "cases")
     p.add_argument("--kind", action="append", default=[], help="only these kinds (repeatable)")
@@ -62,6 +68,16 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
         help="grade the labelled answers in --calibration only: does the judge agree?",
     )
     p.add_argument("--calibration", type=Path, default=HERE / "judge_calibration.toml")
+    p.add_argument("--corpus", type=Path, default=HERE / "runbooks", help="retrieval: runbooks")
+    p.add_argument("--questions", type=Path, default=HERE / "retrieval.toml")
+    p.add_argument("--k", type=int, default=5, help="retrieval: results per question")
+    p.add_argument(
+        "--search-mode",
+        action="append",
+        choices=["hybrid", "keyword", "semantic"],
+        help="retrieval: modes to measure (repeatable; default all three)",
+    )
+    p.add_argument("--min-recall", type=float, help="retrieval: fail when hybrid recall@k is lower")
     p.add_argument("--llm-base-url", help="default: LLM_BASE_URL")
     p.add_argument("--llm-model", help="default: LLM_MODEL")
     p.add_argument("--llm-api-key", help="default: LLM_API_KEY (prefer the environment)")
@@ -137,10 +153,52 @@ async def calibrate_main(args: argparse.Namespace, base: Settings) -> int:
     return 0 if all(row["agrees"] for row in summary["answers"]) else 1
 
 
+async def retrieval_main(args: argparse.Namespace, base: Settings) -> int:
+    corpus = load_corpus(args.corpus)
+    questions = load_questions(args.questions, corpus)
+    modes = args.search_mode or ["hybrid", "keyword", "semantic"]
+
+    async def sessions(groups: tuple[str, ...], email: str) -> str:
+        return await mint_session(email, list(groups), hours=1.0)
+
+    async with httpx2.AsyncClient(base_url=args.api_url, timeout=30) as http:
+        summary = await run_retrieval(
+            http,
+            sessions,
+            args.origin or base.public_url,
+            secrets.token_hex(3),
+            corpus,
+            questions,
+            modes=modes,
+            k=args.k,
+        )
+    summary = {"embedding_model": base.embedding_model, **summary}
+    reasons = []
+    hybrid = summary["modes"].get("hybrid")
+    if (
+        args.min_recall is not None
+        and hybrid
+        and (hybrid[f"recall@{args.k}"] or 0) < args.min_recall
+    ):
+        reasons.append(f"hybrid recall@{args.k} {hybrid[f'recall@{args.k}']} < {args.min_recall}")
+    report = args.report or HERE / "reports" / (
+        f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-retrieval.json"
+    )
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps({**summary, "gate": reasons}, indent=2, ensure_ascii=False))
+    print(f"embedding model: {base.embedding_model}\n")
+    print(retrieval_markdown(summary))
+    print("\n" + ("**FAIL:** " + "; ".join(reasons) if reasons else "**PASS**"))
+    print(f"\nreport: {report}")
+    return 1 if reasons else 0
+
+
 async def main_async(args: argparse.Namespace) -> int:
     base = get_settings()
     if args.calibrate_judge:
         return await calibrate_main(args, base)
+    if args.target == "retrieval":
+        return await retrieval_main(args, base)
     cases = [c for c in load_cases(args.cases) if selected(args, c.kind, c.id)]
     settings = model_settings(args, base)
     llm = OpenAICompatibleClient(settings)

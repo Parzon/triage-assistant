@@ -61,10 +61,11 @@ class Section:
 
 def split_sections(title: str, markdown: str, max_words: int = MAX_SECTION_WORDS) -> list[Section]:
     """One section per heading, carrying the path of headings above it.
-    Text before the first heading belongs to the title. A heading inside a
-    fenced code block is not a heading: a shell comment ("# restart it")
-    would otherwise cut a procedure in two. Sections over max_words are
-    split at blank lines, then at word boundaries."""
+    Text before the first heading belongs to the title, and a top-level
+    heading repeating the title (a pasted document's own) is skipped. A
+    heading inside a fenced code block is not a heading: a shell comment
+    ("# restart it") would otherwise cut a procedure in two. Sections over
+    max_words are split at blank lines, then at word boundaries."""
     sections: list[Section] = []
     path: list[tuple[int, str]] = []
     lines: list[str] = []
@@ -81,6 +82,8 @@ def split_sections(title: str, markdown: str, max_words: int = MAX_SECTION_WORDS
         if _FENCE.match(line):
             in_fence = not in_fence
         match = None if in_fence else _HEADING.match(line)
+        if match and len(match[1]) == 1 and match[2].strip().casefold() == title.casefold():
+            continue
         if match:
             flush()
             level = len(match[1])
@@ -249,8 +252,10 @@ class Hit:
 @dataclass(frozen=True)
 class Retrieval:
     hits: list[Hit]
-    mode: Literal["hybrid", "keyword_only"]
-    # Why the question was not embedded (keyword_only), else None.
+    # As asked (hybrid, keyword, semantic), or keyword_only: a hybrid search
+    # whose question could not be embedded.
+    mode: Literal["hybrid", "keyword", "semantic", "keyword_only"]
+    # Why the question was not embedded, else None.
     embedding_error: str | None = None
 
 
@@ -294,28 +299,47 @@ semantic AS (
 )"""  # noqa: S608
 _RESULT = """
 SELECT c.id, c.runbook_id, t.slug AS team, r.title, c.heading, c.content, r.updated_at,
-       {score} AS score, kw.rank_no AS keyword_rank, {semantic}
+       {score} AS score, {keyword} AS keyword_rank, {semantic}
 FROM ({ids}) ids
 JOIN runbook_chunks c ON c.id = ids.id
 JOIN runbooks r ON r.id = c.runbook_id
 JOIN teams t ON t.id = c.team_id
-LEFT JOIN keyword kw ON kw.id = c.id
-{join}
+{joins}
 ORDER BY score DESC, c.id
 LIMIT :k
 """
-_HYBRID_SQL = f"WITH {_KEYWORD}, {_SEMANTIC}" + _RESULT.format(  # noqa: S608
-    score="coalesce(1.0 / (:rrf_k + kw.rank_no), 0) + coalesce(1.0 / (:rrf_k + se.rank_no), 0)",
-    semantic="se.rank_no AS semantic_rank, se.distance",
-    ids="SELECT id FROM keyword UNION SELECT id FROM semantic",
-    join="LEFT JOIN semantic se ON se.id = c.id",
-)
-_KEYWORD_SQL = f"WITH {_KEYWORD}" + _RESULT.format(  # noqa: S608
-    score="coalesce(1.0 / (:rrf_k + kw.rank_no), 0)",
-    semantic="NULL::bigint AS semantic_rank, NULL::float8 AS distance",
-    ids="SELECT id FROM keyword",
-    join="",
-)
+_KW_SCORE = "coalesce(1.0 / (:rrf_k + kw.rank_no), 0)"
+_SE_SCORE = "coalesce(1.0 / (:rrf_k + se.rank_no), 0)"
+_NO_SEMANTIC = "NULL::bigint AS semantic_rank, NULL::float8 AS distance"
+_SQL = {
+    "hybrid": f"WITH {_KEYWORD}, {_SEMANTIC}"  # noqa: S608
+    + _RESULT.format(
+        score=f"{_KW_SCORE} + {_SE_SCORE}",
+        keyword="kw.rank_no",
+        semantic="se.rank_no AS semantic_rank, se.distance",
+        ids="SELECT id FROM keyword UNION SELECT id FROM semantic",
+        joins="LEFT JOIN keyword kw ON kw.id = c.id LEFT JOIN semantic se ON se.id = c.id",
+    ),
+    "keyword": f"WITH {_KEYWORD}"  # noqa: S608
+    + _RESULT.format(
+        score=_KW_SCORE,
+        keyword="kw.rank_no",
+        semantic=_NO_SEMANTIC,
+        ids="SELECT id FROM keyword",
+        joins="LEFT JOIN keyword kw ON kw.id = c.id",
+    ),
+    "semantic": f"WITH {_SEMANTIC}"  # noqa: S608
+    + _RESULT.format(
+        score=_SE_SCORE,
+        keyword="NULL::bigint",
+        semantic="se.rank_no AS semantic_rank, se.distance",
+        ids="SELECT id FROM semantic",
+        joins="LEFT JOIN semantic se ON se.id = c.id",
+    ),
+}
+# What a search is asked to do. keyword and semantic run one retriever
+# alone: for debugging and for measuring each retriever's recall.
+Mode = Literal["hybrid", "keyword", "semantic"]
 
 
 async def search_runbooks(
@@ -326,6 +350,7 @@ async def search_runbooks(
     team_ids: Sequence[int] | None,
     *,
     k: int,
+    mode: Mode = "hybrid",
 ) -> Retrieval:
     """The k sections most relevant to `query` among `team_ids`' runbooks
     (None: every team).
@@ -337,7 +362,9 @@ async def search_runbooks(
     start = time.perf_counter()
     embedding: list[float] | None = None
     error: str | None = None
-    if embedder.embedding_model is None:
+    if mode == "keyword":
+        pass
+    elif embedder.embedding_model is None:
         error = "embeddings_off"
     else:
         try:
@@ -348,9 +375,13 @@ async def search_runbooks(
         except LLMError as exc:
             error = exc.code
             log.warning("question not embedded: keyword search only", extra={"code": exc.code})
-    mode: Literal["hybrid", "keyword_only"] = (
-        "hybrid" if embedding is not None else ("keyword_only")
-    )
+    # hybrid degrades to keyword_only; semantic alone has nothing to fall back on.
+    done: Literal["hybrid", "keyword", "semantic", "keyword_only"] = mode
+    if embedding is None and mode == "hybrid":
+        done = "keyword_only"
+    if embedding is None and mode == "semantic":
+        retrieval_duration.labels(mode).observe(time.perf_counter() - start)
+        return Retrieval(hits=[], mode="semantic", embedding_error=error)
 
     # Filters (team, embedding model) are applied after an approximate
     # index scan, so a scan can end with fewer than `candidates` rows left.
@@ -365,9 +396,9 @@ async def search_runbooks(
     }
     if embedding is not None:
         params |= {"embedding": to_text(embedding), "model": embedder.embedding_model}
-    sql = _HYBRID_SQL if embedding is not None else _KEYWORD_SQL
+    sql = _SQL["keyword" if done == "keyword_only" else done]
     rows = (await db.execute(text(sql), params)).all()
-    retrieval_duration.labels(mode).observe(time.perf_counter() - start)
+    retrieval_duration.labels(done).observe(time.perf_counter() - start)
     return Retrieval(
         hits=[
             Hit(
@@ -385,6 +416,6 @@ async def search_runbooks(
             )
             for row in rows
         ],
-        mode=mode,
+        mode=done,
         embedding_error=error,
     )

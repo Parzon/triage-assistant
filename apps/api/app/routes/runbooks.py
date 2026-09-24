@@ -38,7 +38,7 @@ def embedder(request: Request) -> Embedder:
 @router.post(
     "",
     response_model=RunbookSaved,
-    dependencies=[Depends(rate_limit("runbooks", "alerts_rate_limit"))],
+    dependencies=[Depends(rate_limit("runbooks", "runbooks_rate_limit"))],
 )
 async def save(
     payload: RunbookIn, request: Request, principal: CurrentUser, db: DbSession
@@ -97,7 +97,7 @@ async def get_runbook(runbook_id: int, principal: CurrentUser, db: DbSession) ->
 @router.delete(
     "/{runbook_id}",
     status_code=204,
-    dependencies=[Depends(rate_limit("runbooks", "alerts_rate_limit"))],
+    dependencies=[Depends(rate_limit("runbooks", "runbooks_rate_limit"))],
 )
 async def delete_runbook(runbook_id: int, principal: CurrentUser, db: DbSession) -> Response:
     """Team admins only. Its sections go with it, so no answer can cite a
@@ -108,7 +108,12 @@ async def delete_runbook(runbook_id: int, principal: CurrentUser, db: DbSession)
     return Response(status_code=204)
 
 
-@router.post("/search", response_model=SearchOut)
+@router.post(
+    "/search",
+    response_model=SearchOut,
+    # Each search embeds the question: a model call, so a cost.
+    dependencies=[Depends(rate_limit("runbooks_search", "runbooks_rate_limit"))],
+)
 async def search(
     payload: SearchIn, request: Request, principal: CurrentUser, db: DbSession
 ) -> SearchOut:
@@ -130,6 +135,7 @@ async def search(
         payload.query,
         team_ids,
         k=payload.k,
+        mode=payload.mode,
     )
     return SearchOut(
         mode=retrieval.mode,

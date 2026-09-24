@@ -167,7 +167,7 @@ describe('Chat', () => {
       invalid_citations: [],
     })
     stream.close()
-    const sources = await screen.findByRole('region', { name: 'Sources' })
+    const sources = await screen.findByRole('region', { name: 'Referenced runbook sections' })
     expect(sources).toHaveTextContent('R1 Disk full > Free space')
     expect(screen.getByRole('status')).toHaveTextContent('2 runbook sections')
   })
@@ -184,7 +184,7 @@ describe('Chat', () => {
     })
     stream.close()
     expect(await screen.findByText(/searched by keyword only/)).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Sources' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Referenced runbook sections' })).not.toBeInTheDocument()
   })
 
   it('shows an empty answer from the model as an error, not as done', async () => {

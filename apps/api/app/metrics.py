@@ -86,6 +86,11 @@ embedding_requests = Counter(
     "question asked) and outcome: ok or an llm_* error code.",
     ["kind", "outcome"],
 )
+prompt_redactions = Counter(
+    "prompt_redactions_total",
+    "Credentials removed from alert and runbook text before it reached the model. "
+    "Each one is a secret a system printed, or someone planted: fix it at the source.",
+)
 chat_citations = Counter(
     "chat_citations_total",
     "Runbook sections cited by answers: valid (in the answer's context) or invalid (a "

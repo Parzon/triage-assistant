@@ -56,6 +56,14 @@ def test_sections_carry_the_path_of_headings_above_them() -> None:
     ]  # and the empty section is dropped
 
 
+def test_a_top_level_heading_repeating_the_title_is_skipped() -> None:
+    body = "# Disk full\nIntro.\n\n## Free space\nDelete logs."
+    assert [s.heading for s in split_sections("Disk full", body)] == [
+        "Disk full",
+        "Disk full > Free space",
+    ]
+
+
 def test_a_comment_in_a_code_block_is_not_a_heading() -> None:
     check = split_sections("Disk full", RUNBOOK)[1]
     assert "# this shell comment is not a heading" in check.content
@@ -82,7 +90,9 @@ def test_sections_are_numbered_for_citation_in_the_prompt() -> None:
     system = build_messages("what now?", [], [hit(1, "Disk full > Free space")])[0]["content"]
     assert "[R1] Disk full > Free space (team payments, updated 2026-09-20)\nstep 1" in system
     none = build_messages("what now?", [])[0]["content"]
-    assert none.endswith("Runbook sections of the asker's teams, most relevant first:\n(none)")
+    assert none.endswith(
+        "Runbook sections of the asker's teams, most relevant first:\n(no runbook sections)"
+    )
 
 
 def test_citations_are_the_sections_cited_and_the_numbers_invented() -> None:
@@ -92,6 +102,12 @@ def test_citations_are_the_sections_cited_and_the_numbers_invented() -> None:
     assert cited[0] == {"ref": "R2", "runbook_id": 12, "title": "Disk full", "heading": "A > Two"}
     assert invalid == ["R9"]
     assert citations("no citation at all", sections) == ([], [])
+    # A model does not always keep the brackets it was asked for.
+    for styled in ("(R2)", "[**R2**]", "【R2】", "the rule in R2 says"):
+        assert [c["ref"] for c in citations(f"Delete WAL archives {styled}.", sections)[0]] == [
+            "R2"
+        ], styled
+    assert citations("R2D2 and XR1 are not citations", sections) == ([], [])
 
 
 async def test_the_answer_reports_its_context_and_citations() -> None:

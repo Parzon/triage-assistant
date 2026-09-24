@@ -121,6 +121,8 @@ class SearchIn(BaseModel):
     # One team's runbooks; default: every team the caller can see.
     team: str | None = Field(None, pattern=TEAM_SLUG)
     k: int = Field(5, ge=1, le=20)
+    # One retriever alone (keyword, semantic), or both fused (hybrid).
+    mode: Literal["hybrid", "keyword", "semantic"] = "hybrid"
 
 
 class SearchHit(BaseModel):
@@ -137,7 +139,8 @@ class SearchHit(BaseModel):
 
 
 class SearchOut(BaseModel):
-    # hybrid, or keyword_only when the question could not be embedded.
-    mode: Literal["hybrid", "keyword_only"]
+    # As asked, or keyword_only: a hybrid search whose question could not be
+    # embedded.
+    mode: Literal["hybrid", "keyword", "semantic", "keyword_only"]
     embedding_error: str | None
     hits: list[SearchHit]

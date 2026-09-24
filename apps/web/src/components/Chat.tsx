@@ -143,8 +143,10 @@ export function Chat() {
         <p className="muted">The answer was cut short: it reached the length limit.</p>
       )}
       {meta?.citations && meta.citations.length > 0 && (
-        <section aria-label="Sources" className="sources">
-          <h3>Sources</h3>
+        // "Referenced", not "Sources": an answer may name a section to say it
+        // does not apply.
+        <section aria-label="Referenced runbook sections" className="sources">
+          <h3>Referenced runbook sections</h3>
           <ul>
             {meta.citations.map((c) => (
               <li key={c.ref}>

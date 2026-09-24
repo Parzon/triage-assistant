@@ -43,6 +43,7 @@ services:
       # Per client per minute. Load tests raise them (make load).
       ALERTS_RATE_LIMIT: ${ALERTS_RATE_LIMIT:-60}
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10}
+      RUNBOOKS_RATE_LIMIT: ${RUNBOOKS_RATE_LIMIT:-60}
       # Shared with Alertmanager (secret below); empty = webhook disabled.
       ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:-}
       # Sign-in (OIDC, ADR-0013). Defaults: the bundled Keycloak below, which

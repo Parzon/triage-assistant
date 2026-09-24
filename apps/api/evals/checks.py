@@ -8,6 +8,7 @@ call and varies itself, so it is used in quality mode only.
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.triage import SYSTEM_PROMPT
@@ -74,6 +75,9 @@ def score(
     *,
     alerts_in_context: int | None = None,
     judge_verdict: bool | None = None,
+    citations: Sequence[str] | None = None,
+    invalid_citations: Sequence[str] = (),
+    runbooks_in_context: int | None = None,
 ) -> list[Check]:
     """Every check the case asks for, in a stable order."""
     text = _norm(answer)
@@ -109,6 +113,36 @@ def score(
                 f"alerts in context == {expect.alerts_in_context}",
                 alerts_in_context == expect.alerts_in_context,
                 f"got {alerts_in_context}",
+            )
+        )
+    if citations is not None:
+        headings = [_norm(h) for h in citations]
+        for needle in expect.cites:
+            checks.append(
+                Check(
+                    f"cites a section matching {needle!r}",
+                    any(_norm(needle) in h for h in headings),
+                    f"cited {list(citations)}",
+                )
+            )
+        if expect.cites_nothing:
+            checks.append(Check("cites no runbook", not citations, f"cited {list(citations)}"))
+    if case.runbooks:
+        # Always, when runbooks were in play: an invented citation sends the
+        # reader to a section that does not exist.
+        checks.append(
+            Check(
+                "cites only sections it was given",
+                not invalid_citations,
+                f"invented {list(invalid_citations)}" if invalid_citations else "",
+            )
+        )
+    if expect.runbooks_in_context is not None and runbooks_in_context is not None:
+        checks.append(
+            Check(
+                f"runbook sections in context == {expect.runbooks_in_context}",
+                runbooks_in_context == expect.runbooks_in_context,
+                f"got {runbooks_in_context}",
             )
         )
     if expect.judge is not None and judge_verdict is not None:
