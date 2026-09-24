@@ -39,12 +39,13 @@ keeps everything else:
 
 | | Measured |
 |---|---|
-| Tests | 166 unit, 110 integration (real database, identity provider, pooler), 52 UI, 12 browser end-to-end; 93% line and branch coverage |
+| Tests | 181 unit, 115 integration (real database, identity provider, pooler), 52 UI, 12 browser end-to-end; 93% line and branch coverage |
 | Capacity | ~1,000 signed-in reads per second, or 500 simultaneous streamed answers, on 2 CPUs |
 | Deploys | 155,659 requests during a deploy, 0 failed; rollbacks work across database changes |
 | Failure drills | 22 injected faults (database frozen, identity provider down, model provider erroring...), each with what users saw and how it recovered |
 | AI quality | 19 test cases against a real model: grounding, refusals, prompt injection, isolation between teams, answers from runbooks. The 15 answer cases pass 10 runs in 10, but one at 9 in 10, within chance. Through the whole service, 18 pass 3 runs in 3; one runbook answer left out a step once. The model printed its instructions 2 times in 600 attempts, under the 1.5% limit set for it |
 | Runbook search | the section that answers is in the top 5 for all 19 test questions, and first for 15; about 10 ms a search |
+| Explaining an answer | every answer can be traced: what it was given (which runbook sections, which prompt version, which model), and where its time went, with no question or answer text kept. Four silent misconfigurations were each found from their traces alone |
 | Releases | 5 releases, for Intel and ARM servers, each smoke-tested after publishing |
 
 📘 **Not yet:**
@@ -90,5 +91,5 @@ read that alert anyway.
 | How was a feature proposed, and what did it cost? | [RFC-0001](rfc/0001-answers-grounded-in-runbooks.md): answers that cite the team's runbooks (accepted and built, with the costs measured) |
 | What should come next? | "Not done yet" in [the guide](../gold_standard_development_guide.md#not-done-yet) |
 | What do we ask model vendors for? | [RFQ-0001](rfq/0001-llm-inference.md) |
-| Why was each technical decision made? | [the ADRs](adr/) (17) |
+| Why was each technical decision made? | [the ADRs](adr/) (18) |
 | How is it built, run and repaired? | [the guide](../gold_standard_development_guide.md) and the [handbook](handbook/) |

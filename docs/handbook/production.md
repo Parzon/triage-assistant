@@ -22,7 +22,9 @@ with a way to prove it is done. Then:
 - sign-in against a real OIDC provider (Keycloak);
 - evals against a real model (local);
 - runbook search against a local embedding model, on a hand-written
-  corpus.
+  corpus;
+- a trace per answer (retrieval, the model, their attributes), with its
+  cost measured under load.
 
 📘 **Not yet:**
 - a cloud VM with a real domain;
@@ -125,7 +127,14 @@ For two to four weeks:
   built yet: it is the first product addition this stage asks for
   ([the PRD](../prd/0001-triage-assistant.md)).
 - **Add real failures to the evals.** Every answer the pilot reports as
-  wrong becomes an eval case, anonymised.
+  wrong becomes an eval case, anonymised. Its trace says what it was
+  given: note the trace id with the report (the chat's `meta` event has
+  it).
+- **Trace a share of requests,** not all: `OTEL_TRACES_SAMPLER=
+  parentbased_traceidratio`, `OTEL_TRACES_SAMPLER_ARG=0.1` kept p95 within
+  0.2 ms of no tracing; every trace doubled it. Send them to the
+  platform's OpenTelemetry Collector, and restrict who can read the trace
+  store: it ignores teams ([AI observability](ai-observability.md)).
 - **Import the pilot team's runbooks, and label 30 of their real
   questions** for the retrieval benchmark: the one cost RFC-0001 asked
   for that is not measured yet.
@@ -257,6 +266,7 @@ run before the stage that depends on it.
 | Browsers other than Chromium | Playwright runs Chromium only | add the `firefox` and `webkit` projects to `tests/e2e/playwright.config.ts` |
 | More than one host; managed Postgres; RDS Proxy; Kubernetes | pooling, failover and load balancer behaviour change | re-run `make drills` and `make load` on the new platform (environments chapter) |
 | Real user traffic | capacity numbers come from synthetic load on one box | the pilot's metrics |
+| Tracing at production volume, through a collector | tracing's cost was measured at 200 req/s on one process, straight to Jaeger | the pilot, sampled, through the platform's collector: watch p99 and `event_loop_lag_seconds` |
 | Restoring production-sized data | restores were rehearsed on small dumps (seconds) | a restore of a full-size dump, timed |
 | Months of operation | table bloat and vacuum, log and disk growth, a major Postgres upgrade (17 → 18) | a staging host kept running; an upgrade rehearsal |
 | A third-party security review or penetration test | the attack table (security chapter) is self-assessed | before handling sensitive data |

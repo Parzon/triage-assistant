@@ -22,7 +22,7 @@ Routes and clients do the reading and writing, then call it.
 | what the model is shown | `build_messages` (`app/triage.py`) | the chat route, the evals |
 | whether an answer passes | `score` (`evals/checks.py`) | the eval runner |
 
-These need no database, network or mocks to test. That is why 166 unit
+These need no database, network or mocks to test. That is why 181 unit
 tests run in 3 seconds, and why the access model is tested case by case
 (`tests/unit/test_access.py`).
 

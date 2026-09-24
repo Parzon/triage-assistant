@@ -31,6 +31,8 @@ are the source of truth, and Dependabot moves them weekly:
 | Sign-in | OIDC; PyJWT + cryptography for ID tokens | 2.14 / 50 | `app/oidc.py` |
 | Identity provider (dev, demo) | Keycloak | 26.7.4 | `infra/keycloak/` |
 | Metrics (app) | prometheus-client | 0.26 | `app/metrics.py` |
+| Traces (app) | OpenTelemetry SDK, OTLP/HTTP exporter, SQLAlchemy instrumentation | 1.44 / 0.65b0 | `app/tracing.py` |
+| Traces (store, UI) | Jaeger | 2.21 | `compose.yaml` (`jaeger`), `infra/observability/jaeger/` |
 | Language (web) | TypeScript on Node | 6.0 / 24 | `apps/web/` |
 | UI | React, TanStack Query | 19.3 / 5.103 | `apps/web/src/` |
 | Build, dev server | Vite | 8.3 | `apps/web/vite.config.ts` |
@@ -189,6 +191,24 @@ multiprocess mode: each worker writes files, and the scrape sums them.
   merely *exists*, even empty. The operator CLI removes it before
   importing the app.
 
+**OpenTelemetry** records a trace per request: a span per step, named by
+the GenAI semantic conventions for the model's steps (retrieval,
+embeddings, chat). Off unless an OTLP endpoint is set (ADR-0018,
+[AI observability](ai-observability.md)). Alternatives: a vendor's agent
+(Datadog, New Relic), which the same spans can feed through OTLP; an
+LLM-specific tracer (Langfuse, Phoenix), built to store prompts and
+answers, which this service keeps out of telemetry.
+- **Trap:** a span made current inside an async generator stays current in
+  the caller between chunks. The model's span is started and ended, never
+  made current.
+- **Trap:** the SQLAlchemy instrumentor is a process-wide singleton, and
+  its SQL commenter makes every statement unique (prepared-statement
+  caches churn). Instrument per engine, commenter off.
+- **Trap:** `OTEL_EXPORTER_OTLP_TIMEOUT` is milliseconds in the spec and
+  seconds in the Python exporter.
+- The contrib instrumentations are still versioned as betas (`0.65b0`),
+  pinned to the SDK's release.
+
 **Tooling:**
 - **ruff** lints and formats (it replaces flake8, isort and black).
 - **mypy** in strict mode type-checks `app/` and `evals/`.
@@ -301,6 +321,17 @@ it works with macOS's.
 **Prometheus, Alertmanager and Grafana** monitor the stack, fed by:
 - the exporters for Postgres, PgBouncer, Valkey and the host;
 - **cAdvisor**, for container metrics.
+
+**Jaeger 2** (built on the OpenTelemetry Collector) stores and shows the
+traces: OTLP in, the newest 20,000 traces in memory, a UI that compares
+two traces side by side. Alternatives: Grafana Tempo (TraceQL, object
+storage; AGPL), a vendor's tracing. The api speaks OTLP, so changing
+means changing an address.
+- **Trap:** Jaeger 2 dropped the old search API: `/api/services` and
+  `/api/traces?service=` answer 404. Use `/api/v3/traces`.
+- **Trap:** its default config keeps up to 100,000 traces in memory.
+  `infra/observability/jaeger/config.yaml` caps it at 20,000, and
+  `make obs-check` validates it (`jaeger validate`).
 
 Dashboards, alert rules and the rules' tests are code
 ([observability](observability.md)).

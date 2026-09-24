@@ -212,14 +212,24 @@ The contract any platform needs is already here:
 - the model provider's API: answers, and embeddings for runbook search;
 - the identity provider (its metadata, signing keys, and the code
   exchange);
-- Let's Encrypt, for certificates.
+- Let's Encrypt, for certificates;
+- optionally, an OpenTelemetry endpoint for traces
+  (`OTEL_EXPORTER_OTLP_ENDPOINT`, OTLP/HTTP): the platform's collector, or
+  the Jaeger in the `observability` profile.
 
-All over HTTPS. Nothing else at runtime.
+All over HTTPS, except OTLP to a collector on the same network. Nothing
+else at runtime.
 
-**What does it log?**
-- JSON lines on stdout, with one request id across nginx and the api.
-- Never tokens, cookies, question text, alert text or runbook text.
+**What does it log, and trace?**
+- JSON lines on stdout, with one request id across nginx and the api,
+  and the trace id when the request is traced.
+- Never tokens, cookies, question text, alert text or runbook text:
+  neither in logs, nor on spans.
 - Users appear by id, not email.
+- **Traces cost the tail:** at 200 req/s, keeping every trace took p95
+  from 2.8 to 5–6 ms and CPU up 15–19%; keeping 10% cost 0.2 ms at p95.
+  Sample in production. A trace backend that is down costs nothing but
+  the lost spans ([AI observability](ai-observability.md)).
 
 **What will page us?**
 - The alert rules in `infra/observability/prometheus/alerts.yml`, each

@@ -254,8 +254,12 @@ from history is not enough on a public repo; it's already copied.
 
 ## Settings reference
 
-Every variable the stack reads. Where a variable is set: `.env` (from
-`.env.example`), or the service's `environment:` in the compose files.
+Every variable the stack reads. Set it in `.env` (from `.env.example`) or
+the shell. A container only sees the variables its service's
+`environment:` lists: every api setting below is listed in `compose.yaml`,
+most with no value, so an unset one keeps the code's default. `make lint`
+fails when a new setting is not listed (`scripts/check_settings.py`):
+until it did, 22 of them could not be set from `.env`.
 
 **The api** (`apps/api/app/config.py`: typed, validated at startup):
 
@@ -301,6 +305,12 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `SESSION_MAX_AGE_S` / `SESSION_IDLE_TIMEOUT_S` | 43200 / 7200 | a session ends 12 h after sign-in or 2 h after its last request; role changes apply at the next sign-in |
 | `SESSION_COOKIE_SECURE` | `true` | `false` only for plain-HTTP dev (the dev overlay sets it): the cookie is then `triage_session`, not `__Host-triage_session` |
 | `JUDGE_API_KEY` | empty (`LLM_API_KEY`) | development only, for `make evals`: the key of a judge at another provider than the model under test |
+| `APP_VERSION` | `dev` | the release: compose passes `IMAGE_TAG` (the dev overlay, `dev`). On traces and in `app_info` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty (tracing off) | where traces go, over OTLP/HTTP; `make obs-up` sets Jaeger's (AI observability chapter) |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0 | `parentbased_traceidratio` with 0.1 keeps 10% of traces |
+| `OTEL_SERVICE_NAME` | `triage-assistant-api` | |
+| `TRACE_CONTENT` | false | questions, prompts and answers on spans, redacted: development only |
+| `TRACE_EXPORT_TIMEOUT_S` | 2 | one export's budget; bounds a worker's shutdown when the trace backend is down. Seconds, unlike the spec's `OTEL_EXPORTER_OTLP_TIMEOUT` |
 
 **gunicorn** (`apps/api/gunicorn.conf.py`, production image only):
 
@@ -324,7 +334,7 @@ Every variable the stack reads. Where a variable is set: `.env` (from
 | `MONITOR_DB_USER`, `MONITOR_DB_PASSWORD` | postgres-exporter (`pg_monitor`: statistics only) |
 | `COMPOSE_PROFILES` | `mock` runs the mock LLM, `edge` the TLS edge, `idp` the bundled Keycloak; add `observability` for the monitoring stack |
 | `KEYCLOAK_ADMIN_PASSWORD`, `DEMO_USER_PASSWORD` | the bundled Keycloak's administrator and its demo users (it refuses to start without both) |
-| `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT` | monitoring (bound to 127.0.0.1) |
+| `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT`, `JAEGER_PORT` | monitoring (bound to 127.0.0.1). On a host that also runs the production stack's monitoring, give the dev one other ports on the command line: `.env` is read by both stacks |
 | `BIND_ADDR`, `API_PORT`, `WEB_PORT` | dev ports (127.0.0.1 by default) |
 | `HTTP_BIND`, `HTTP_PORT` | nginx over plain HTTP: loopback `8088` behind the TLS edge; `0.0.0.0`/`80` behind a cloud load balancer (edge profile off) |
 | `SITE_ADDRESS` | the TLS edge's name: a domain gets a Let's Encrypt certificate automatically; `localhost` uses Caddy's local CA |

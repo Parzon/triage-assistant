@@ -28,6 +28,7 @@ needs a real cloud account). Where the two differ, trust ✅.
 | taking it to production | [going to production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) |
 | changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
 | changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` → [the RAG debugging lab](labs/rag-debugging/README.md) |
+| an answer got worse or slower | [AI observability](docs/handbook/ai-observability.md): read its trace → [the AI observability lab](labs/ai-observability/README.md) |
 | deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
 
 ## The system on one page
@@ -49,7 +50,8 @@ browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; 
                    │         its embeddings for runbook search                                    │
                    │                                                                              │
                    │ Prometheus ◄─ scrapes api, exporters, cAdvisor ─► Grafana; Alertmanager ─►   │
-                   │   api (alerts appear in the app)            [dashboards on 127.0.0.1 only]   │
+                   │   api (alerts appear in the app); Jaeger ◄─ api's traces (OTLP)              │
+                   │                                             [dashboards on 127.0.0.1 only]   │
                    └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,7 +73,8 @@ Four request paths matter:
   the asker's teams only) and loads the asker's visible alerts →
   redacts credentials → streams the model's answer as Server-Sent
   Events, with a heartbeat every 15 s, then the sections it cited. Stop
-  in the browser cancels the model call.
+  in the browser cancels the model call. With tracing on, each step is a
+  span of one trace.
 - **Alert webhook:** Alertmanager → api (bearer token) → a row in
   Postgres, in the team its `team` label names.
 
@@ -185,6 +188,11 @@ Each rule exists because breaking it cost something measurable here.
     A prompt rule is a probability: "never repeat credentials" failed
     about 1 run in 100. Redacting them before any model call cannot fail
     for the formats it knows. ([security](docs/handbook/security.md))
+21. **Telemetry is a copy of the data.** Logs and traces carry ids,
+    counts and durations, never questions, prompts, answers or document
+    text: the stores they land in ignore the access rules the service
+    enforces. ([AI observability](docs/handbook/ai-observability.md),
+    ADR-0018)
 
 ## The handbook
 
@@ -198,6 +206,7 @@ Each rule exists because breaking it cost something measurable here.
 | [Testing](docs/handbook/testing.md) | writing tests; what each layer proves; which layer caught which real bug |
 | [Debugging](docs/handbook/debugging.md) | something is wrong: symptom → tool, how each tool works, real output |
 | [Observability](docs/handbook/observability.md) | adding metrics, panels or alerts; reading the dashboard |
+| [AI observability](docs/handbook/ai-observability.md) | an answer got worse or slower: tracing it through retrieval and the model; what spans may hold; what tracing costs; with a hands-on [lab](labs/ai-observability/README.md) |
 | [Performance](docs/handbook/performance.md) | something is slow; capacity numbers; how the bottlenecks were found |
 | [Load testing](docs/handbook/load-testing.md) | choosing a tool; open vs closed models; reference scripts for six tools |
 | [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
@@ -218,6 +227,16 @@ each; the linked chapter has the evidence. Add to this list whenever
 something bites.
 
 ### Docker and Compose
+- **A variable in `.env` reaches a container only if its service lists
+  it** under `environment:`. 22 of the api's settings could not be set from
+  `.env`, silently. List each with no value (`DB_POOL_SIZE:`): passed when
+  set, absent otherwise, so the code's default applies. `make lint` checks
+  every setting is listed.
+- **`.env` is shared by every compose project in the directory.** On a host
+  running both the dev and the production stack, `IMAGE_TAG` (recorded by
+  deploys) made the dev api report the release's version, and both stacks'
+  monitoring wanted the same ports. Give the dev one other ports on the
+  command line (`GRAFANA_PORT=3001 ... make obs-up`).
 - **The Dev Containers CLI attaches to an already running compose
   container without building its features**: a user added by a feature
   didn't exist ("unable to find user dev"). Put the user in the image
@@ -655,6 +674,41 @@ Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
   `(R1)`, `【R1】`, `[**R1**]` and a bare R1. A strict pattern failed a
   quarter of the correct answers.
 
+### Tracing (OpenTelemetry)
+Measured building the traces; the evidence is in
+[AI observability](docs/handbook/ai-observability.md).
+- **Never make a span current inside an async generator.** It stays
+  current in the caller's code between chunks, and detaching fails when
+  the generator is closed from another context. Start it, end it in
+  `finally`.
+- **Instrumenting a generator by wrapping it in another breaks
+  cancellation.** Closing the outer generator left the inner one, and the
+  provider's stream, open until garbage collection.
+- **The ASGI instrumentation package adds a span per response chunk**
+  unless `exclude_spans=["send", "receive"]`: hundreds per streamed answer.
+- **`SQLAlchemyInstrumentor` is a process-wide singleton:** a second
+  `instrument()` is ignored. Instrument in startup, uninstrument in
+  shutdown.
+- **The SQL commenter writes the trace id into every statement,** so no
+  two match, and prepared-statement caches (asyncpg, PgBouncer) churn.
+  Leave it off.
+- **`OTEL_EXPORTER_OTLP_TIMEOUT`: the spec says milliseconds, the Python
+  exporter reads seconds.** Pass the timeout in code.
+- **With the trace backend down, each worker's shutdown waits out the
+  export timeout** (10 s by default): 10.25 s against 0.42 s. With 2 s,
+  1.27 s. Requests are not affected.
+- **An unsampled request still has a valid trace id.** Hand one out only
+  when `trace_flags.sampled`; at 10%, nine in ten led nowhere.
+- **Full sampling costs the tail:** at 200 req/s, p99 went from 7–13 ms to
+  39–44 ms; at 10%, p95 stayed within 0.2 ms of off.
+- **Redaction removes secrets, not facts.** A captured question kept "payroll
+  export failed for 1,200 employees" for every trace reader. Content stays
+  off spans in production.
+- **prometheus_client's multiprocess mode has no exemplars**, so metrics
+  cannot link to traces under gunicorn. Log lines carry the trace id.
+- **Jaeger 2 dropped the old search API** (`/api/services`,
+  `/api/traces?service=` answer 404). Use `/api/v3/traces`.
+
 ### Observability
 - **A ratio with a numerator that doesn't exist yet is "no data", not 0**:
   `or vector(0)`. ([observability](docs/handbook/observability.md))
@@ -740,6 +794,10 @@ Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
   hardware**: a missing index, invisible until 2 M rows.
 
 ### Shell, Git, host
+- **`git checkout <file>` to undo an experiment discards every other
+  uncommitted change in that file.** A documented correction was lost this
+  way, and its lab kept saying it had been made. Commit first, or revert
+  the experiment with a reverse patch (`git diff > x.patch; git apply -R`).
 - **In a YAML folded block (`>-`), a more-indented line keeps its
   newline**: cloud-init's secret loop, continued on an indented line,
   became two shell commands (`for ... in <newline>`). Parse the YAML and
@@ -810,6 +868,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - rollbacks roll back code, not the schema (0015)
 - evals gate prompt and model changes (0016)
 - runbook retrieval in Postgres, hybrid, under row-level security (0017)
+- traces with OpenTelemetry and the GenAI conventions, no content by default (0018)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -830,8 +889,10 @@ oversight:
 - **Quality evals on a schedule** against the production model, and
   real answers sampled into the eval set. Today quality evals run on
   demand, against a local model.
-- **Tracing (OpenTelemetry) and central logs**, once there is more than
-  one service or host.
+- **Central logs** (Loki, CloudWatch), once there is more than one host.
+- **An OpenTelemetry Collector:** tail sampling (keep every failing
+  trace), and durable trace storage with access control
+  ([AI observability](docs/handbook/ai-observability.md)).
 - **Better runbook answers:** a reranker, the neighbouring sections in
   context, shadow mode before a team turns runbooks on, a sync from the
   wiki, and retrieval measured on real questions
