@@ -59,7 +59,7 @@ apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the mode
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, profiler and load-tool images
 tests/               end-to-end (Playwright) and load tests
-labs/                hands-on exercises: rag-debugging, ai-observability, ai-security
+labs/                hands-on exercises: rag-debugging, ai-observability, ai-security, ai-cost
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
 scripts/             deploy, backup/restore, failure drills, fresh-host test
 compose.yaml         services shared by every environment

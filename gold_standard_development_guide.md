@@ -221,6 +221,7 @@ Each rule exists because breaking it cost something measurable here.
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
 | [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
+| [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped; with a hands-on [lab](labs/ai-cost/README.md) |
 | [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools; with a hands-on [lab](labs/ai-security/README.md) |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
