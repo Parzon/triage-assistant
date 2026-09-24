@@ -33,13 +33,13 @@ keeps everything else:
 | Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([infrastructure Q&A](handbook/infrastructure-qa.md)) |
 | Other engineering teams | a working starting point, and a documented way to adopt it ([using this template](handbook/using-this-template.md)) |
 
-## Where it stands (v0.7.0, September 2026)
+## Where it stands (v0.8.0, September 2026)
 
 ✅ **Built and measured**, on one production-shaped host:
 
 | | Measured |
 |---|---|
-| Tests | 249 unit, 129 integration (real database, identity provider, pooler), 53 UI, 12 browser end-to-end; 92% line and branch coverage |
+| Tests | 259 unit, 131 integration (real database, identity provider, pooler), 54 UI, 12 browser end-to-end; 92% line and branch coverage |
 | Capacity | ~1,000 signed-in reads per second, or 500 simultaneous streamed answers, on 2 CPUs |
 | Deploys | 238,281 requests during the last upgrade, which added a table, 0 failed; rolling back and forward again, 0 failed of 243,594 and 244,223 |
 | Failure drills | 22 injected faults (database frozen, identity provider down, model provider erroring...), each with what users saw and how it recovered |
@@ -47,8 +47,9 @@ keeps everything else:
 | Runbook search | the section that answers is in the top 5 for all 19 test questions, and first for 15; about 10 ms a search |
 | Explaining an answer | every answer can be traced: what it was given (which runbook sections, which prompt version, which model), and where its time went, with no question or answer text kept. Four silent misconfigurations were each found from their traces alone |
 | Accountability | every question is on record with what it was given, and every runbook and alert with who wrote each version, in an audit trail the service cannot rewrite (checked by trying, as its own database account). A bad runbook step leads to its author, and to everyone who was given it, in two queries |
+| Agent or pipeline | an agent that chooses what to read passed 14 of the 19 cases, against 18 for the fixed pipeline; told to read what the pipeline reads, 17, at 3.8× the tokens. The pipeline stays the default; the agent's read-only tools are also offered to other AI tools (MCP) |
 | Keeping secrets from the model | credentials are removed before anything reaches a model: 21 of 24 credential shapes it was not written against, up from 11, and no ordinary text changed |
-| Releases | 7 releases, for Intel and ARM servers, each smoke-tested after publishing, and deployed on a production-shaped host with no failed request |
+| Releases | 8 releases, for Intel and ARM servers, each smoke-tested after publishing, and deployed on a production-shaped host with no failed request |
 
 📘 **Not yet:**
 - a cloud server with a real domain;
@@ -69,7 +70,8 @@ browser ─HTTPS─► edge (TLS) ─► web server ─► api ─► database (
 
 The model sees the question, the asker's recent alerts, and the
 sections of the asker's runbooks that match the question, with known
-credential formats removed. Nothing else. It has no tools: it cannot run commands or change data. The worst
+credential formats removed. Nothing else. It cannot run commands or change data: by default it has no tools,
+and in agent mode (off by default) two that only read, with the asker's rights. The worst
 a malicious alert can do is distort one answer, to someone who could
 read that alert anyway.
 
@@ -77,7 +79,7 @@ read that alert anyway.
 
 | Risk | Limited by |
 |---|---|
-| The AI answers wrongly or is manipulated by alert text | measured with test cases before each change, calibrated automatic grading, safety cases that must pass 100%; no tools; answers shown as text only |
+| The AI answers wrongly or is manipulated by alert text | measured with test cases before each change, calibrated automatic grading, safety cases that must pass 100%; no tool that changes anything; answers shown as text only |
 | One team sees another's data | access checks in the service, plus database-level row security, both tested |
 | Alert and runbook text sent to an external AI provider | provider terms with zero data retention ([RFQ-0001](rfq/0001-llm-inference.md)), or a model in the company's own cloud; known credential formats removed before anything is sent |
 | A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own; every version's author, and every answer's sources, are on record |

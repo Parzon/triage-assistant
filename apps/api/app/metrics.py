@@ -105,6 +105,19 @@ chat_citations = Counter(
     "number the model invented). Invalid ones are a hallucination signal.",
     ["validity"],
 )
+agent_steps = Histogram(
+    "agent_steps",
+    "Rounds of tool calls in one agent answer (CHAT_MODE=agent): 0 = answered without "
+    "a tool; AGENT_MAX_STEPS = stopped by the limit and made to answer.",
+    buckets=(0, 1, 2, 3, 4, 5, 6, 8, 10),
+)
+tool_calls = Counter(
+    "tool_calls_total",
+    "Tool calls (app/tools.py) by tool (unknown: a name a model invented), outcome "
+    "(ok, or error: unknown tool, invalid arguments, a timeout) and via: api (the "
+    "agent) or mcp (an MCP client).",
+    ["tool", "outcome", "via"],
+)
 retrieval_duration = Histogram(
     "retrieval_duration_seconds",
     "Runbook retrieval for one question, the query's embedding included, by mode: hybrid, "

@@ -90,14 +90,39 @@ class ChatCompletionRequest(BaseModel):
 def reply_for(messages: list[dict[str, Any]]) -> str:
     question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
     system = next((m["content"] for m in messages if m["role"] == "system"), "")
-    alerts = sum(1 for line in system.splitlines() if line.startswith("- ["))
+    # An agent's context arrives as tool results rather than in the system prompt.
+    results = "\n".join(str(m.get("content") or "") for m in messages if m["role"] == "tool")
+    alerts = sum(1 for line in f"{system}\n{results}".splitlines() if line.startswith("- ["))
+    cite = " Follow the runbook [R1]." if "\n[R1] " in f"\n{results}" else ""
     return (
         f"Triage summary for: {question}\n\n"
         f"I can see {alerts} recent alert(s) in context.\n"
         "- Start with the newest critical alert — it is usually closest to the cause.\n"
-        "- Check what was deployed in the last hour.\n\n"
+        f"- Check what was deployed in the last hour.{cite}\n\n"
         "(mock-llm reply: café ☕ ünïcödé check)"
     )
+
+
+def tool_calls_for(body: ChatCompletionRequest) -> list[dict[str, Any]]:
+    """Offered tools and none called yet: call every one (search_runbooks with
+    the question), like a model that looks before it answers. Then answer."""
+    tools = (body.model_extra or {}).get("tools") or []
+    if not tools or any(m["role"] == "tool" for m in body.messages):
+        return []
+    question = next((m["content"] for m in reversed(body.messages) if m["role"] == "user"), "")
+    arguments = {"search_runbooks": {"query": str(question)[:300]}}
+    return [
+        {
+            "index": i,
+            "id": f"call_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {
+                "name": tool["function"]["name"],
+                "arguments": json.dumps(arguments.get(tool["function"]["name"], {})),
+            },
+        }
+        for i, tool in enumerate(tools)
+    ]
 
 
 def tokenize(text: str) -> list[str]:
@@ -142,9 +167,10 @@ async def chat_completions(
         return openai_error(500, "the server had an error", "server_error")
     requests_total.labels("200").inc()
 
-    reply = tokenize(reply_for(body.messages))
+    calls = tool_calls_for(body)
+    reply = [] if calls else tokenize(reply_for(body.messages))
     tokens = reply[: body.max_tokens]
-    finish_reason = "length" if len(tokens) < len(reply) else "stop"
+    finish_reason = "tool_calls" if calls else "length" if len(tokens) < len(reply) else "stop"
     if failing and behaviour.fail_mode == "empty_answer":
         tokens, finish_reason = [], "length"
     prompt_tokens = sum(len(str(m.get("content", "")).split()) for m in body.messages)
@@ -170,7 +196,9 @@ async def chat_completions(
         )
     include_usage = bool((body.stream_options or {}).get("include_usage"))
     return StreamingResponse(
-        stream(completion_id, body.model, tokens, usage, include_usage, failing, finish_reason),
+        stream(
+            completion_id, body.model, tokens, usage, include_usage, failing, finish_reason, calls
+        ),
         media_type="text/event-stream",
     )
 
@@ -183,6 +211,7 @@ async def stream(
     include_usage: bool,
     failing: bool,
     finish_reason: str = "stop",
+    calls: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     stats.streams_started += 1
     stats.active_streams += 1
@@ -199,6 +228,9 @@ async def stream(
             choice = {"index": 0, "delta": {"content": token}, "finish_reason": None}
             yield chunk(completion_id, model, choices=[choice])
             await asyncio.sleep(1 / behaviour.tokens_per_s)
+        if calls:  # whole, in one chunk, as Ollama sends them
+            choice = {"index": 0, "delta": {"tool_calls": calls}, "finish_reason": None}
+            yield chunk(completion_id, model, choices=[choice])
         last = {"index": 0, "delta": {}, "finish_reason": finish_reason}
         yield chunk(completion_id, model, choices=[last])
         if include_usage:

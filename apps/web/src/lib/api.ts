@@ -54,12 +54,15 @@ export type ChatEvent =
       type: 'meta'
       requestId: string
       model: string
-      alertsInContext: number
+      /** null: not known in advance - the agent chooses what to read (CHAT_MODE=agent). */
+      alertsInContext: number | null
       runbooksInContext: number
       /** "hybrid", "keyword_only" (the question could not be embedded), or null (runbooks off). */
       retrieval: string | null
     }
   | { type: 'token'; delta: string }
+  /** A tool the agent called: what it read, as counts (CHAT_MODE=agent). */
+  | { type: 'tool'; name: string; ok: boolean; summary: string }
   | {
       type: 'done'
       ttftMs: number | null
@@ -102,6 +105,9 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
         break
       case 'token':
         yield { type: 'token', delta: payload.delta }
+        break
+      case 'tool':
+        yield { type: 'tool', name: payload.name, ok: payload.ok, summary: payload.summary }
         break
       case 'done':
         finished = true

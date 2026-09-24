@@ -34,13 +34,14 @@ with whose rights, and who confirms.
 |---|---|---|
 | What the model reads | alert and runbook text written by others: instructions, or credentials | ✅ only what the asker may read (the same queries as the UI, row-level security underneath); ✅ credentials redacted before any model call; ✅ the prompt marks alerts and runbooks as untrusted, and evals measure how often that holds |
 | The model | a wrong answer, or one steered by planted text | ✅ evals, including injection and isolation cases, gate every prompt or model change ([AI engineering](ai-engineering.md)) |
-| Its decision | acting on the steered answer | ✅ **the model has no tools**: nothing it writes is executed. A person reads the answer |
+| Its decision | acting on the steered answer | ✅ **no tool changes anything**: by default the model has no tools; in agent mode it has two that only read, as the asker ([Agents](agents.md)). A person reads the answer |
 | The answer on screen | markup that loads or runs: an image URL carrying data out, a script | ✅ rendered as text, never HTML or markdown (a test fails otherwise); ✅ the page's content security policy allows images and fetches from this site only |
-| Systems and data | — | nothing to reach: no tools. The api's database role cannot drop or alter tables ([Security](security.md), least privilege) |
+| Systems and data | a tool used beyond the asker's rights | ✅ the tools read through the api's own queries, with the asker's rights; no argument names a team. The api's database role cannot drop or alter tables ([Security](security.md), least privilege) |
 | After the fact | not knowing who wrote what the model read, or what it was given | ✅ the audit trail (below); ✅ traces and logs hold no content ([AI observability](ai-observability.md)) |
 
-The strongest control in that table is the absence of tools. The day the
-assistant gets one, read [Before the assistant gets tools](#before-the-assistant-gets-tools).
+The strongest control in that table is what the model cannot do: its
+tools only read, with the asker's rights. Before a tool that changes
+anything, read [Rules for tools](#rules-for-tools).
 
 ## Redaction: measured ✅
 
@@ -167,37 +168,39 @@ a second layer: images and connections to this site only.
 To render markdown one day, sanitise it, allow no images from outside the
 site, and keep the policy.
 
-## Before the assistant gets tools
+## Rules for tools
 
-📘 Nothing here is built yet: tools arrive with the agents work. These
-rules come from the OWASP Top 10 for LLM Applications (LLM06 excessive
-agency), the OWASP Top 10 for Agentic Applications (ASI02 tool misuse,
-ASI03 identity and privilege abuse), MCP's security best practices, and
-Meta's Agents Rule of Two:
+The agent mode and the MCP server share two read-only tools
+(`app/tools.py`, [Agents](agents.md)). These rules come from the OWASP Top
+10 for LLM Applications (LLM06 excessive agency), the OWASP Top 10 for
+Agentic Applications (ASI02 tool misuse, ASI03 identity and privilege
+abuse), MCP's security best practices, and Meta's Agents Rule of Two. ✅ =
+how the tools here meet it; — = no tool here needs it yet.
 
-1. **A tool acts as the asking user**, through the api, with the user's
+1. ✅ **A tool acts as the asking user**, through the api, with the user's
    session: the same role checks and row-level security. Never a service
    account, which lets anyone who can steer the model use the service's
    rights (a confused deputy).
-2. **Tenancy and identity come from the session, never from a parameter**
+2. ✅ **Tenancy and identity come from the session, never from a parameter**
    the model fills in. A `team` argument is an argument anyone who writes
    the model's context can fill in.
-3. **A change of state needs the person's confirmation**, showing exactly
+3. — **A change of state needs the person's confirmation**, showing exactly
    what will happen, and is bounded: one object, a limited effect, easy to
    undo.
-4. **The Rule of Two:** in one session, at most two of *untrusted input*,
+4. ✅ **The Rule of Two:** in one session, at most two of *untrusted input*,
    *private data or sensitive systems*, and *the ability to change state or
    communicate out*, without a person confirming. All three together is how
    data leaks. Simon Willison's "lethal trifecta" is the same idea for
-   data exfiltration.
-5. **Egress is an allow-list**, with no internal addresses (SSRF) and no
+   data exfiltration. The agent here holds the first two (alert and runbook
+   text, the asker's data) and cannot change state or send anything out.
+5. — **Egress is an allow-list**, with no internal addresses (SSRF) and no
    redirects off the list. Anything a tool fetches is untrusted input.
-6. **Every call is audited** like a change by a person: a `tool.called`
-   event with the arguments' ids, the approval and the outcome.
-7. **Least privilege per tool:** narrow scopes, short-lived credentials,
+6. ✅ **Every call is audited** like a change by a person: a `tool.called`
+   event with what was asked for, the ids read, and any approval.
+7. ✅ **Least privilege per tool:** narrow scopes, short-lived credentials,
    never a token passed through from the user to another service (MCP
    forbids token passthrough).
-8. **Code a model writes runs sandboxed:** no network, a read-only file
+8. — **Code a model writes runs sandboxed:** no network, a read-only file
    system, no secrets in its environment, limits on time and memory.
 
 The research on designs that resist injection names six patterns 📘

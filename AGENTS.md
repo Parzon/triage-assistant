@@ -10,7 +10,9 @@ retrieval (hybrid search in Postgres with pgvector, ADR-0017) is
 `apps/api/app/runbooks.py`; credentials are redacted before any model call
 by `apps/api/app/redact.py`; who wrote what the assistant reads, and what
 it was given for each question, is recorded by `apps/api/app/audit.py`
-(ADR-0019).
+(ADR-0019). `CHAT_MODE=agent` answers with a bounded tool-calling loop
+instead (`app/agent.py`), over read-only tools (`app/tools.py`) that
+`app/mcp_server.py` also serves over MCP (ADR-0020).
 Locally the model is `tools/mock-llm` (OpenAI-compatible, tunable
 latency and failure modes). Sign-in is OIDC against the organisation's
 identity provider (locally the `keycloak` service, demo users alice, bob,
@@ -53,6 +55,11 @@ Run `make` to list every target. The ones you need most:
 - Cost: tokens per answer and where they go, cost per 1,000 questions,
   self-hosted throughput: `labs/ai-cost/` (docs/handbook/ai-cost.md).
   `OLLAMA_NUM_PARALLEL` sets how many answers the local model batches
+- Agents and MCP (docs/handbook/agents.md): `CHAT_MODE=agent` switches the
+  chat to the agent; compare it with the pipeline by running `make evals
+  a="--target api --judge ..."` in each mode. The tools over MCP, for a
+  local client: `python -m app.mcp_server`, with `TRIAGE_SESSION` set to a
+  `make session` cookie
 - Load tests (production stack, rate limits raised):
   `ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up`, then
   `make seed n=1000000 ENV=prod`, `make load s=alerts-read|chat|health`,
@@ -166,9 +173,11 @@ Access control, for every change that touches data:
 - A regular expression run on text others write (alerts, runbooks,
   questions) has every scan bounded, and a test that hostile input stays
   linear (`test_hostile_text_is_redacted_in_linear_time`).
-- The model gets no tool without docs/handbook/ai-security.md's rules: it
-  acts with the asker's rights, takes the team from the session, asks the
-  person before changing anything, and is audited.
+- Tools live in `app/tools.py`, shared by the agent and the MCP server,
+  under docs/handbook/ai-security.md's rules: they act with the asker's
+  rights, take the team from the session, ask the person before changing
+  anything, and are audited. A tool name comes from the model: through
+  `tools.label()` before it reaches a metric, a span or a log.
 - Tests: `sign_in_as("team:<slug>:<role>")` for a signed-in client;
   cover 401, 404 for another team, 403 for a role too low, and
   `csrf_failed` for writes (`tests/integration/test_access.py`).

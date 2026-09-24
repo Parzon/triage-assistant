@@ -1,14 +1,15 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
-from app.llm import Finish, LLMRateLimited, PromptRef, Usage
+from app.llm import Finish, LLMRateLimited, Message, PromptRef, ToolCall, Usage
 from app.schemas import AlertOut, Severity
 from app.sse import HEARTBEAT, sse
-from app.triage import MAX_ALERT_CHARS, answer_events, build_messages
+from app.triage import MAX_ALERT_CHARS, answer_events, build_messages, pipeline
 
 
 class FakeLLM:
@@ -20,8 +21,11 @@ class FakeLLM:
         self.prompt: PromptRef | None = None
 
     async def stream(
-        self, messages: list[dict[str, str]], prompt: PromptRef | None = None
-    ) -> AsyncIterator[str | Usage | Finish]:
+        self,
+        messages: list[Message],
+        prompt: PromptRef | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str | Usage | Finish | ToolCall]:
         self.prompt = prompt
         try:
             for item in self.items:
@@ -49,7 +53,9 @@ def parse(events: list[str]) -> list[tuple[str, object]]:
 
 async def collect(llm: FakeLLM, **overrides: float) -> list[tuple[str, object]]:
     options = {"stream_timeout_s": 5.0, "heartbeat_s": 5.0, **overrides}
-    events = answer_events(llm, [], request_id="rid-1", alerts_in_context=2, **options)
+    events = answer_events(
+        llm, pipeline(llm, []), request_id="rid-1", alerts_in_context=2, **options
+    )
     return parse([event async for event in events])
 
 
@@ -77,6 +83,7 @@ async def test_happy_path_is_meta_tokens_done() -> None:
         "request_id": "rid-1",
         "trace_id": None,  # no request span around a unit test
         "model": "fake-1",
+        "mode": "pipeline",
         "alerts_in_context": 2,
         "runbooks_in_context": 0,
         "retrieval": None,
@@ -123,7 +130,12 @@ async def test_total_duration_is_capped() -> None:
 async def test_closing_the_stream_early_stops_the_model() -> None:
     llm = FakeLLM(["t"] * 1000, delay_s=0.01)
     events = answer_events(
-        llm, [], request_id="r", alerts_in_context=0, stream_timeout_s=5, heartbeat_s=5
+        llm,
+        pipeline(llm, []),
+        request_id="r",
+        alerts_in_context=0,
+        stream_timeout_s=5,
+        heartbeat_s=5,
     )
     received = 0
     async for _event in events:

@@ -52,6 +52,11 @@ question it is asked is recorded in an audit trail the api cannot
 rewrite: who wrote which version, and which versions each answer was
 given (`make audit`; [AI security](docs/handbook/ai-security.md)).
 
+`CHAT_MODE=agent` lets the model choose what to read instead, through two
+read-only tools called with the asker's rights, each call audited. An MCP
+server offers the same tools to a local client such as Claude Code
+([Agents](docs/handbook/agents.md)).
+
 ## Structure
 
 ```

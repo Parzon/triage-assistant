@@ -10,12 +10,22 @@ import contextlib
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Sequence
-from dataclasses import asdict
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from dataclasses import asdict, dataclass
 
 from opentelemetry import trace
 
-from app.llm import Finish, LLMClient, LLMEmptyAnswer, LLMError, LLMTimeout, PromptRef, Usage
+from app.llm import (
+    Finish,
+    LLMClient,
+    LLMEmptyAnswer,
+    LLMError,
+    LLMTimeout,
+    Message,
+    PromptRef,
+    ToolCall,
+    Usage,
+)
 from app.metrics import (
     chat_citations,
     llm_active_streams,
@@ -100,9 +110,42 @@ _CITATION = re.compile(r"\bR(\d{1,2})\b")
 _END = object()
 
 
+@dataclass(frozen=True)
+class ToolEvent:
+    """A tool the agent called (CHAT_MODE=agent, app/agent.py), shown to the
+    asker as it happens: a "tool" event."""
+
+    name: str
+    ok: bool
+    summary: str
+
+
+# What an answer's source puts on the stream: answer text, a Usage and a
+# Finish per model call, and a ToolEvent per tool call.
+Item = str | Usage | Finish | ToolEvent
+Emit = Callable[[Item], Awaitable[None]]
+Source = Callable[[Emit], Awaitable[None]]
+
+
+def alert_line(alert: AlertOut, clean: Callable[[str], str]) -> str:
+    """One alert as the model reads it: as the API shows it, cut short."""
+    return (
+        f"- [{alert.severity}] {alert.created_at:%Y-%m-%d %H:%M}Z team={alert.team} "
+        f"{alert.source}: {clean(alert.message[:MAX_ALERT_CHARS])}"
+    )
+
+
+def section_text(number: int, hit: Hit, clean: Callable[[str], str]) -> str:
+    """One runbook section as the model reads it, numbered for citation."""
+    return (
+        f"[R{number}] {hit.heading} (team {hit.team}, updated {hit.updated_at:%Y-%m-%d})\n"
+        f"{clean(hit.content)}"
+    )
+
+
 def build_messages(
     question: str, alerts: Sequence[AlertOut], sections: Sequence[Hit] = ()
-) -> list[dict[str, str]]:
+) -> list[Message]:
     """The prompt: only alerts and runbook sections the asker may see (the
     caller retrieves them with the asker's visibility), alerts in the same
     shape the API shows them, sections numbered for citation. Credentials in
@@ -115,15 +158,8 @@ def build_messages(
         redactions += found
         return text
 
-    lines = [
-        f"- [{a.severity}] {a.created_at:%Y-%m-%d %H:%M}Z team={a.team} {a.source}: "
-        f"{clean(a.message[:MAX_ALERT_CHARS])}"
-        for a in alerts
-    ]
-    runbooks = [
-        f"[R{n}] {s.heading} (team {s.team}, updated {s.updated_at:%Y-%m-%d})\n{clean(s.content)}"
-        for n, s in enumerate(sections, 1)
-    ]
+    lines = [alert_line(a, clean) for a in alerts]
+    runbooks = [section_text(n, s, clean) for n, s in enumerate(sections, 1)]
     if redactions:
         prompt_redactions.inc(redactions)
     # On the request's span: how much context the model got. Counts, never
@@ -163,18 +199,39 @@ def citations(answer: str, sections: Sequence[Hit]) -> tuple[list[dict[str, obje
     return cited, invalid
 
 
+def pipeline(llm: LLMClient, messages: list[Message]) -> Source:
+    """The default answer (CHAT_MODE=pipeline): one model call over the
+    context the service prepared."""
+
+    async def source(emit: Emit) -> None:
+        async for item in llm.stream(messages, PROMPT):
+            if not isinstance(item, ToolCall):  # none: no tools offered
+                await emit(item)
+
+    return source
+
+
 async def answer_events(
     llm: LLMClient,
-    messages: list[dict[str, str]],
+    source: Source,
     *,
     request_id: str,
-    alerts_in_context: int,
+    alerts_in_context: int | None,
     stream_timeout_s: float,
     heartbeat_s: float,
     sections: Sequence[Hit] = (),
     retrieval: str | None = None,
+    mode: str = "pipeline",
+    alerts_read: Collection[int] | None = None,
 ) -> AsyncIterator[str]:
-    """SSE events for one answer.
+    """SSE events for one answer, from `source`: pipeline() or the agent's.
+
+    `sections` are what the answer may cite, [R1] first. The agent adds to
+    the list as its searches return (app/agent.py): citations are checked
+    at the end, against every section it read. `alerts_in_context` is None
+    when not known in advance: the agent chooses what to read, and its
+    tools collect the ids in `alerts_read`. "done" reports both counts as
+    they ended.
 
     A producer task reads the model and fills a small queue; this generator
     drains it. The split keeps the total-duration cap (asyncio.timeout) in
@@ -188,8 +245,7 @@ async def answer_events(
     async def produce() -> None:
         try:
             async with asyncio.timeout(stream_timeout_s):
-                async for item in llm.stream(messages, PROMPT):
-                    await queue.put(item)
+                await source(queue.put)
         except TimeoutError:
             await queue.put(LLMTimeout("the answer took too long"))
         except Exception as exc:  # delivered to the client as an error event
@@ -202,6 +258,7 @@ async def answer_events(
     answer: list[str] = []
     usage: Usage | None = None
     finish: str | None = None
+    model_calls = tool_calls = 0
     cited: list[dict[str, object]] = []
     invalid: list[str] = []
     # Anything that ends the stream without reaching "ok" or an error code -
@@ -215,6 +272,7 @@ async def answer_events(
             # Tracing on: the id to look the answer up by in Jaeger.
             "trace_id": trace_id(),
             "model": llm.model,
+            "mode": mode,
             "alerts_in_context": alerts_in_context,
             "runbooks_in_context": len(sections),
             # hybrid, keyword_only (the question could not be embedded), or
@@ -237,10 +295,15 @@ async def answer_events(
                 yield _error_event(item, request_id)
                 return
             if isinstance(item, Usage):
-                usage = item
+                usage = item if usage is None else _add(usage, item)
                 continue
             if isinstance(item, Finish):
                 finish = item.reason
+                model_calls += 1
+                continue
+            if isinstance(item, ToolEvent):
+                tool_calls += 1
+                yield sse("tool", {"name": item.name, "ok": item.ok, "summary": item.summary})
                 continue
             if ttft_s is None:
                 ttft_s = time.perf_counter() - start
@@ -270,6 +333,9 @@ async def answer_events(
                 "finish_reason": finish,
                 "citations": len(cited),
                 "invalid_citations": len(invalid),
+                "mode": mode,
+                "model_calls": model_calls,
+                "tool_calls": tool_calls,
             },
         )
         # "length": cut off by LLM_MAX_OUTPUT_TOKENS - delivered, but counted
@@ -284,6 +350,12 @@ async def answer_events(
                 "finish_reason": finish,
                 "citations": cited,
                 "invalid_citations": invalid,
+                "model_calls": model_calls,
+                "tool_calls": tool_calls,
+                "alerts_in_context": (
+                    len(alerts_read) if alerts_read is not None else alerts_in_context
+                ),
+                "runbooks_in_context": len(sections),
             },
         )
     finally:
@@ -292,6 +364,9 @@ async def answer_events(
         trace.get_current_span().set_attributes(
             {
                 "app.chat.outcome": outcome,
+                "app.chat.mode": mode,
+                "app.chat.model_calls": model_calls,
+                "app.chat.tool_calls": tool_calls,
                 "app.chat.retrieval": retrieval or "off",
                 "app.chat.citations": len(cited),
                 "app.chat.invalid_citations": len(invalid),
@@ -318,6 +393,10 @@ def _error_event(exc: Exception, request_id: str) -> str:
     return sse(
         "error", {"code": "internal_error", "message": "internal error", "request_id": request_id}
     )
+
+
+def _add(a: Usage, b: Usage) -> Usage:
+    return Usage(a.prompt_tokens + b.prompt_tokens, a.completion_tokens + b.completion_tokens)
 
 
 def _ms(seconds: float | None) -> float | None:

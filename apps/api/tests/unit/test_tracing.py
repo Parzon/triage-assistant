@@ -8,25 +8,28 @@ import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from app.agent import AGENT_PROMPT_REF
 from app.llm import PromptRef
 from app.logs import JsonFormatter
 from app.tracing import MAX_CONTENT_CHARS, messages_json, provider_attributes, text_parts, trace_id
-from app.triage import PROMPT, PROMPT_VERSION, SYSTEM_PROMPT
+from app.triage import PROMPT, SYSTEM_PROMPT
 
-# SYSTEM_PROMPT's hash for each version. Changing the prompt changes the
-# hash, and this test fails until the version is bumped: add the new pair
-# here, and a row to the prompt history (docs/handbook/ai-engineering.md),
-# with the eval runs before and after.
+# Each prompt's hash for each version. Changing a prompt changes its hash,
+# and this test fails until its version is bumped: add the new pair here,
+# and a row to the prompt history (docs/handbook/ai-engineering.md), with
+# the eval runs before and after.
 PROMPT_HASHES = {
-    "v6": "98b3574d800acbd129f70e0744c11e9095f8b34c7ee2adb54357adec5289b840",
+    ("triage", "v6"): "98b3574d800acbd129f70e0744c11e9095f8b34c7ee2adb54357adec5289b840",
+    ("triage-agent", "v1"): "99554ca00ec709c40be2932a6a3618bfe46a25271c73c02c9a7bfb13ad6fdd3e",
+    ("triage-agent", "v2"): "40a7d1757488b6e0dc4e35644cee2169fba09263a5ac28969063f539cb998ff5",
 }
 
 
-def test_the_prompt_is_not_changed_without_a_new_version() -> None:
-    assert PROMPT.version == PROMPT_VERSION
-    assert PROMPT_HASHES.get(PROMPT_VERSION) == PROMPT.sha256, (
-        f"SYSTEM_PROMPT changed, but PROMPT_VERSION is still {PROMPT_VERSION}: bump it, and "
-        f"record {PROMPT.sha256} for the new version in PROMPT_HASHES"
+@pytest.mark.parametrize("ref", [PROMPT, AGENT_PROMPT_REF], ids=lambda ref: ref.name)
+def test_a_prompt_is_not_changed_without_a_new_version(ref: PromptRef) -> None:
+    assert PROMPT_HASHES.get((ref.name, ref.version)) == ref.sha256, (
+        f"The {ref.name} prompt changed, but its version is still {ref.version}: bump it, "
+        f"and record {ref.sha256} for the new version in PROMPT_HASHES"
     )
 
 

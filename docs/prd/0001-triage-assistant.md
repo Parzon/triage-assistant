@@ -144,6 +144,7 @@ stage 4):
 | v0.5.0: answers cite the team's runbooks (F7); credentials redacted from the prompt | ✅ |
 | v0.6.0: every answer can be traced (N8), with no content kept | ✅ |
 | v0.7.0: who wrote what the assistant reads, and what each answer was given, on record (N9); redaction measured | ✅ |
+| v0.8.0: an agent mode, measured against the pipeline and kept off; its read-only tools over MCP | ✅ |
 | Stages 1–3: a cloud host with HTTPS, the company identity provider, a hosted model under agreed terms | 📘 about 3 weeks of work, plus vendor and security lead times |
 | Stage 4: a pilot team; answer feedback (F6) | 📘 2–4 weeks |
 | Stage 5: general availability, team by team; a second host | 📘 after the pilot's review |
