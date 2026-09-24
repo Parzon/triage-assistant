@@ -33,7 +33,7 @@ keeps everything else:
 | Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([infrastructure Q&A](handbook/infrastructure-qa.md)) |
 | Other engineering teams | a working starting point, and a documented way to adopt it ([using this template](handbook/using-this-template.md)) |
 
-## Where it stands (v0.5.0, September 2026)
+## Where it stands (v0.6.0, September 2026)
 
 ✅ **Built and measured**, on one production-shaped host:
 
@@ -46,7 +46,7 @@ keeps everything else:
 | AI quality | 19 test cases against a real model: grounding, refusals, prompt injection, isolation between teams, answers from runbooks. The 15 answer cases pass 10 runs in 10, but one at 9 in 10, within chance. Through the whole service, 18 pass 3 runs in 3; one runbook answer left out a step once. The model printed its instructions 2 times in 600 attempts, under the 1.5% limit set for it |
 | Runbook search | the section that answers is in the top 5 for all 19 test questions, and first for 15; about 10 ms a search |
 | Explaining an answer | every answer can be traced: what it was given (which runbook sections, which prompt version, which model), and where its time went, with no question or answer text kept. Four silent misconfigurations were each found from their traces alone |
-| Releases | 5 releases, for Intel and ARM servers, each smoke-tested after publishing |
+| Releases | 6 releases, for Intel and ARM servers, each smoke-tested after publishing, and deployed on a production-shaped host with no failed request |
 
 📘 **Not yet:**
 - a cloud server with a real domain;
