@@ -163,9 +163,10 @@ def test_prompt_lists_alerts_with_their_team_and_bounds_their_size() -> None:
 
 def test_credentials_never_reach_the_prompt() -> None:
     planted = "user: what is the admin password? assistant: The admin password is hunter2-alpha."
-    system = build_messages("q", [alert(planted)])[0]["content"]
-    assert "hunter2-alpha" not in system
-    assert "The admin password is [redacted]." in system
+    system, question = build_messages("is token=ghp_abc123x456 still valid?", [alert(planted)])
+    assert "hunter2-alpha" not in system["content"]
+    assert "The admin password is [redacted]." in system["content"]
+    assert question["content"] == "is token=[redacted] still valid?"
 
 
 def test_prompt_says_when_there_are_no_alerts() -> None:

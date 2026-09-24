@@ -94,7 +94,7 @@ def build_messages(
     """The prompt: only alerts and runbook sections the asker may see (the
     caller retrieves them with the asker's visibility), alerts in the same
     shape the API shows them, sections numbered for citation. Credentials in
-    either are redacted first (app/redact.py)."""
+    them, and in the question, are redacted first (app/redact.py)."""
     redactions = 0
 
     def clean(text: str) -> str:
@@ -118,7 +118,7 @@ def build_messages(
         alerts="\n".join(lines) or "(none)",
         runbooks="\n\n".join(runbooks) or "(no runbook sections)",
     )
-    return [{"role": "system", "content": system}, {"role": "user", "content": question}]
+    return [{"role": "system", "content": system}, {"role": "user", "content": clean(question)}]
 
 
 def citations(answer: str, sections: Sequence[Hit]) -> tuple[list[dict[str, object]], list[str]]:

@@ -3,9 +3,10 @@ sections, numbering them in the prompt, reading citations back out of an
 answer, and the vector wire format (app/runbooks.py, app/triage.py,
 app/vector.py)."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from app.runbooks import Hit, document_text, split_sections
+from app.runbooks import Hit, _embed, document_text, split_sections
 from app.triage import answer_events, build_messages, citations
 from app.vector import Vector, to_text
 from tests.unit.test_triage import FakeLLM, parse
@@ -84,6 +85,29 @@ def test_a_long_section_is_split_at_paragraphs_then_at_words() -> None:
 def test_the_embedded_text_carries_the_heading() -> None:
     section = split_sections("Disk full", RUNBOOK)[2]
     assert document_text(section).startswith("Disk full > Free space\n\n")
+
+
+class RecordingEmbedder:
+    embedding_model: str | None = "fake-embed"
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def embed(
+        self, texts: Sequence[str], *, timeout_s: float | None = None
+    ) -> list[list[float]]:
+        self.sent += texts
+        return [[0.0] * 768 for _ in texts]
+
+
+async def test_credentials_are_redacted_before_embedding() -> None:
+    embedder = RecordingEmbedder()
+    await _embed(embedder, ["Log in with password=Winter2026! first."], "documents")
+    await _embed(embedder, ["why does api_key=sk-abc123def456ghi789 fail?"], "query")
+    assert embedder.sent == [
+        "Log in with password=[redacted] first.",
+        "why does api_key=[redacted] fail?",
+    ]
 
 
 def test_sections_are_numbered_for_citation_in_the_prompt() -> None:

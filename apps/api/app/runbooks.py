@@ -32,6 +32,7 @@ from app.config import Settings
 from app.llm import Embedder, LLMError
 from app.metrics import embedding_requests, retrieval_duration
 from app.models import Runbook, RunbookChunk, Team
+from app.redact import redact
 from app.vector import to_text
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,9 @@ async def _embed(
     kind: Literal["documents", "query"],
     timeout_s: float | None = None,
 ) -> list[list[float]]:
+    # The embedding model is a model provider too: a credential in a runbook
+    # or a question must not leave for it any more than for the chat model.
+    texts = [redact(text)[0] for text in texts]
     try:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), EMBED_BATCH):

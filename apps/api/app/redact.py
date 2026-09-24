@@ -8,9 +8,10 @@ gpt-oss:20b, that rule fails about 1 run in 100
 deterministic floor under it: the model cannot repeat what it never saw,
 and the secret never leaves for the model provider (OWASP LLM02).
 
-Only the prompt's copy changes: the alert list shows alerts as they were
-sent. Patterns, not a guarantee - an unknown secret format passes through,
-and the prompt's rule remains.
+Only what goes to a model changes: the prompt (alerts, runbook sections,
+the question) and the text sent for embedding. The alert list and the
+stored runbooks keep the text as it was sent. Patterns, not a guarantee -
+an unknown secret format passes through, and the prompt's rule remains.
 """
 
 import re
