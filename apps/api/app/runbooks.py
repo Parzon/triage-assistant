@@ -272,31 +272,39 @@ _QUERY_TERMS = """
 # The SQL below is assembled once, from this module's constants, never from
 # input: every value is a bound parameter (:query, :team_ids, :embedding...).
 # Bandit's S608 cannot tell the two apart, hence its noqa on each assembly.
-_TEAMS = "(CAST(:team_ids AS bigint[]) IS NULL OR c.team_id = ANY(CAST(:team_ids AS bigint[])))"
-_KEYWORD = f"""
+#
+# The team filter comes in two forms, not one "(:team_ids IS NULL OR ...)":
+# measured on 50,000 sections in 100 teams, a one-team caller's semantic
+# search behind that OR (and row-level security's own) got the HNSW index:
+# 0 results without iterative scans (all 40 candidates were other teams'),
+# 20 in 71 ms with them. The plain "team_id = ANY(...)" lets the planner read
+# the team's rows by its index and sort them exactly: 20 in 1.6 ms.
+_ALL_TEAMS = "TRUE"
+_SOME_TEAMS = "c.team_id = ANY(CAST(:team_ids AS bigint[]))"
+_KEYWORD = """
 keyword AS (
     SELECT id, row_number() OVER (ORDER BY rank DESC, id) AS rank_no
     FROM (
         SELECT c.id, ts_rank_cd(c.search, q.query) AS rank
-        FROM runbook_chunks c, (SELECT {_QUERY_TERMS} AS query) q
-        WHERE c.search @@ q.query AND {_TEAMS}
+        FROM runbook_chunks c, (SELECT {terms} AS query) q
+        WHERE c.search @@ q.query AND {teams}
         ORDER BY rank DESC, c.id
         LIMIT :candidates
     ) k
-)"""  # noqa: S608
+)"""
 # The inner ORDER BY distance ... LIMIT is what the HNSW index serves; the
 # ranks are numbered outside it, so no window sorts the whole table.
-_SEMANTIC = f"""
+_SEMANTIC = """
 semantic AS (
     SELECT id, distance, row_number() OVER (ORDER BY distance, id) AS rank_no
     FROM (
         SELECT c.id, c.embedding <=> CAST(CAST(:embedding AS text) AS vector) AS distance
         FROM runbook_chunks c
-        WHERE c.embedding_model = :model AND {_TEAMS}
+        WHERE c.embedding_model = :model AND {teams}
         ORDER BY c.embedding <=> CAST(CAST(:embedding AS text) AS vector)
         LIMIT :candidates
     ) s
-)"""  # noqa: S608
+)"""
 _RESULT = """
 SELECT c.id, c.runbook_id, t.slug AS team, r.title, c.heading, c.content, r.updated_at,
        {score} AS score, {keyword} AS keyword_rank, {semantic}
@@ -311,31 +319,41 @@ LIMIT :k
 _KW_SCORE = "coalesce(1.0 / (:rrf_k + kw.rank_no), 0)"
 _SE_SCORE = "coalesce(1.0 / (:rrf_k + se.rank_no), 0)"
 _NO_SEMANTIC = "NULL::bigint AS semantic_rank, NULL::float8 AS distance"
-_SQL = {
-    "hybrid": f"WITH {_KEYWORD}, {_SEMANTIC}"  # noqa: S608
-    + _RESULT.format(
-        score=f"{_KW_SCORE} + {_SE_SCORE}",
-        keyword="kw.rank_no",
-        semantic="se.rank_no AS semantic_rank, se.distance",
-        ids="SELECT id FROM keyword UNION SELECT id FROM semantic",
-        joins="LEFT JOIN keyword kw ON kw.id = c.id LEFT JOIN semantic se ON se.id = c.id",
-    ),
-    "keyword": f"WITH {_KEYWORD}"  # noqa: S608
-    + _RESULT.format(
-        score=_KW_SCORE,
-        keyword="kw.rank_no",
-        semantic=_NO_SEMANTIC,
-        ids="SELECT id FROM keyword",
-        joins="LEFT JOIN keyword kw ON kw.id = c.id",
-    ),
-    "semantic": f"WITH {_SEMANTIC}"  # noqa: S608
-    + _RESULT.format(
+
+
+def _assemble(mode: str, teams: str) -> str:
+    keyword = _KEYWORD.format(terms=_QUERY_TERMS, teams=teams)
+    semantic = _SEMANTIC.format(teams=teams)
+    if mode == "hybrid":
+        return f"WITH {keyword}, {semantic}" + _RESULT.format(  # noqa: S608
+            score=f"{_KW_SCORE} + {_SE_SCORE}",
+            keyword="kw.rank_no",
+            semantic="se.rank_no AS semantic_rank, se.distance",
+            ids="SELECT id FROM keyword UNION SELECT id FROM semantic",
+            joins="LEFT JOIN keyword kw ON kw.id = c.id LEFT JOIN semantic se ON se.id = c.id",
+        )
+    if mode == "keyword":
+        return f"WITH {keyword}" + _RESULT.format(  # noqa: S608
+            score=_KW_SCORE,
+            keyword="kw.rank_no",
+            semantic=_NO_SEMANTIC,
+            ids="SELECT id FROM keyword",
+            joins="LEFT JOIN keyword kw ON kw.id = c.id",
+        )
+    return f"WITH {semantic}" + _RESULT.format(  # noqa: S608
         score=_SE_SCORE,
         keyword="NULL::bigint",
         semantic="se.rank_no AS semantic_rank, se.distance",
         ids="SELECT id FROM semantic",
         joins="LEFT JOIN semantic se ON se.id = c.id",
-    ),
+    )
+
+
+# (mode, scoped to some teams) -> SQL; unscoped is an org admin's search.
+_SQL = {
+    (mode, scoped): _assemble(mode, _SOME_TEAMS if scoped else _ALL_TEAMS)
+    for mode in ("hybrid", "keyword", "semantic")
+    for scoped in (True, False)
 }
 # What a search is asked to do. keyword and semantic run one retriever
 # alone: for debugging and for measuring each retriever's recall.
@@ -389,14 +407,15 @@ async def search_runbooks(
     await db.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
     params: dict[str, object] = {
         "query": query,
-        "team_ids": list(team_ids) if team_ids is not None else None,
         "candidates": CANDIDATES,
         "rrf_k": RRF_K,
         "k": k,
     }
+    if team_ids is not None:
+        params["team_ids"] = list(team_ids)
     if embedding is not None:
         params |= {"embedding": to_text(embedding), "model": embedder.embedding_model}
-    sql = _SQL["keyword" if done == "keyword_only" else done]
+    sql = _SQL[("keyword" if done == "keyword_only" else done, team_ids is not None)]
     rows = (await db.execute(text(sql), params)).all()
     retrieval_duration.labels(done).observe(time.perf_counter() - start)
     return Retrieval(

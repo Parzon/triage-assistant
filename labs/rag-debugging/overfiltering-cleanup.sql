@@ -1,0 +1,2 @@
+-- Removes the lab's teams; their runbooks and sections go with them (cascade).
+DELETE FROM teams WHERE slug LIKE 'lab-t%';

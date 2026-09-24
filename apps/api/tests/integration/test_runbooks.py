@@ -125,6 +125,15 @@ async def test_search_finds_the_right_section_among_the_askers_teams_only(
     assert other.status_code == 404
 
 
+async def test_an_org_admin_searches_every_team(sign_in_as: SignIn) -> None:
+    admin = await sign_in_as("team:payments:admin", "team:platform:admin")
+    await save(admin, "payments", "Disk full")
+    await save(admin, "platform", "Disk full")
+    org = await sign_in_as("org:admin")
+    found = await org.post("/runbooks/search", json={"query": "free disk space", "k": 10})
+    assert {hit["team"] for hit in found.json()["hits"]} == {"payments", "platform"}
+
+
 async def test_search_falls_back_to_keywords_when_the_embedding_model_fails(
     sign_in_as: SignIn, mock_llm: MockLLM
 ) -> None:
