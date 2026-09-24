@@ -246,7 +246,7 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
         CheckConstraint(r"action ~ '^[a-z_]+\.[a-z_]+$'", name="ck_audit_events_action"),
-        CheckConstraint("via IN ('api', 'alertmanager', 'cli')", name="ck_audit_events_via"),
+        CheckConstraint("via IN ('api', 'mcp', 'alertmanager', 'cli')", name="ck_audit_events_via"),
         # Newest first, and one target's history (a runbook's saves).
         Index("ix_audit_events_created_at_id", "created_at", "id"),
         Index("ix_audit_events_target_id", "target_id"),

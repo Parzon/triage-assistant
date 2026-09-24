@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from app.runbooks import Hit, _embed, document_text, split_sections
-from app.triage import answer_events, build_messages, citations
+from app.triage import answer_events, build_messages, citations, pipeline
 from app.vector import Vector, to_text
 from tests.unit.test_triage import FakeLLM, parse
 
@@ -136,12 +136,13 @@ def test_citations_are_the_sections_cited_and_the_numbers_invented() -> None:
 
 
 async def test_the_answer_reports_its_context_and_citations() -> None:
+    llm = FakeLLM(["Free space first [R1]", ", not [R3]."])
     events = parse(
         [
             event
             async for event in answer_events(
-                FakeLLM(["Free space first [R1]", ", not [R3]."]),
-                [],
+                llm,
+                pipeline(llm, []),
                 request_id="rid",
                 alerts_in_context=0,
                 stream_timeout_s=5,

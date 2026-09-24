@@ -4,6 +4,10 @@ Routes and the triage logic only see LLMClient: an async stream of text
 deltas (plus one Usage at the end) and a small set of typed errors.
 Swapping providers means another class with the same two methods; nothing
 else in the service changes.
+
+Messages are plain dicts: {"role", "content"}, plus, for the agent's tool
+rounds (app/agent.py), an assistant message's "tool_calls" and a "tool"
+message's "tool_call_id".
 """
 
 import asyncio
@@ -16,7 +20,7 @@ from typing import Any, Protocol, cast
 
 import openai
 from openai import AsyncOpenAI, Timeout, omit
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 from opentelemetry import trace
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
@@ -42,6 +46,27 @@ class PromptRef:
         """No version: the hash's first 12 characters serve as one."""
         sha256 = hashlib.sha256(template.encode()).hexdigest()
         return cls(name, version or sha256[:12], sha256)
+
+
+# A chat message, as the OpenAI-compatible API takes it.
+Message = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """A tool the model asked to call, given at the end of its turn. The
+    arguments are the model's raw JSON: validate them before use."""
+
+    id: str
+    name: str
+    arguments: str
+
+    def as_message_part(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments},
+        }
 
 
 @dataclass(frozen=True)
@@ -86,8 +111,11 @@ class LLMClient(Protocol):
     model: str
 
     def stream(
-        self, messages: list[dict[str, str]], prompt: PromptRef | None = None
-    ) -> AsyncIterator[str | Usage | Finish]: ...
+        self,
+        messages: list[Message],
+        prompt: PromptRef | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str | Usage | Finish | ToolCall]: ...
 
     async def aclose(self) -> None: ...
 
@@ -156,8 +184,11 @@ class OpenAICompatibleClient:
         )
 
     async def stream(
-        self, messages: list[dict[str, str]], prompt: PromptRef | None = None
-    ) -> AsyncIterator[str | Usage | Finish]:
+        self,
+        messages: list[Message],
+        prompt: PromptRef | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str | Usage | Finish | ToolCall]:
         # Started, never made current: this is an async generator, and a
         # span made current here would stay current in the caller's code
         # between chunks (and fail to detach when the caller closes the
@@ -177,6 +208,9 @@ class OpenAICompatibleClient:
         timing = _StreamTiming(span)
         answer: list[str] = []
         finish_reasons: list[str] = []
+        # Tool calls arrive in pieces, keyed by index: OpenAI streams the name,
+        # then the arguments in fragments; Ollama sends each whole, at once.
+        calls: dict[int, dict[str, str]] = {}
         outcome = "cancelled"
         try:
             with _provider_errors("the model"):
@@ -191,6 +225,7 @@ class OpenAICompatibleClient:
                     # OpenAI-only; every compatible server accepts max_tokens.
                     max_tokens=self._max_tokens,
                     temperature=omit if self._temperature is None else self._temperature,
+                    tools=cast("list[ChatCompletionToolParam]", list(tools)) if tools else omit,
                     extra_body=self._extra or None,
                 )
                 # Leaving this block (done, error, or cancelled because the
@@ -220,7 +255,23 @@ class OpenAICompatibleClient:
                                 # reasoning model's thinking in its own field,
                                 # before the answer.
                                 timing.reasoning_chunks += 1
+                            for part in choice.delta.tool_calls or ():
+                                call = calls.setdefault(
+                                    part.index, {"id": "", "name": "", "arguments": ""}
+                                )
+                                call["id"] = part.id or call["id"]
+                                if part.function is not None:
+                                    call["name"] += part.function.name or ""
+                                    call["arguments"] += part.function.arguments or ""
                             if choice.finish_reason:
+                                for index in sorted(calls):
+                                    call = calls[index]
+                                    yield ToolCall(
+                                        call["id"] or f"call_{index}",
+                                        call["name"],
+                                        call["arguments"] or "{}",
+                                    )
+                                calls.clear()
                                 finish_reasons.append(choice.finish_reason)
                                 yield Finish(choice.finish_reason)
             outcome = "ok"

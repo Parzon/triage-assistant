@@ -48,16 +48,18 @@ Action = Literal[
     "chat.asked",
     "runbook.deleted",
     "runbook.saved",
+    "tool.called",
 ]
 
 
 @dataclass(frozen=True)
 class Actor:
-    """Who an event is recorded for: a signed-in user, or no user - the
-    Alertmanager webhook, an operator's command."""
+    """Who an event is recorded for: a signed-in user (through the api, or
+    an MCP client: app/mcp_server.py), or no user - the Alertmanager webhook,
+    an operator's command."""
 
     user_id: int | None
-    via: Literal["api", "alertmanager", "cli"]
+    via: Literal["api", "mcp", "alertmanager", "cli"]
 
     @classmethod
     def of(cls, principal: Principal) -> "Actor":

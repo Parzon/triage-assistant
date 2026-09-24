@@ -199,6 +199,12 @@ Each rule exists because breaking it cost something measurable here.
     the api can add to but not rewrite. A new way to feed the model (a
     sync, a tool) records its events too.
     ([AI security](docs/handbook/ai-security.md), ADR-0019)
+23. **The simplest design that answers well: a pipeline before an agent.**
+    When the steps are known before the model runs, code them. The agent
+    here matched the pipeline only once its prompt said to read what the
+    pipeline reads, and then cost 3.8× the prompt tokens and 2.7× the
+    model calls. Tools act as the asker, only read, and are audited.
+    ([Agents](docs/handbook/agents.md), ADR-0020)
 
 ## The handbook
 
@@ -222,6 +228,7 @@ Each rule exists because breaking it cost something measurable here.
 | [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
 | [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped; with a hands-on [lab](labs/ai-cost/README.md) |
+| [Agents](docs/handbook/agents.md) | an agent or a pipeline (measured); how the agent and its tools work; the tools over MCP; approval gates and multi-agent designs, not built |
 | [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools; with a hands-on [lab](labs/ai-security/README.md) |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
@@ -667,6 +674,25 @@ The evidence is in [AI security](docs/handbook/ai-security.md) and
   action and target, or by a user made for the test; a runbook and an
   alert can share an id.
 
+### Agents and MCP
+Measured with gpt-oss:20b; the evidence is in [Agents](docs/handbook/agents.md).
+- **A hint in the prompt becomes a filter.** "Critical alerts matter most"
+  turned into `list_alerts(severity=critical)`, which hid the warning or
+  deploy that answered the question: 14 of 19 cases passed, against the
+  pipeline's 18.
+- **An agent that reads less fails an equality check too.** "Alerts in
+  context == 1" catches a leak in the pipeline, and an agent that read 0.
+  The `tool.called` audit rows tell the two apart.
+- **An agent's context is known only at the end:** the stream's first
+  event cannot say how much it will read. `done` reports the final counts.
+- **Tool calls stream differently by provider.** OpenAI sends the
+  arguments in fragments, Ollama each call whole. Accumulate by index
+  until `finish_reason`.
+- **A tool name comes from the model:** map it to a known tool or
+  `unknown` before it reaches a metric label, a span or a log.
+- **The MCP stdio transport owns stdout.** Anything else printed there
+  breaks the protocol.
+
 ### Runbook retrieval (RAG)
 Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
 [RAG](docs/handbook/rag.md) and [the lab](labs/rag-debugging/README.md).
@@ -903,6 +929,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - runbook retrieval in Postgres, hybrid, under row-level security (0017)
 - traces with OpenTelemetry and the GenAI conventions, no content by default (0018)
 - an append-only audit trail of what the assistant reads, and who wrote it (0019)
+- an agent mode beside the pipeline, and its read-only tools over MCP (0020)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -930,9 +957,9 @@ oversight:
 - **Audit history the database owner cannot rewrite:** a copy of each
   event outside the database, or a hash chain
   ([AI security](docs/handbook/ai-security.md)).
-- **Tools for the assistant**, and the rules they need first: the user's
-  own rights, confirmation for changes, allow-listed egress, every call
-  audited ([AI security](docs/handbook/ai-security.md)).
+- **Tools that change something**, with the person's confirmation before
+  each change; remote MCP with OAuth; memory across questions
+  ([Agents](docs/handbook/agents.md)).
 - **Better runbook answers:** a reranker, the neighbouring sections in
   context, shadow mode before a team turns runbooks on, a sync from the
   wiki, and retrieval measured on real questions

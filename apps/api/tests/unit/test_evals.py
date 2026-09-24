@@ -181,7 +181,7 @@ class ScriptedLLM:
         self.reply = reply
         self.error = error
 
-    async def stream(self, messages: list[dict[str, str]], prompt=None):  # type: ignore[no-untyped-def]
+    async def stream(self, messages, prompt=None, tools=None):  # type: ignore[no-untyped-def]
         self.prompt = prompt
         if self.error:
             raise self.error

@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     # gpt-oss:20b at "low": 65-308 tokens instead of 460-800.
     llm_reasoning_effort: Literal["low", "medium", "high"] | None = None
     chat_context_alerts: int = Field(20, ge=0)
+    # How the assistant answers (ADR-0020). "pipeline": the service reads the
+    # asker's newest alerts and the runbook sections matching the question,
+    # then calls the model once. "agent": the model gets read-only tools and
+    # decides what to read (app/agent.py): more model calls, more tokens.
+    chat_mode: Literal["pipeline", "agent"] = "pipeline"
+    # Agent mode: rounds of tool calls before the model must answer.
+    agent_max_steps: int = Field(3, ge=1, le=10)
 
     # --- Runbook search (RFC-0001, ADR-0017): embeddings from the same
     # OpenAI-compatible endpoint as the model. Unset = runbooks are off: the

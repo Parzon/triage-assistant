@@ -13,7 +13,7 @@ interface Failure {
 
 interface Meta {
   requestId: string
-  alertsInContext: number
+  alertsInContext: number | null
   runbooksInContext: number
   retrieval: string | null
   citations?: Citation[]
@@ -38,6 +38,8 @@ export function Chat() {
   const [status, setStatus] = useState<Status>('idle')
   const [failure, setFailure] = useState<Failure | null>(null)
   const [meta, setMeta] = useState<Meta | null>(null)
+  // The agent's tool calls, as they happen: what it read before answering.
+  const [steps, setSteps] = useState<string[]>([])
   const controller = useRef<AbortController | null>(null)
   const busy = status === 'waiting' || status === 'streaming'
 
@@ -51,6 +53,7 @@ export function Chat() {
     setAnswer('')
     setFailure(null)
     setMeta(null)
+    setSteps([])
     setStatus('waiting')
     try {
       for await (const event of streamChat(message, controller.current.signal)) {
@@ -61,6 +64,9 @@ export function Chat() {
             runbooksInContext: event.runbooksInContext,
             retrieval: event.retrieval,
           })
+        } else if (event.type === 'tool') {
+          const step = event.ok ? event.summary : `failed (${event.summary})`
+          setSteps((s) => [...s, `${event.name}: ${step}`])
         } else if (event.type === 'token') {
           setStatus('streaming')
           // Tokens carry their own spacing and newlines: append verbatim.
@@ -131,7 +137,8 @@ export function Chat() {
 
       <p className="status" role="status">
         {STATUS_TEXT[status]}
-        {meta && ` · ${meta.alertsInContext} alerts in context`}
+        {meta?.alertsInContext != null && ` · ${meta.alertsInContext} alerts in context`}
+        {steps.map((step) => ` · ${step}`)}
         {meta?.retrieval && ` · ${meta.runbooksInContext} runbook sections`}
         {meta?.ttftMs != null && ` · first token ${Math.round(meta.ttftMs)} ms`}
       </p>

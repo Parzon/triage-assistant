@@ -10,6 +10,7 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.util.types import AttributeValue
 
+from app.agent import AGENT_PROMPT_REF
 from app.llm import LLMClient, PromptRef
 from app.tracing import trace_id
 from app.triage import PROMPT
@@ -236,6 +237,8 @@ def summarize(
                         "error": r.answer.error,
                         "finish_reason": r.answer.finish_reason,
                         "completion_tokens": r.answer.completion_tokens,
+                        "model_calls": r.answer.model_calls,
+                        "tool_calls": r.answer.tool_calls,
                         "judge_reason": r.judge_reason,
                         "citations": r.answer.citations,
                         "invalid_citations": list(r.answer.invalid_citations),
@@ -253,13 +256,17 @@ def summarize(
         k["gated"] += int(bool(c["gated"]))
     latency = [r.answer.latency_s for r in results if not r.answer.error]
     ttft = [r.answer.ttft_s for r in results if r.answer.ttft_s is not None]
+    # The api target answers with the service's CHAT_MODE: an agent run's
+    # answers come from the agent's prompt.
+    agent = bool(results) and all(r.answer.mode == "agent" for r in results)
+    prompt = AGENT_PROMPT_REF if agent else PROMPT
     return {
         "target": target,
         "mode": mode,
         "model": model,
         # Which prompt the answers came from: a report from another version
         # is a comparison between prompts, not a regression of one.
-        "prompt": {"name": PROMPT.name, "version": PROMPT.version, "sha256": PROMPT.sha256},
+        "prompt": {"name": prompt.name, "version": prompt.version, "sha256": prompt.sha256},
         "cases": cases,
         "kinds": kinds,
         "latency_s": {"p50": _pct(latency, 50), "p95": _pct(latency, 95)},
@@ -269,6 +276,9 @@ def summarize(
             "completion": sum(r.answer.completion_tokens or 0 for r in results),
         },
         "calls": len(results),
+        # Api target only: model calls and tool calls, over every answer.
+        "model_calls": sum(r.answer.model_calls or 0 for r in results),
+        "tool_calls": sum(r.answer.tool_calls or 0 for r in results),
         "judge": (
             {"model": judge.model, "asked": judge.asked, "missing": judge.missing}
             if judge

@@ -218,6 +218,21 @@ describe('Chat', () => {
     expect(screen.queryByRole('region', { name: 'Referenced runbook sections' })).not.toBeInTheDocument()
   })
 
+  it('shows what the agent read, as it reads it', async () => {
+    const stream = controllableStream()
+    await ask()
+    stream.send('meta', { request_id: 'r1', model: 'm', mode: 'agent', alerts_in_context: null })
+    stream.send('tool', { name: 'list_alerts', ok: true, summary: '3 critical alerts' })
+    stream.send('tool', { name: 'search_runbooks', ok: false, summary: 'timed out' })
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'list_alerts: 3 critical alerts · search_runbooks: failed (timed out)',
+      ),
+    )
+    expect(screen.getByRole('status')).not.toHaveTextContent('alerts in context')
+    stream.close()
+  })
+
   it('shows an empty answer from the model as an error, not as done', async () => {
     const stream = controllableStream()
     await ask()

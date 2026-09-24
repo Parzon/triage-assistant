@@ -36,6 +36,11 @@ class Answer:
     invalid_citations: tuple[str, ...] = ()
     # What the service retrieved (api target), else None.
     runbooks_in_context: int | None = None
+    # How the service answered (api target): its CHAT_MODE, the model calls
+    # the answer took, and the tools the agent called.
+    mode: str | None = None
+    model_calls: int | None = None
+    tool_calls: int | None = None
 
 
 class Target(Protocol):
@@ -108,6 +113,8 @@ async def collect(
                 continue
             if isinstance(item, Finish):
                 finish = item.reason
+                continue
+            if not isinstance(item, str):  # a ToolCall: none, no tools offered
                 continue
             if ttft is None:
                 ttft = time.perf_counter() - start
@@ -256,8 +263,10 @@ class ApiTarget:
                     elif event == "error":
                         error = f"{data.get('code')}: {data.get('message')}"
         usage = done.get("usage") if isinstance(done.get("usage"), dict) else None
-        in_context = meta.get("alerts_in_context")
-        runbooks = meta.get("runbooks_in_context")
+        # What the answer had, as it ended: an agent's context is only known
+        # then (the start-of-stream counts are None and 0).
+        in_context = done.get("alerts_in_context", meta.get("alerts_in_context"))
+        runbooks = done.get("runbooks_in_context", meta.get("runbooks_in_context"))
         cited = done.get("citations")
         invalid = done.get("invalid_citations")
         return Answer(
@@ -274,4 +283,11 @@ class ApiTarget:
             ),
             invalid_citations=tuple(str(i) for i in invalid) if isinstance(invalid, list) else (),
             runbooks_in_context=runbooks if isinstance(runbooks, int) else None,
+            mode=str(meta["mode"]) if meta.get("mode") else None,
+            model_calls=_int(done.get("model_calls")),
+            tool_calls=_int(done.get("tool_calls")),
         )
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) else None
