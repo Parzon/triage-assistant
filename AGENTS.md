@@ -43,6 +43,11 @@ Run `make` to list every target. The ones you need most:
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
+- Supply chain (ADR-0022, CI's `security` job): `make secrets-scan`
+  (gitleaks, every commit), `make scan` (Trivy: the production images and
+  the web's runtime dependencies; a fixable HIGH or CRITICAL fails),
+  `make scan-compose` (the compose files' images, weekly). Base images
+  are pinned by tag and digest: change both, or let Dependabot do it.
 - Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge;
   signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)
 - Sessions for scripts: `make session [groups="team:default:admin org:admin"]` prints a
@@ -186,6 +191,10 @@ Access control, for every change that touches data:
   the PR description first.
 - Don't edit a merged `docs/adr/*.md` file — write a new ADR that
   supersedes it instead.
+- Don't make a scan pass by exempting its finding. An entry in
+  `.trivyignore.yaml` needs a statement (why, who accepted) and an expiry
+  at most 90 days out; a line in `.gitleaks.toml` or `.gitleaksignore`
+  needs the value shown to be fake. A real secret is rotated first.
 - Don't weaken, delete or re-label an eval case, a calibration answer or a
   retrieval question to make a run pass. A failing case is a claim to investigate: read the
   answer and the judge's reason, and change a check only when the check is

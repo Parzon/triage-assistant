@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check session revoke reembed seed load \
+        backup restore drills image-check scan scan-compose secrets-scan session revoke reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
 help: ## List all targets
@@ -155,6 +155,41 @@ typecheck: ## mypy (strict) on the api, tsc on the web
 	$(DEV) run --rm --no-deps api mypy
 	$(DEV) run --rm --no-deps web npx tsc -b
 
+# --- Supply chain: known vulnerabilities, leaked secrets (ADR-0022) -----------
+# The scanners run from images pinned by digest. In March 2026 Trivy's own
+# releases (0.69.4 to 0.69.6) and its GitHub Action's tags were replaced by
+# code that stole CI credentials: a scanner is supply chain too.
+TRIVY := docker run --rm -v "$(CURDIR):/src:ro" -v triage-assistant-trivy-cache:/root/.cache/trivy \
+  aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+GITLEAKS := docker run --rm $(AS_ME) -v "$(CURDIR):/repo:ro" \
+  ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+# What fails a build or a release: HIGH or CRITICAL, with a fixed version to
+# move to. An accepted risk goes in .trivyignore.yaml with a reason and an
+# expiry date (scripts/check_trivyignore.py refuses one without either).
+SCAN := --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --table-mode detailed \
+  --ignorefile /src/.trivyignore.yaml
+
+# Built here and saved to a file for Trivy: no Docker socket in the scanner.
+scan: ## Scan the production images and the web's dependencies; fail on fixable HIGH/CRITICAL (Trivy)
+	@python3 scripts/check_trivyignore.py
+	docker build -q --target production -t triage-assistant-api:scan apps/api >/dev/null
+	docker build -q --target production -t triage-assistant-web:scan apps/web >/dev/null
+	docker build -q -t triage-assistant-edge:scan tools/edge >/dev/null
+	@mkdir -p .scan; trap 'rm -rf .scan' EXIT; status=0; \
+	  for image in api web edge; do echo "== triage-assistant-$$image"; \
+	    docker save -o .scan/$$image.tar triage-assistant-$$image:scan \
+	    && $(TRIVY) image $(SCAN) --input /src/.scan/$$image.tar || status=1; done; \
+	  echo "== apps/web/package-lock.json (runtime dependencies)"; \
+	  $(TRIVY) fs $(SCAN) --scanners vuln /src/apps/web || status=1; exit $$status
+
+scan-compose: ## Scan the third-party images the compose files run (Postgres, PgBouncer, Valkey, Keycloak, monitoring)
+	@python3 scripts/check_trivyignore.py
+	@status=0; for image in $$($(PROD) --profile '*' config --images | grep -v '^triage-assistant' | sort -u); do \
+	  echo "== $$image"; $(TRIVY) image $(SCAN) $$image || status=1; done; exit $$status
+
+secrets-scan: ## Leaked secrets in every commit (gitleaks); fake credentials on purpose: .gitleaks.toml
+	$(GITLEAKS) git --no-banner --redact --config /repo/.gitleaks.toml --gitleaks-ignore-path /repo/.gitleaksignore /repo
+
 # --- Tests -------------------------------------------------------------------
 
 test: test-api test-web ## Every test suite (api + web), as CI runs them
@@ -203,11 +238,13 @@ check: lint typecheck test ## Everything CI checks, before you push
 
 # The production api image, checked the way CI checks it (CI calls this target).
 IMG := triage-assistant-api:check
-image-check: ## Build the production api image; assert non-root, no dev tools, every module imports
+image-check: ## Build the production api image; assert non-root, no dev tools or pip, every module imports
 	docker build -q --target production -t $(IMG) apps/api >/dev/null
 	test "$$(docker run --rm --entrypoint id $(IMG) -u)" = "10001"
 	@if docker run --rm --entrypoint sh $(IMG) -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then \
 	  echo "dev tooling found in the production image"; exit 1; fi
+	@if docker run --rm --entrypoint sh $(IMG) -c 'ls -d /usr/local/lib/python3*/site-packages/pip' >/dev/null 2>&1; then \
+	  echo "pip found in the production image"; exit 1; fi
 	@# Tests run with dev dependencies installed, so an import that only resolves
 	@# through a test tool passes CI and crashes production. Read-only rootfs +
 	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
@@ -216,7 +253,7 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 	@# write into the server's metrics directory - here one it could not write.
 	docker run --rm --read-only --tmpfs /tmp -e PROMETHEUS_MULTIPROC_DIR=/not-writable \
 	  --entrypoint python $(IMG) -m app.cli --help >/dev/null
-	@echo "production image: non-root, no dev tools, all modules import, the CLI runs"
+	@echo "production image: non-root, no dev tools or pip, all modules import, the CLI runs"
 
 # --- Debugging toolkit ------------------------------------------------------------
 # ENV=prod points a target at the production-shaped stack instead of dev.

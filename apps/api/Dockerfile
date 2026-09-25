@@ -1,12 +1,14 @@
-ARG PYTHON_VERSION=3.13
+# Base images are pinned by digest as well as tag: a tag can be moved to
+# other content, a digest cannot. Dependabot moves both, in one PR, and the
+# two python lines below together.
 
 # uv comes from its official image at a pinned version. `pip install uv`
 # installed whatever was newest at build time (builds not reproducible)
 # and left pip + uv (80MB) inside the runtime image.
-FROM ghcr.io/astral-sh/uv:0.12.18 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.18@sha256:3adc3706091ce7c2fe595e669628caedd6d951551b92b258b7e7dbe06d9440bc AS uv
 
 # ---- deps: virtualenv with runtime dependencies only ----------------------
-FROM python:${PYTHON_VERSION}-slim AS deps
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS deps
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -49,9 +51,14 @@ EXPOSE 8010
 CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8010", "--reload"]
 
 # ---- production -------------------------------------------------------------
-FROM python:${PYTHON_VERSION}-slim AS production
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS production
 # Numeric UID: Kubernetes' runAsNonRoot can only verify a numeric USER.
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+# pip goes: the virtualenv below is complete, and the base image's pip
+# carries its own vendored libraries with their own vulnerabilities
+# (msgpack, setuptools' pkg_resources: make scan) - and it lets whoever gets
+# code execution install more.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+ && python -m pip uninstall --yes --root-user-action ignore pip
 WORKDIR /api
 # Same path as in the deps stage: a venv's scripts hard-code its location.
 COPY --from=deps /api/.venv /api/.venv

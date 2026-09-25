@@ -7,7 +7,9 @@
 #   kernel refuses to run a binary that asks for capabilities it cannot get;
 # - /data (certificates, the ACME account key) and /config belong to that
 #   user, so the named volumes created from them do too.
-FROM caddy:2.11.4-alpine
+#
+# The base image is pinned by digest as well as tag (Dependabot moves both).
+FROM caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
 RUN apk add --no-cache libcap-setcap \
  && setcap -r /usr/bin/caddy \
  && apk del libcap-setcap \

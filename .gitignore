@@ -30,3 +30,5 @@ test-results/
 .captures/
 # Database dumps (make backup): data, never in git
 backups/
+# Images saved for the vulnerability scan (make scan), removed after it
+.scan/

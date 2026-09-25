@@ -348,19 +348,50 @@ security](ai-security.md).
 - ✅ **GitHub Actions pinned to commit SHAs**, not tags. A tag can be
   moved to malicious code, as in the 2025 tj-actions/changed-files
   compromise.
-- ✅ **Pinned versions** of base images and tools.
+- ✅ **Base images pinned by digest**, not only by tag: a tag like
+  `python:3.13-slim` can be moved to other content, a digest cannot.
+  Dependabot moves tag and digest together, and a rebuilt base (same tag,
+  new digest, security fixes inside) arrives as a PR too. The compose
+  files' images (Postgres, Valkey, the monitoring stack) are pinned by
+  tag, bumped by Dependabot (minor and patch), and scanned weekly.
 - ✅ **Release images carry provenance and an SBOM** (what went into them),
   stored next to them in GHCR.
 - ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates weekly,
   grouped, for GitHub Actions, the api (uv), the web (npm), the e2e
-  suite and the Dockerfiles. Each update is a PR that has to pass CI.
-- 📘 **Image scanning** (Trivy or Grype) on the release images, and a
-  policy on what severity blocks a release.
-- 📘 **Secret scanning** in CI (gitleaks via its CLI; the GitHub Action
-  needs a licence for organisations). Enable GitHub's secret-scanning
-  push protection on the repository too.
-- 📘 **Pin base images by digest** too, with Dependabot bumping them:
-  tags like `python:3.13-slim` move under you.
+  suite, the Dockerfiles and the compose files. Each update is a PR that
+  has to pass CI.
+- ✅ **Vulnerability scanning** (Trivy, `make scan`; ADR-0022): the
+  production images (api, web, edge) and the web's runtime dependencies,
+  on every PR, again before a release publishes anything, and weekly from
+  main (`.github/workflows/scan.yml`, with the compose files' images:
+  `make scan-compose`).
+- ✅ **Secret scanning** (gitleaks, `make secrets-scan`): every commit in
+  the history, on every PR. Files of fake credentials on purpose are
+  exempt (`.gitleaks.toml`), and single old findings by fingerprint
+  (`.gitleaksignore`). A real finding: rotate the secret first, since
+  once pushed it is public; then remove it. 📘 Turn on GitHub's
+  secret-scanning push protection too: it stops the push itself.
+- ✅ **The scanners are pinned by digest as well.** In March 2026 Trivy's
+  own releases (0.69.4 to 0.69.6) and the tags of its GitHub Action were
+  replaced by code that stole CI credentials (CVE-2026-33634). They run
+  from images, not third-party Actions.
+
+**The policy, and who owns it.** A fixable HIGH or CRITICAL finding
+blocks the merge and the release; "fixable" means a fixed version exists
+to move to. When nothing can be moved to yet, the risk may be accepted in
+`.trivyignore.yaml`: one entry per finding, with the reason
+(`statement`) and an expiry date at most 90 days out (`expired_at`).
+`make scan` refuses an entry without either, and the code owners approve
+every change to the file. The severity that blocks, and who may accept,
+are the lead's call: change `SCAN` in the Makefile and `.github/CODEOWNERS`.
+
+What the first scan found, and what was done:
+
+| Finding | Where | Done |
+|---|---|---|
+| `msgpack` 1.1.2, `setuptools` 70.3.0 (HIGH, fixed) | inside pip, in the Python base image | pip removed from the production image, which never used it; `make image-check` now refuses an image with pip |
+| `libexpat` 2.8.4 (HIGH, fixed) | nginx's optional modules | the `-slim` nginx variant: same nginx, no optional modules or curl, no findings |
+| 17 in Go and its modules (HIGH, fixed upstream) | the Caddy binary of the TLS edge | no Caddy release carries the fixes yet: accepted until 2026-10-25. The way out before then is building Caddy with xcaddy on a patched Go |
 
 ## Before real users 📘
 

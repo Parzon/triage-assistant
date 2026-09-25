@@ -20,3 +20,8 @@
 
 # Decisions are reviewed by whoever owns the architecture
 /docs/adr/             @Parzon
+
+# Accepting a vulnerability or exempting a secret is a decision too
+/.trivyignore.yaml     @Parzon
+/.gitleaks.toml        @Parzon
+/.gitleaksignore       @Parzon

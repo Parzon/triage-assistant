@@ -50,6 +50,10 @@ jobs:
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - name: Production api image - non-root, no dev tools, every module imports
         run: make image-check
+      # Again at release, not only at merge: vulnerabilities published since
+      # the PR merged block the release too (ADR-0022).
+      - name: No fixable HIGH or CRITICAL vulnerability in what ships (Trivy)
+        run: make scan
 
   # One native build per image and architecture: no emulation, so an arm64
   # build is as fast and as faithful as an amd64 one. Each pushes by digest;
