@@ -7,10 +7,7 @@ cites each section it uses as `[R1]`. This chapter covers:
 - how to operate it;
 - what is not built yet.
 
-The decision record is ADR-0017, the proposal RFC-0001. To see each
-failure for yourself, run the hands-on lab,
-[labs/rag-debugging](../../labs/rag-debugging/README.md): ten exercises,
-one per stage.
+The decision record is ADR-0017, the proposal RFC-0001.
 
 ✅ = built and measured here (gpt-oss:20b and nomic-embed-text through
 Ollama, one RTX 6000 Ada). 📘 = not built yet.
@@ -20,13 +17,13 @@ Ollama, one RTX 6000 Ada). 📘 = not built yet.
 | Stage | Where | What goes wrong | How you see it |
 |---|---|---|---|
 | Ingestion | `POST /runbooks` → `save_runbook` | the runbook is missing, stale, or embedded another way than today's settings | `GET /runbooks`; search reports `keyword_only (no_current_vectors)` |
-| Parsing | `split_sections` | a `#` comment in a code block taken for a heading | `lab sections --naive` |
-| Chunking | `split_sections`, max 300 words | too small: a step loses its condition; too large: one match diluted | `lab sections --max-words` |
+| Parsing | `split_sections` | a `#` comment in a code block taken for a heading | the headings of search hits; `split_sections`' unit tests |
+| Chunking | `split_sections`, max 300 words | too small: a step loses its condition; too large: one match diluted | the `sections` count `POST /runbooks` returns; the hits' text |
 | Embedding | `Embedder.embed`, task prefixes | a missing or changed prefix; the wrong dimensions | the embedding key; a clear error for the dimensions |
 | Retrieval | `search_runbooks`: full-text + pgvector | a paraphrase missed by keywords; a rare identifier blurred by embeddings | `POST /runbooks/search` with `mode` |
 | Fusion | reciprocal rank fusion | a confident wrong keyword match outranks the semantic winner | each retriever's rank in the search response |
-| Team filter | `team_id = ANY(...)`, row-level security | an approximate index filtered after the scan finds nothing | `make rag-overfiltering-lab` |
-| Context | `RAG_CONTEXT_CHUNKS` (4) | the right section ranked 5th, and cut | `meta.runbooks_in_context`; `lab ask` |
+| Team filter | `team_id = ANY(...)`, row-level security | an approximate index filtered after the scan finds nothing | `make bench-rag-filter` |
+| Context | `RAG_CONTEXT_CHUNKS` (4) | the right section ranked 5th, and cut | `meta.runbooks_in_context`; the request's trace |
 | Prompt | prompt v6, `build_messages` | a rule firing on the wrong list | the evals |
 | Generation | the model | a section in context, ignored or misused; an invented step | the citations; the judge |
 | Evaluation | the checks, the judge | a check failing correct answers | read the failing answers |
@@ -66,7 +63,7 @@ default, and filters come after. When the caller's teams own few of the
 rows, the candidates can all be someone else's.
 
 Measured on 50,000 sections in 100 teams, as a viewer of one team (`make
-rag-overfiltering-lab`):
+bench-rag-filter`):
 
 | Query | Found (of 20) | Time |
 |---|---|---|
@@ -75,7 +72,7 @@ rag-overfiltering-lab`):
 | every row compared, no index | 20 | 6.5 ms |
 | **the service:** a plain `team_id = ANY(...)` | 20 (the team's rows, by their index, sorted exactly) | **0.8 ms** |
 
-That is one run, the lab's. Over three runs, iterative scans took 32 to
+That is one run. Over three runs, iterative scans took 32 to
 71 ms, the service's query 0.8 to 1.6 ms, and the first configuration
 found 0 or 1 of 20. The order never changed.
 
@@ -115,8 +112,8 @@ What the table says, and does not:
   search do better.
 - **Hybrid is not always better than semantic alone.** Fusion weights
   both lists equally. One confident wrong keyword match ("back" in "comes
-  back down" matching "Roll back") outranked the semantic winner (lab,
-  exercise 1). A reranker is the known fix 📘.
+  back down" matching "Roll back") outranked the semantic winner. A
+  reranker is the known fix 📘.
 - **Prefixes changed recall by nothing here, and changed distances a
   lot.** embeddinggemma with its prompts put relevant sections at most
   0.57 away and unanswerable questions at least 0.69 away: a clean gap.
@@ -152,7 +149,7 @@ What went wrong on the way, and each fix:
 | The model repeated a password planted as a fake conversation: 2 runs in 110; 2 in 200 with a stronger rule | a prompt rule is probabilistic | **credentials redacted before the prompt** (`app/redact.py`): 0 in 200, by construction |
 | Correct answers failed the citation check, 3 in 20 | the model cites as `(R1)`, `【R1】`, `[**R1**]`, bare "R1" | any standalone `R<number>` counts |
 | A correct answer failed "cites nothing" | it named [R1] and [R2] to say they did not apply | the check was dropped; the judge decides |
-| One "There are no alerts." in 10, with an alert present | suspected: `(none)` written for both lists | a distinct marker. **Not proven**: 0 in 60 runs when put back (lab, exercise 9) |
+| One "There are no alerts." in 10, with an alert present | suspected: `(none)` written for both lists | a distinct marker. **Not proven**: 0 in 60 runs when put back |
 | With one section in context, the model invented a step, without the runbook's safety conditions | the most important section ranked last for that wording | the context holds 4 sections; small-to-big retrieval 📘 |
 
 The cost, through the service:

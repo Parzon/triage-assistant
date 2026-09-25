@@ -44,8 +44,8 @@ log = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 # About 400 tokens: specific enough to rank, long enough to hold a step
-# with its context. The RAG debugging lab shows what too small and too
-# large do to retrieval.
+# with its context. Too small loses a step's condition; too large dilutes
+# one match (docs/handbook/rag.md).
 MAX_SECTION_WORDS = 300
 # Candidates each retriever contributes before fusion.
 CANDIDATES = 20
@@ -318,7 +318,7 @@ _QUERY_TERMS = """
 # 0 results without iterative scans (all 40 candidates were other teams'),
 # 20 in 32-71 ms with them. The plain "team_id = ANY(...)" lets the planner
 # read the team's rows by its index and sort them exactly: 20 in 0.8-1.6 ms
-# (three runs of make rag-overfiltering-lab).
+# (three runs of make bench-rag-filter).
 _ALL_TEAMS = "TRUE"
 _SOME_TEAMS = "c.team_id = ANY(CAST(:team_ids AS bigint[]))"
 _KEYWORD = """

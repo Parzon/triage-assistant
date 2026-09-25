@@ -27,8 +27,8 @@ needs a real cloud account). Where the two differ, trust ✅.
 | on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [infrastructure Q&A](docs/handbook/infrastructure-qa.md) (reproducibility, scale) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
 | taking it to production | [going to production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) |
 | changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
-| changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` → [the RAG debugging lab](labs/rag-debugging/README.md) |
-| an answer got worse or slower | [AI observability](docs/handbook/ai-observability.md): read its trace → [the AI observability lab](labs/ai-observability/README.md) |
+| changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` |
+| an answer got worse or slower | [AI observability](docs/handbook/ai-observability.md): read its trace |
 | deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
 
 ## The system on one page
@@ -85,7 +85,6 @@ host, a secret store on a platform.
 apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals, the retrieval benchmark), tests/{unit,integration}, migrations/
 apps/web/        React + Vite UI (Node 24); nginx config for production
 tools/           mock-llm (a provider stand-in with failure modes, chat and embeddings), the TLS edge image
-labs/            hands-on exercises, one fault at a time: rag-debugging (each stage of runbook retrieval)
 tests/           e2e (Playwright through production nginx), load (k6)
 infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
 scripts/         deploy, backup, restore, failure drills, SQL helpers
@@ -218,18 +217,18 @@ Each rule exists because breaking it cost something measurable here.
 | [Testing](docs/handbook/testing.md) | writing tests; what each layer proves; which layer caught which real bug |
 | [Debugging](docs/handbook/debugging.md) | something is wrong: symptom → tool, how each tool works, real output |
 | [Observability](docs/handbook/observability.md) | adding metrics, panels or alerts; reading the dashboard |
-| [AI observability](docs/handbook/ai-observability.md) | an answer got worse or slower: tracing it through retrieval and the model; what spans may hold; what tracing costs; with a hands-on [lab](labs/ai-observability/README.md) |
+| [AI observability](docs/handbook/ai-observability.md) | an answer got worse or slower: tracing it through retrieval and the model; what spans may hold; what tracing costs |
 | [Performance](docs/handbook/performance.md) | something is slow; capacity numbers; how the bottlenecks were found |
 | [Load testing](docs/handbook/load-testing.md) | choosing a tool; open vs closed models; reference scripts for six tools |
 | [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
 | [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
 | [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
-| [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
+| [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed` |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
-| [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped; with a hands-on [lab](labs/ai-cost/README.md) |
+| [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped |
 | [Agents](docs/handbook/agents.md) | an agent or a pipeline (measured); how the agent and its tools work; the tools over MCP; approval gates and multi-agent designs, not built |
-| [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools; with a hands-on [lab](labs/ai-security/README.md) |
+| [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools |
 | [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
 | [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
 | [Infrastructure Q&A](docs/handbook/infrastructure-qa.md) | an infrastructure team's questions: reproducibility, scale, limits, backups, Kubernetes |
@@ -649,8 +648,7 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
   shows the processor. Recreate the container.
 
 ### AI security
-The evidence is in [AI security](docs/handbook/ai-security.md) and
-[the lab](labs/ai-security/README.md).
+The evidence is in [AI security](docs/handbook/ai-security.md).
 - **`\bpassword` never matches `DB_PASSWORD`**: `_` is a word character.
   The first redactor caught 17 of 54 secrets in real log shapes. Match
   names that *end* with the word, and leave `max_tokens` alone.
@@ -694,13 +692,13 @@ Measured with gpt-oss:20b; the evidence is in [Agents](docs/handbook/agents.md).
 
 ### Runbook retrieval (RAG)
 Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
-[RAG](docs/handbook/rag.md) and [the lab](labs/rag-debugging/README.md).
+[RAG](docs/handbook/rag.md).
 - **A team filter under an approximate vector index can find nothing.**
   HNSW hands back its 40 nearest rows, then the filter runs. With 1% of
   the rows the caller's, a one-team search found 0 of 20, and nothing
   failed. Send the filter as a plain `team_id = ANY(...)`, never behind
   an OR, and turn on iterative scans (pgvector 0.8+) where there is no
-  filter. `make rag-overfiltering-lab` shows all four plans.
+  filter. `make bench-rag-filter` shows all four plans.
 - **Change the embedding model, its dimensions or its document prefix,
   and every stored vector is meaningless against new questions.**
   Similarity search still returns rows. Here each vector carries the key
@@ -854,7 +852,7 @@ Measured building the traces; the evidence is in
 ### Shell, Git, host
 - **`git checkout <file>` to undo an experiment discards every other
   uncommitted change in that file.** A documented correction was lost this
-  way, and its lab kept saying it had been made. Commit first, or revert
+  way, and the notes kept saying it had been made. Commit first, or revert
   the experiment with a reverse patch (`git diff > x.patch; git apply -R`).
 - **In a YAML folded block (`>-`), a more-indented line keeps its
   newline**: cloud-init's secret loop, continued on an indented line,

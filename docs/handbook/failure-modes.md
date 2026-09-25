@@ -247,7 +247,7 @@ risk remains.
 - *A blocked event loop* (sync I/O or CPU work in async code) stalls every
   request on that worker. It shows as `event_loop_lag_seconds`
   (`EventLoopLagHigh`). After `timeout` (30 s) without a heartbeat,
-  gunicorn kills it (`WORKER TIMEOUT`). ✅ in the performance lab.
+  gunicorn kills it (`WORKER TIMEOUT`). ✅ in the load tests.
 - The worker count follows the CPU limit. More workers than CPUs only
   adds contention.
 
@@ -272,7 +272,7 @@ risk remains.
 - *Slow query:* `statement_timeout` (10 s), then 503, and
   `SlowRequests` fires.
 - *Lock queue:* a DDL statement waiting behind a long transaction makes
-  every later query on the table wait behind the DDL (✅ lab, `make
+  every later query on the table wait behind the DDL (✅ measured, `make
   db-locks`). Migrations set `lock_timeout` 5 s so they give up instead.
 - *Out of connections:* PgBouncer caps server connections at 20, well
   under Postgres' 100.
@@ -317,7 +317,7 @@ risk remains.
 
 **Host / VM.**
 - Everything shares one machine's CPU, memory and disk, so a noisy
-  neighbour (a load generator on the same box, ✅ measured in the lab)
+  neighbour (a load generator on the same box, ✅ measured in the load tests)
   skews everything.
 - Disk: logs are rotated (3 × 10 MB per container), Prometheus is capped
   (15 d / 2 GB), and the disk alerts fire first.
@@ -354,7 +354,7 @@ risk remains.
 
 ## Scalability bottlenecks, in the order they bite ✅
 
-Measured in the performance lab. The performance chapter has the method
+Measured in the load tests. The performance chapter has the method
 and the raw numbers.
 
 1. **A missing index.** Newest-first reads were parallel scans of 2 M

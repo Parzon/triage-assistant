@@ -22,7 +22,7 @@ S    ?=
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore drills image-check session revoke reembed seed load \
-        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals rag-overfiltering-lab
+        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
 help: ## List all targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -121,13 +121,13 @@ ollama-pull: ## Download a model into the local Ollama: make ollama-pull m=llama
 	$(DEV) --profile ollama up -d --wait ollama
 	$(DEV) --profile ollama exec ollama ollama pull $(m)
 
-# --- The RAG debugging lab (labs/rag-debugging/README.md) ---------------------------
+# --- Runbook search under a team filter (docs/handbook/rag.md) --------------------
 
-rag-overfiltering-lab: ## Vector search behind a team filter, four ways, on 50,000 lab sections (dev db; ~3 min)
-	$(DEV) exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-seed.sql
-	$(DEV) exec -T db sh -c 'export TEAM_ID=$$(psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT id FROM teams WHERE slug = '"'"'lab-t42'"'"'"); \
-	  PGPASSWORD="$$APP_DB_PASSWORD" psql -q -h localhost -U "$$APP_DB_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-query.sql
-	$(DEV) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-cleanup.sql
+bench-rag-filter: ## Vector search behind a team filter, four ways, on 50,000 synthetic sections (dev db; ~3 min)
+	$(DEV) exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-seed.sql
+	$(DEV) exec -T db sh -c 'export TEAM_ID=$$(psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT id FROM teams WHERE slug = '"'"'bench-t42'"'"'"); \
+	  PGPASSWORD="$$APP_DB_PASSWORD" psql -q -h localhost -U "$$APP_DB_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-query.sql
+	$(DEV) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-cleanup.sql
 
 # --- Evals (apps/api/evals; docs/handbook/ai-engineering.md) -------------------------
 # In the running dev api: the service's own settings, prompt and model client.
@@ -293,7 +293,7 @@ audit-prune: ## Delete audit events older than days= (no default: your retention
 	@$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
 	  "DELETE FROM audit_events WHERE created_at < now() - make_interval(days => $(days))"'
 
-# --- Performance lab ------------------------------------------------------------
+# --- Load tests ------------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through
 # nginx, from a container on its network. Raise the rate limits for them:
 #   ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up

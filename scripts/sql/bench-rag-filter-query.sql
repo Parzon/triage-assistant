@@ -1,6 +1,6 @@
--- As the app's role (row-level security applies), a viewer of one lab team
--- (1% of the rows): the 20 nearest sections, four ways. `make
--- rag-overfiltering-lab` runs it; read the "rows=" of each Limit line.
+-- As the app's role (row-level security applies), a viewer of one benchmark
+-- team (1% of the rows): the 20 nearest sections, four ways. `make
+-- bench-rag-filter` runs it; read the "rows=" of each Limit line.
 --
 -- The vector is a bound parameter, as in the service: a prepared statement
 -- with a generic plan (and the plans show $1, not 768 numbers).
@@ -11,11 +11,11 @@ BEGIN;
 SELECT set_config('app.read_team_ids', '{' || :team_id || '}', true) \g /dev/null
 PREPARE nearest(vector) AS
   SELECT c.id FROM runbook_chunks c
-  WHERE c.embedding_key = 'lab-random'
+  WHERE c.embedding_key = 'bench-random'
   ORDER BY c.embedding <=> $1 LIMIT 20;
 PREPARE nearest_in_team(vector, bigint[]) AS
   SELECT c.id FROM runbook_chunks c
-  WHERE c.embedding_key = 'lab-random' AND c.team_id = ANY($2)
+  WHERE c.embedding_key = 'bench-random' AND c.team_id = ANY($2)
   ORDER BY c.embedding <=> $1 LIMIT 20;
 
 \echo '=== 1. HNSW index, team filtered after the scan, iterative scans off'
@@ -32,7 +32,7 @@ EXPLAIN (ANALYZE, COSTS OFF) EXECUTE nearest(:'v');
 SET LOCAL enable_indexscan = off;
 PREPARE nearest_exact(vector) AS
   SELECT c.id FROM runbook_chunks c
-  WHERE c.embedding_key = 'lab-random'
+  WHERE c.embedding_key = 'bench-random'
   ORDER BY c.embedding <=> $1 LIMIT 20;
 EXPLAIN (ANALYZE, COSTS OFF) EXECUTE nearest_exact(:'v');
 SET LOCAL enable_indexscan = on;

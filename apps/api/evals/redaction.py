@@ -1,6 +1,6 @@
-"""How much does the redactor catch? (app/redact.py; the AI security lab.)
+"""How much does the redactor catch? (app/redact.py, docs/handbook/ai-security.md)
 
-Run by `labs/ai-security/lab redaction`, inside the dev api container.
+    python -m evals.redaction [tuning|heldout|both]    # in the api container
 
 Two sets of fake credentials, in the shapes alerts and logs carry them, and
 ordinary ops text that must come through unchanged:
@@ -8,6 +8,11 @@ ordinary ops text that must come through unchanged:
 - the HELD-OUT set: written before the patterns changed, and not looked at
   while changing them. A score on the tuning set shows the patterns fit it;
   only the held-out score says how they do on shapes nobody tuned them to.
+  Its three first misses were fixed since, so it is no longer unseen: an
+  honest estimate for a new redactor needs a new held-out set.
+
+tests/unit/test_redaction_corpus.py fails when a change catches less than
+today, or changes an ordinary line.
 
 Every fake is assembled at runtime from random characters, so this file
 holds no string a secret scanner would flag. A secret counts as caught when
@@ -19,10 +24,12 @@ import random
 import string
 import sys
 import uuid
+from dataclasses import dataclass
 
 from app.redact import redact
 
-rng = random.Random(20260924)  # noqa: S311 - seeded on purpose: the same fakes every run
+SEED = 20260924
+rng = random.Random(SEED)  # noqa: S311 - seeded on purpose: the same fakes every run
 UP, LOW, DIG = string.ascii_uppercase, string.ascii_lowercase, string.digits
 ALNUM = UP + LOW + DIG
 B64 = ALNUM + "+/"
@@ -290,9 +297,16 @@ def heldout_negatives() -> list[tuple[str, str]]:
     ]
 
 
-def score(
-    label: str, positives: list[tuple[str, str, str]], negatives: list[tuple[str, str]]
-) -> None:
+@dataclass(frozen=True)
+class Score:
+    secrets: int
+    missed: list[str]
+    lines: int
+    # (name, the line after redaction)
+    changed: list[tuple[str, str]]
+
+
+def score(positives: list[tuple[str, str, str]], negatives: list[tuple[str, str]]) -> Score:
     missed = []
     for name, text, secret in positives:
         out, _ = redact(text)
@@ -300,19 +314,28 @@ def score(
         if any(p[i : i + 8] in out for p in parts for i in range(max(1, len(p) - 7))):
             missed.append(name)
     changed = [(name, redact(text)[0]) for name, text in negatives if redact(text)[0] != text]
-    print(
-        f"{label}: caught {len(positives) - len(missed)} of {len(positives)} secrets; "
-        f"changed {len(changed)} of {len(negatives)} ordinary lines"
-    )
-    for name in missed:
-        print(f"  missed:  {name}")
-    for name, out in changed:
-        print(f"  changed: {name}: {out[:100]}")
+    return Score(len(positives), missed, len(negatives), changed)
+
+
+def scores() -> dict[str, Score]:
+    """Both sets, generated in the same order from the same seed every time."""
+    rng.seed(SEED)
+    return {
+        "tuning": score(positives(), negatives()),
+        "heldout": score(heldout_positives(), heldout_negatives()),
+    }
 
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "both"
-    if which in ("tuning", "both"):
-        score("tuning set", positives(), negatives())
-    if which in ("heldout", "both"):
-        score("held-out set", heldout_positives(), heldout_negatives())
+    for label, result in scores().items():
+        if which not in (label, "both"):
+            continue
+        print(
+            f"{label} set: caught {result.secrets - len(result.missed)} of {result.secrets} "
+            f"secrets; changed {len(result.changed)} of {result.lines} ordinary lines"
+        )
+        for name in result.missed:
+            print(f"  missed:  {name}")
+        for name, out in result.changed:
+            print(f"  changed: {name}: {out[:100]}")

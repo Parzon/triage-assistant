@@ -3,7 +3,6 @@
 What changes when a service has a language model in it, what this one does
 about it, and what was measured. General security (sign-in, roles,
 secrets, the network, the supply chain) is in [Security](security.md).
-The hands-on part is [labs/ai-security](../../labs/ai-security/README.md).
 ✅ = in place and checked here, 📘 = documented practice, not built here.
 
 ## What changes
@@ -51,9 +50,10 @@ own rule ("never repeat credentials") failed about 1 run in 100; redaction
 does not fail for the formats it knows, and it keeps them from the model
 provider too (OWASP LLM02).
 
-**How much it catches.** Scored with `labs/ai-security/lab redaction`,
-over fake credentials in the shapes logs carry them (env files, JSON,
-YAML, headers, URLs, command lines):
+**How much it catches.** Scored with `python -m evals.redaction` (in the
+api container; the corpus is `apps/api/evals/redaction.py`), over fake
+credentials in the shapes logs carry them (env files, JSON, YAML, headers,
+URLs, command lines):
 
 | | Tuning set (54) | Held-out set (24) |
 |---|---|---|
@@ -64,7 +64,9 @@ YAML, headers, URLs, command lines):
 None of 56 ordinary lines was changed by this redactor. The v0.6.0 one
 changed 2. The held-out set was written before the patterns changed and not
 used to tune them. 21 of 24 is the honest estimate for shapes nobody
-anticipated; its three misses were covered afterwards.
+anticipated; its three misses were covered afterwards. Today both sets
+score in full, and `tests/unit/test_redaction_corpus.py` keeps it so: a
+change to the patterns may catch more, never less.
 
 **Three ways to recognise a secret**, and the patterns use all three:
 - **by name:** an identifier that *ends* with password, secret, token or
@@ -105,7 +107,7 @@ a bad answer: **what was the model given, and who wrote it?**
 | `chat.asked` | every question, before the answer starts | who asked, their teams, the prompt's version and hash, the model, the alert ids and runbook sections in the context, each with its runbook's version hash |
 
 A chat's section hash leads to the save that wrote that version, so from a
-complaint to its author takes two queries (lab, exercise 2).
+complaint to its author takes two queries.
 
 **What it never holds:** the text of a question, an answer, an alert or a
 runbook. Those live in their own tables under their own access rules, and

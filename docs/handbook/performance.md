@@ -168,7 +168,7 @@ provider's quota binds long before 500 concurrent streams.
 
 ## What a blocked event loop looks like
 
-A lab copy of the chat code called a *synchronous* HTTP client inside
+An experimental copy of the chat code called a *synchronous* HTTP client inside
 the async stream (never committed):
 - `/health`, which does no I/O, went from 1.2 ms to up to 4.8 s with 20
   streams.

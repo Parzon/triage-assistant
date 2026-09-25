@@ -49,10 +49,11 @@ Run `make` to list every target. The ones you need most:
   cookie; `make revoke email=...` ends a user's sessions (add `ENV=prod`)
 - Audit trail: `make audit a="--action runbook.saved --target 17"` (add
   `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
-  owner (the api cannot). Hands-on: `labs/ai-security/` (redaction measured,
-  an investigation; docs/handbook/ai-security.md)
+  owner (the api cannot). Redaction's score: `python -m evals.redaction` in
+  the api container; `tests/unit/test_redaction_corpus.py` fails if a
+  change catches less (docs/handbook/ai-security.md)
 - Cost: tokens per answer and where they go, cost per 1,000 questions,
-  self-hosted throughput: `labs/ai-cost/` (docs/handbook/ai-cost.md).
+  self-hosted throughput: docs/handbook/ai-cost.md.
   `OLLAMA_NUM_PARALLEL` sets how many answers the local model batches
 - Agents and MCP (docs/handbook/agents.md): `CHAT_MODE=agent` switches the
   chat to the agent; compare it with the pipeline by running `make evals
@@ -72,8 +73,8 @@ Run `make` to list every target. The ones you need most:
   user input).
 - Debugging: `make debug-up` (breakpoints from VS Code, `.vscode/launch.json`),
   `make trace id=<request id>` (one request across nginx and the api, then
-  its Jaeger link), `labs/ai-observability/` (a worse answer, diagnosed from its
-  trace; docs/handbook/ai-observability.md),
+  its Jaeger link; a worse answer, diagnosed from its trace:
+  docs/handbook/ai-observability.md),
   `make db-activity` / `db-locks` / `db-top-queries` (add `ENV=prod` for
   the production stack).
 - Releases and hosts: a `vX.Y.Z` tag on main publishes the api, web and edge images (amd64 + arm64) to GHCR
@@ -97,8 +98,8 @@ Run `make` to list every target. The ones you need most:
 - Runbook search (RAG, docs/handbook/rag.md): after changing `EMBEDDING_MODEL`,
   `EMBEDDING_DIMENSIONS` or `EMBEDDING_DOCUMENT_PREFIX`, run `make reembed` (add
   `ENV=prod`). Before merging a retrieval or embedding change: `make evals
-  a="--target retrieval"` (recall@k, MRR), before/after in the PR. Hands-on
-  debugging: `labs/rag-debugging/` (`make rag-overfiltering-lab`).
+  a="--target retrieval"` (recall@k, MRR), before/after in the PR. A team
+  filter under the vector index, measured: `make bench-rag-filter`.
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults

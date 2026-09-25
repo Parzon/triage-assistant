@@ -39,8 +39,7 @@ resisting prompt injection, never crossing teams
 ([AI engineering](docs/handbook/ai-engineering.md)).
 
 Runbook search needs an embedding model (`EMBEDDING_MODEL`; the mock
-has one). How it works, what was measured, and a hands-on debugging lab:
-[RAG](docs/handbook/rag.md).
+has one). How it works, and what was measured: [RAG](docs/handbook/rag.md).
 
 `make obs-up` starts the monitoring stack and turns tracing on: each
 answer is a trace in Jaeger (http://localhost:16686), from retrieval to
@@ -64,7 +63,6 @@ apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the mode
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, the TLS edge image
 tests/               end-to-end (Playwright) and load tests
-labs/                hands-on exercises: rag-debugging, ai-observability, ai-security, ai-cost
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
 scripts/             deploy, backup/restore, failure drills
 compose.yaml         services shared by every environment

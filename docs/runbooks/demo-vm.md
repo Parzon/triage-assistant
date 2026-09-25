@@ -30,7 +30,7 @@ Why those numbers, measured on this stack:
   Prometheus 1 GiB, Grafana 512 MiB, the rest 128–256 MiB each. 8 GB
   leaves the OS and the page cache room.
 - **CPU:** the api is capped at 2 CPUs and Postgres at 2. On 2 api CPUs
-  the lab measured ~1,000 simple reads/s and 500 concurrent streams
+  the load tests measured ~1,000 simple reads/s and 500 concurrent streams
   before saturating. A demo is far below either.
 - **Disk:** images are 2.9 GB (Grafana alone 1.4 GB). Logs are capped per
   container (3 × 10 MB), Prometheus at 2 GB, and 14 daily dumps of 2 M

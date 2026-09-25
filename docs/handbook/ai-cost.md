@@ -2,9 +2,8 @@
 
 What an answer costs here, where its tokens go, and which settings move the
 bill. Measured with gpt-oss:20b on one local GPU; prices are list prices
-read on 2026-09-24. The exercises and the full numbers are in
-[labs/ai-cost](../../labs/ai-cost/README.md). ✅ = measured here,
-📘 = documented practice, not built here.
+read on 2026-09-24. ✅ = measured here, 📘 = documented practice, not
+built here.
 
 ## The cost model
 

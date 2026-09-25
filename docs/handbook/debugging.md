@@ -162,7 +162,7 @@ handler line.
 `PYTHONASYNCIODEBUG=1` (on under `make debug-up`) makes asyncio log any
 callback that holds the event loop for more than 100 ms. It also logs
 coroutines that were created but never awaited, with where they were
-created. In the blocking-client lab (a synchronous HTTP client called
+created. In the blocking-client experiment (a synchronous HTTP client called
 inside an async generator) it logged 60 lines of `Executing <Task ...>
 took 1.3 seconds`, each naming the task. It is too slow for production.
 There, the `event_loop_lag_seconds` metric and the `EventLoopLagHigh`
@@ -220,7 +220,7 @@ make db-top-queries [ENV=prod]  # pg_stat_statements: calls, mean, total, % of a
 make psql                        # then EXPLAIN (ANALYZE, BUFFERS) <query>;
 ```
 
-The lock-queue lab (`db-locks` shows the chain):
+The lock-queue experiment (`db-locks` shows the chain):
 1. A long transaction held a lock.
 2. A migration's `ALTER TABLE` (with no `lock_timeout`) queued behind it.
 3. Every new `SELECT` on the table queued behind the `ALTER`: Postgres

@@ -78,7 +78,7 @@ With tracing on (`make obs-up`), each case's run is a trace: its checks
 are `gen_ai.evaluation.result` events, and through the api target, the
 service's own spans sit under it. The report records each answer's
 `trace_id` and the prompt version: from a failing answer to what it was
-given, in one step (the AI observability lab, exercise 5).
+given, in one step.
 
 **Two targets:**
 - **model:** the production prompt (`build_messages`) around each case's
