@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant reembed seed load \
+        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant retention user-export user-forget reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
 help: ## List all targets
@@ -338,6 +338,21 @@ audit-prune: ## Delete audit events older than days= (no default: your retention
 	@case "$(days)" in ''|*[!0-9]*) echo 'usage: make audit-prune days=<whole days to keep> [ENV=prod]'; exit 2;; esac
 	@$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
 	  "DELETE FROM audit_events WHERE created_at < now() - make_interval(days => $(days))"'
+
+# --- Personal data (app/privacy.py, docs/privacy.md) ---------------------------
+# Operator commands, audited as the CLI. The deleting ones are dry runs until
+# told otherwise: they print exactly what the real run would delete.
+
+retention: ## Delete what is past its retention: expired sessions, inactive users, old alerts (dry run unless apply=1) [ENV=prod]
+	@docker exec $(API_C) python -m app.cli retention $(if $(apply),--apply)
+
+user-export: ## Everything held about a person, as JSON (an access request): make user-export email=... [ENV=prod]
+	@test -n "$(email)" || { echo 'usage: make user-export email=<address> [ENV=prod]'; exit 2; }
+	@docker exec $(API_C) python -m app.cli user-export --email "$(email)"
+
+user-forget: ## Erase a person's accounts; the audit trail keeps pseudonymous events (dry run unless yes=1) [ENV=prod]
+	@test -n "$(email)" || { echo 'usage: make user-forget email=<address> [yes=1] [ENV=prod]'; exit 2; }
+	@docker exec $(API_C) python -m app.cli user-forget --email "$(email)" $(if $(yes),--yes)
 
 # --- Load tests ------------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through

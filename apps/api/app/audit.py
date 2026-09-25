@@ -17,6 +17,8 @@ What is recorded, and the question each answers:
   save that wrote them.
 - assistant.disabled, assistant.enabled: who switched the assistant off or
   on (app/switch.py), and the hash of the reason they gave.
+- retention.applied, user.exported, user.forgotten: personal data deleted
+  by age, exported for a person, or erased (app/privacy.py).
 
 Never the text of a question, an answer, an alert or a runbook: like
 traces (ADR-0018), the audit trail holds ids, counts and hashes. The text
@@ -50,9 +52,12 @@ Action = Literal[
     "assistant.disabled",
     "assistant.enabled",
     "chat.asked",
+    "retention.applied",
     "runbook.deleted",
     "runbook.saved",
     "tool.called",
+    "user.exported",
+    "user.forgotten",
 ]
 
 

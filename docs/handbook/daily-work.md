@@ -309,6 +309,7 @@ until it did, 22 of them could not be set from `.env`.
 | `OIDC_SCOPES` | `openid profile email` | |
 | `OIDC_GROUPS_CLAIM` | `groups` | the claim carrying `team:<slug>:<role>` and `org:admin` (`roles` for Entra ID app roles) |
 | `OIDC_TIMEOUT_S` | 5 | each call to the provider |
+| `USER_RETENTION_DAYS` / `ALERT_RETENTION_DAYS` | 365 / 365 | what `make retention` deletes: users without a sign-in for that long, alerts older than that; empty keeps for ever ([privacy](../privacy.md)) |
 | `SESSION_MAX_AGE_S` / `SESSION_IDLE_TIMEOUT_S` | 43200 / 7200 | a session ends 12 h after sign-in or 2 h after its last request; role changes apply at the next sign-in |
 | `SESSION_COOKIE_SECURE` | `true` | `false` only for plain-HTTP dev (the dev overlay sets it): the cookie is then `triage_session`, not `__Host-triage_session` |
 | `JUDGE_API_KEY` | empty (`LLM_API_KEY`) | development only, for `make evals`: the key of a judge at another provider than the model under test |

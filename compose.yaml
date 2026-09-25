@@ -102,6 +102,8 @@ services:
       SESSION_IDLE_TIMEOUT_S:
       SESSION_COOKIE_SECURE:
       OTEL_SERVICE_NAME:
+      USER_RETENTION_DAYS:
+      ALERT_RETENTION_DAYS:
       OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
     # Deliberately no depends_on the identity provider either: the api starts
     # without it, and sessions already issued keep working while it is down.

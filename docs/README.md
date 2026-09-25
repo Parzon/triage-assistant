@@ -10,6 +10,8 @@
 - **`images/`**: the dashboard screenshot the chapters show.
 - **[`overview.md`](overview.md)**: the project on one page, for anyone
   deciding about it.
+- **[`privacy.md`](privacy.md)**: the personal data the service holds:
+  where, why, who reads it, how long, how it is exported and erased.
 
 Plus three document types for deciding what to build. Each has a
 different job and a different lifetime. Copy the `TEMPLATE.md` in the

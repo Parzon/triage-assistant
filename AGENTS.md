@@ -55,6 +55,11 @@ Run `make` to list every target. The ones you need most:
 - The assistant's off switch (ADR-0024): `make assistant [off="why" | on=1]`
   (add `ENV=prod`); org admins have it in the UI (`PUT /api/assistant`).
   Runbook: docs/runbooks/turn-the-assistant-off.md
+- Personal data (docs/privacy.md, ADR-0025): `make retention [apply=1]`,
+  `make user-export email=...`, `make user-forget email=... [yes=1]` (add
+  `ENV=prod`); dry runs unless told. A new table, log field or span
+  attribute holding personal data gets a row in docs/privacy.md, and a
+  retention.
 - Audit trail: `make audit a="--action runbook.saved --target 17"` (add
   `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
   owner (the api cannot). Redaction's score: `python -m evals.redaction` in

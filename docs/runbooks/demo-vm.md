@@ -293,6 +293,15 @@ A backup nobody has restored is a hope, not a backup. Rehearse a restore
 onto a clean host (`make restore file=...` on a fresh `make prod-up`) after
 schema changes, and before relying on a backup.
 
+**Retention** runs on the same schedule ([privacy](../privacy.md)): what is
+past its retention goes (expired sessions, inactive users, old alerts),
+and the audit trail is pruned by its owner. Days to keep: your policy's.
+
+```
+17 3 * * * cd /srv/triage-assistant && make retention apply=1 ENV=prod >> backups/retention.log 2>&1
+27 3 * * * cd /srv/triage-assistant && make audit-prune days=400 ENV=prod >> backups/retention.log 2>&1
+```
+
 ## 8. Cutting a release
 
 ```

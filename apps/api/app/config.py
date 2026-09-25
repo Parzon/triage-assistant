@@ -217,11 +217,24 @@ class Settings(BaseSettings):
     # Per client IP per window: sign-in redirects and callbacks.
     auth_rate_limit: int = Field(30, ge=1)
 
+    # --- Personal data (app/privacy.py, docs/privacy.md). What the retention
+    # job deletes (`make retention`, scheduled on a host): users who have not
+    # signed in for this many days (they come back at their next sign-in,
+    # from the identity provider), and alerts older than this. Empty: keep
+    # for ever. Your retention policy decides; these are only defaults.
+    user_retention_days: int | None = Field(365, ge=1)
+    alert_retention_days: int | None = Field(365, ge=1)
+
     # Production checks this deployment skips on purpose, by name, comma-
     # separated (PRODUCTION_CHECKS). The production-shaped stack on a laptop
     # or in CI runs with localhost, the mock model and the demo users, and
     # waives those three (.env.example). Each waiver is logged at startup.
     prod_checks_waived: Annotated[frozenset[str], NoDecode] = frozenset()
+
+    @field_validator("user_retention_days", "alert_retention_days", mode="before")
+    @classmethod
+    def _empty_retention_means_keep(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("otel_traces_sampler", "otel_traces_sampler_arg", mode="before")
     @classmethod
