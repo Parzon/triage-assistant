@@ -172,8 +172,8 @@ class OpenAICompatibleClient:
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key.get_secret_value(),
             # The SDK's own Timeout type: openai 3.x ships its HTTP client as the
-            # separate `httpx2` package - importing `httpx` here only worked in
-            # dev, where httpx happened to be installed as a test tool.
+            # separate `httpx2` package. `httpx` is a test-only dependency, absent
+            # from the production image (make image-check).
             timeout=Timeout(
                 connect=settings.llm_connect_timeout_s,
                 read=settings.llm_read_timeout_s,

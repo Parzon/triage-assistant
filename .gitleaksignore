@@ -1,0 +1,6 @@
+# Findings gitleaks may skip, one per line: <commit>:<file>:<rule>:<line>.
+# Each is a fake credential in a test, in a commit already in the history.
+# A new line here needs the same proof: show the value is fake.
+d8c2fc601dbce58ba996b5276ab4c9659f9e03b7:apps/api/tests/unit/test_triage.py:generic-api-key:166
+d8c2fc601dbce58ba996b5276ab4c9659f9e03b7:apps/api/tests/unit/test_runbooks.py:generic-api-key:106
+cba5bb58d3db8f78e4deda9666a0e29f0bc0d6aa:apps/api/tests/unit/test_config.py:generic-api-key:121

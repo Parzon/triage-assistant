@@ -164,9 +164,17 @@ identity_provider_up = Gauge(
     multiprocess_mode="livemin",
 )
 
+chat_refusals = Counter(
+    "chat_refusals_total",
+    "Questions refused on purpose, before any model call: assistant_disabled (the "
+    "off switch, ADR-0024). Not errors: HighErrorRate leaves them out.",
+    ["reason"],
+)
+
 ratelimit_decisions = Counter(
     "ratelimit_decisions_total",
-    "Rate limiter outcomes: allowed, rejected, or fail_open (Redis unreachable).",
+    "Rate limiter outcomes: allowed or rejected; with Redis unreachable, fail_open "
+    "(let through) or fail_closed (refused: the chat, in production).",
     ["scope", "decision"],
 )
 

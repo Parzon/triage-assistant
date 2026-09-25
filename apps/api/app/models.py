@@ -15,6 +15,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -151,7 +152,7 @@ class Alert(Base):
         # 0.1ms, severity=critical 43ms -> 3.8ms. A second index on
         # (severity, created_at, id) takes that to 0.06ms but costs every
         # insert (~2x this one's); add it when a rarer filter shows up in
-        # the SlowRequests alert, not before. See the performance chapter.
+        # the SlowRequests alert, not before (docs/handbook/operations.md).
         Index("ix_alerts_created_at_id", "created_at", "id"),
         # One team's alerts, newest first: what almost every user reads.
         # Several teams are read one team at a time and merged (see
@@ -268,3 +269,24 @@ class AuditEvent(Base):
     # Ids, counts and hashes; never the text of a question, an answer, an
     # alert or a runbook.
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default="{}")
+
+
+class AssistantSwitch(Base):
+    """The assistant's off switch (app/switch.py, ADR-0024): one row, for
+    the whole organisation. Off, every question is refused before any model
+    call, with the reason shown to the asker; alerts and runbooks keep
+    working. Row-level security: everyone reads it, org admins change it,
+    nobody adds or removes it.
+
+    No foreign key on changed_by, as on audit_events: the row outlives the
+    admin who flipped it."""
+
+    __tablename__ = "assistant_switch"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_assistant_switch_one_row"),)
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    # Shown to everyone who asks while the assistant is off.
+    reason: Mapped[str | None] = mapped_column(Text)
+    # NULL: an operator's command (app/cli.py), not a signed-in admin.
+    changed_by: Mapped[int | None] = mapped_column(BigInteger)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

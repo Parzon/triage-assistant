@@ -1,0 +1,85 @@
+# Accepted vulnerabilities (make scan, make scan-compose; ADR-0022). A
+# finding goes here only when it cannot be fixed now: no fixed version is
+# used by the image yet, or the vulnerable code is shown to be unreachable.
+# Each entry needs:
+#   statement:  why it is safe for now, and who accepted it
+#   expired_at: at most 90 days out; Trivy reports it again after that
+# scripts/check_trivyignore.py refuses an entry without both, and the code
+# owners must approve every change to this file (.github/CODEOWNERS).
+#
+#   vulnerabilities:
+#     - id: CVE-2026-12345
+#       paths: ["usr/lib/libexample.so.1"]
+#       statement: "Only reachable through X, which this image never runs. Accepted by @lead."
+#       expired_at: 2026-12-01
+vulnerabilities:
+  # The TLS edge's Caddy binary (tools/edge). 2.11.4 is the newest release,
+  # built with Go 1.26.3 and older golang.org/x modules; the fixes exist
+  # upstream but in no Caddy release yet (caddyserver/caddy#8055 asks for
+  # 2.11.5). Mostly denial of service in TLS, HTTP/2, URL and certificate
+  # parsing: the edge is the one internet-facing service, so this expires
+  # early. The way out before then: build Caddy with xcaddy on a patched Go.
+  - id: CVE-2026-27145
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-33818
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-39821
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-39822
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-42504
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-46600
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56852
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56853
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56854
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56858
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56859
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56860
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-56862
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-84304
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: CVE-2026-84445
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25
+  - id: GHSA-hrxh-6v49-42gf
+    paths: ["usr/bin/caddy"]
+    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
+    expired_at: 2026-10-25

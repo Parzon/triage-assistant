@@ -1,0 +1,15 @@
+# Secret scanning (make secrets-scan, CI; ADR-0022): gitleaks' own rules,
+# over every commit. A finding is a leaked secret until shown otherwise:
+# rotate it first (a pushed secret is public, even after a force-push), then
+# remove it. Only files that hold fake credentials on purpose are exempt.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake credentials on purpose: the redactor's corpus and its unit tests"
+paths = [
+  '''^apps/api/evals/redaction\.py$''',
+  '''^apps/api/tests/unit/test_redact\.py$''',
+  # The corpus's earlier home, still in the history.
+  '''^labs/ai-security/redaction\.py$''',
+]

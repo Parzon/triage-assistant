@@ -56,6 +56,27 @@ tests:
         alertname: SignInsFailing
         exp_alerts: []
 
+  - name: A chat refused by its rate limiter fires after a minute; one let through does not
+    interval: 15s
+    input_series:
+      # Four chat questions a minute refused from the start: Valkey is down
+      # and the chat fails closed (production).
+      - series: 'ratelimit_decisions_total{scope="chat", decision="fail_closed"}'
+        values: "0+1x20"
+      - series: 'ratelimit_decisions_total{scope="alerts", decision="fail_open"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: RateLimiterFailingClosed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RateLimiterFailingClosed
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "the assistant refuses questions: its rate limiter cannot reach Redis"
+              runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#ratelimiterfailingclosed"
+
   - name: Redis down fires only after one minute
     interval: 15s
     input_series:
@@ -92,6 +113,22 @@ tests:
             exp_annotations:
               summary: "more than 5% of api requests fail with 5xx"
               runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#higherrorrate"
+
+  - name: Questions refused by the off switch are not errors
+    interval: 1m
+    input_series:
+      # 100 requests/min: 70 reads, 30 questions answered 503 because an org
+      # admin switched the assistant off (ADR-0024).
+      - series: 'http_requests_total{route="/alerts",status="200",method="GET"}'
+        values: "0+70x15"
+      - series: 'http_requests_total{route="/chat/stream",status="503",method="POST"}'
+        values: "0+30x15"
+      - series: 'chat_refusals_total{reason="assistant_disabled"}'
+        values: "0+30x15"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: HighErrorRate
+        exp_alerts: []
 
   - name: Truncated answers are not model errors, but have their own warning
     interval: 1m

@@ -11,6 +11,7 @@ import socket
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
@@ -33,13 +34,20 @@ _CODES = {
 
 class ApiError(HTTPException):
     """An HTTPException with its own error code instead of the status's
-    generic one: {"error": {"code": "csrf_failed", ...}}."""
+    generic one: {"error": {"code": "csrf_failed", ...}}, and any fields a
+    client needs beside the message ({"reason": ...})."""
 
     def __init__(
-        self, status_code: int, code: str, detail: str, headers: dict[str, str] | None = None
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+        headers: dict[str, str] | None = None,
+        **fields: Any,
     ) -> None:
         super().__init__(status_code=status_code, detail=detail, headers=headers)
         self.code = code
+        self.fields = fields
 
 
 # Connection-level failures only: the database is down, unreachable, too
@@ -69,15 +77,24 @@ def error_response(
 async def _http_error(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, HTTPException):  # registered for HTTPException only
         raise exc
-    code = exc.code if isinstance(exc, ApiError) else _CODES.get(exc.status_code, "error")
+    if isinstance(exc, ApiError):
+        return error_response(
+            exc.status_code, exc.code, str(exc.detail), dict(exc.headers or {}), **exc.fields
+        )
+    code = _CODES.get(exc.status_code, "error")
     return error_response(exc.status_code, code, str(exc.detail), dict(exc.headers or {}))
 
 
 async def _validation_error(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, RequestValidationError):
         raise exc
+    # jsonable_encoder: a validator's own ValueError sits in each error's
+    # ctx, and a raw exception would turn this 422 into a 500.
     return error_response(
-        422, "validation_error", "request body or parameters are invalid", details=exc.errors()
+        422,
+        "validation_error",
+        "request body or parameters are invalid",
+        details=jsonable_encoder(exc.errors()),
     )
 
 

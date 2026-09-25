@@ -21,6 +21,18 @@ revoke`): they use the app's own settings and database role.
   python -m app.cli audit [--action runbook.saved] [--target 17] [--hours 24]
       The audit trail, newest first, one JSON object per line (app/audit.py):
       who wrote a runbook's versions, what the assistant was given.
+
+  python -m app.cli assistant [--off --reason "..." | --on]
+      The assistant's off switch (app/switch.py): its state, or switch it.
+      For operators, and for when nobody can sign in: it needs neither the
+      identity provider nor an org admin's session. Audited as the CLI.
+
+  python -m app.cli retention [--apply]
+  python -m app.cli user-export --email alice@example.com
+  python -m app.cli user-forget --email alice@example.com [--yes]
+      Personal data (app/privacy.py, docs/privacy.md): delete what is past
+      its retention; everything held about a person, as JSON; erase a
+      person. The deleting ones are dry runs until --apply / --yes.
 """
 
 import os
@@ -34,18 +46,26 @@ os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
 
 import argparse
 import asyncio
+import json
 import sys
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import privacy, switch
 from app.audit import CLI, events, to_out
 from app.config import get_settings
 from app.db import create_engine, create_sessionmaker, set_transaction_settings
 from app.llm import OpenAICompatibleClient
-from app.models import Runbook, Team, User
+from app.models import AssistantSwitch, Runbook, Team, User
 from app.oidc import Identity
 from app.runbooks import embedding_key, save_runbook
+from app.schemas import AssistantIn
 from app.sessions import session_cookie, sign_in, sign_out_everywhere
 
 CLI_ISSUER = "urn:triage-assistant:cli"
@@ -126,6 +146,31 @@ async def audit_trail(
     return [to_out(*row).model_dump_json() for row in rows]
 
 
+async def as_org_admin[T](work: Callable[[AsyncSession], Awaitable[T]]) -> T:
+    """Run `work` in a session that may see and change every team's rows
+    (row-level security), as an operator's command does."""
+    engine = create_engine(get_settings())
+    try:
+        async with create_sessionmaker(engine)() as db:
+            await set_transaction_settings(db, {"app.org_admin": "on"})
+            return await work(db)
+    finally:
+        await engine.dispose()
+
+
+async def assistant(change: AssistantIn | None) -> AssistantSwitch:
+    """The switch's state, after `change` if one is given."""
+
+    async def work(db: AsyncSession) -> AssistantSwitch:
+        if change is None:
+            return await switch.current(db)
+        row = await switch.turn(db, CLI, enabled=change.enabled, reason=change.reason)
+        await db.commit()
+        return row
+
+    return await as_org_admin(work)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -147,6 +192,18 @@ def main(argv: list[str] | None = None) -> None:
     audit_cmd.add_argument("--actor", type=int, help="a user's id")
     audit_cmd.add_argument("--hours", type=float, help="only the last N hours")
     audit_cmd.add_argument("--limit", type=int, default=50)
+    switch_cmd = commands.add_parser("assistant", help="the assistant's off switch")
+    turn = switch_cmd.add_mutually_exclusive_group()
+    turn.add_argument("--off", action="store_true", help="refuse every question (needs --reason)")
+    turn.add_argument("--on", action="store_true", help="answer again")
+    switch_cmd.add_argument("--reason", help="why it is off: everyone who asks reads it")
+    retention_cmd = commands.add_parser("retention", help="delete what is past its retention")
+    retention_cmd.add_argument("--apply", action="store_true", help="delete (default: dry run)")
+    export_cmd = commands.add_parser("user-export", help="everything held about a person, as JSON")
+    export_cmd.add_argument("--email", required=True)
+    forget_cmd = commands.add_parser("user-forget", help="erase a person's accounts")
+    forget_cmd.add_argument("--email", required=True)
+    forget_cmd.add_argument("--yes", action="store_true", help="erase (default: dry run)")
     args = parser.parse_args(argv)
 
     if args.command == "session":
@@ -159,6 +216,47 @@ def main(argv: list[str] | None = None) -> None:
             audit_trail(args.action, args.target, args.actor, args.hours, args.limit)
         )
         print("\n".join(lines))
+    elif args.command == "assistant":
+        change = None
+        if args.off or args.on:
+            try:
+                change = AssistantIn(enabled=args.on, reason=args.reason)
+            except ValidationError as exc:
+                raise SystemExit(f"assistant: {exc.errors()[0]['msg']}") from exc
+        row = asyncio.run(assistant(change))
+        state = "on" if row.enabled else f"off: {row.reason}"
+        print(f"the assistant is {state} (since {row.changed_at:%Y-%m-%d %H:%M:%S %Z})")
+    elif args.command == "retention":
+        settings = get_settings()
+        retained = asyncio.run(
+            as_org_admin(lambda db: privacy.retention(db, settings, apply=args.apply))
+        )
+        verb = "deleted" if args.apply else "would delete (dry run; --apply deletes)"
+        counts = ", ".join(f"{n} {what.replace('_', ' ')}" for what, n in asdict(retained).items())
+        print(f"{verb}: {counts}")
+    elif args.command == "user-export":
+        exported: dict[str, Any] = asyncio.run(
+            as_org_admin(lambda db: privacy.export(db, args.email))
+        )
+        print(json.dumps(exported, indent=2, ensure_ascii=False))
+        if not exported["accounts"]:
+            print(f"no account with the email {args.email}", file=sys.stderr)
+    elif args.command == "user-forget":
+        gone = asyncio.run(as_org_admin(lambda db: privacy.forget(db, args.email, apply=args.yes)))
+        verb = "erased" if args.yes else "would erase (dry run; --yes erases)"
+        for account in gone:
+            print(
+                f"{verb}: user {account.user_id} ({account.issuer}), with their teams and "
+                f"sessions. Kept, now pseudonymous: {account.audit_events_kept} audit event(s)."
+            )
+        if not gone:
+            print(f"no account with the email {args.email}", file=sys.stderr)
+        elif args.yes:
+            print(
+                "Remove them from the identity provider too: their next sign-in would "
+                "create them again.",
+                file=sys.stderr,
+            )
     else:
         done, total = asyncio.run(reembed())
         print(f"embedded again {done} of {total} runbook(s)", file=sys.stderr)

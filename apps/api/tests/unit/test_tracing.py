@@ -9,9 +9,17 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.agent import AGENT_PROMPT_REF
+from app.config import Settings
 from app.llm import PromptRef
 from app.logs import JsonFormatter
-from app.tracing import MAX_CONTENT_CHARS, messages_json, provider_attributes, text_parts, trace_id
+from app.tracing import (
+    MAX_CONTENT_CHARS,
+    make_sampler,
+    messages_json,
+    provider_attributes,
+    text_parts,
+    trace_id,
+)
 from app.triage import PROMPT, SYSTEM_PROMPT
 
 # Each prompt's hash for each version. Changing a prompt changes its hash,
@@ -115,3 +123,19 @@ def test_an_unsampled_trace_hands_out_no_id() -> None:
     with trace.use_span(unsampled):
         assert trace_id() is None
         assert "trace_id" not in json.loads(JsonFormatter().format(record))
+
+
+@pytest.mark.parametrize(
+    ("sampler", "arg", "description"),
+    [
+        ("parentbased_always_on", 1.0, "ParentBased{root:AlwaysOnSampler,"),
+        ("parentbased_traceidratio", 0.1, "ParentBased{root:TraceIdRatioBased{0.1},"),
+        ("always_off", 1.0, "AlwaysOffSampler"),
+        ("traceidratio", 0.25, "TraceIdRatioBased{0.25}"),
+    ],
+)
+def test_the_sampler_is_the_one_the_settings_name(
+    sampler: str, arg: float, description: str
+) -> None:
+    settings = Settings.model_construct(otel_traces_sampler=sampler, otel_traces_sampler_arg=arg)
+    assert make_sampler(settings).get_description().startswith(description)

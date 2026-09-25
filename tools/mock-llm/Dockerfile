@@ -1,7 +1,8 @@
-FROM ghcr.io/astral-sh/uv:0.12.18 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.18@sha256:3adc3706091ce7c2fe595e669628caedd6d951551b92b258b7e7dbe06d9440bc AS uv
 
-# A dev/test tool, not a shipped artifact: one stage is enough.
-FROM python:3.13-slim
+# A dev/test tool, not a shipped artifact: one stage is enough. Pinned by
+# digest like the others (Dependabot moves tag and digest together).
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

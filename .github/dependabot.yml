@@ -33,22 +33,36 @@ updates:
     groups:
       e2e: {patterns: ["*"]}
 
-  # Base images in the Dockerfiles. Images named in the compose files
-  # (postgres, valkey, pgbouncer, the monitoring stack) are bumped by hand:
-  # a new major Postgres needs a data migration, not just a new tag.
+  # Base images in the Dockerfiles, pinned by tag and digest: Dependabot
+  # moves both, and a new digest under the same tag (a rebuilt base with
+  # security fixes) is a PR too.
   - package-ecosystem: docker
     directories:
       - /apps/api
       - /apps/web
+      - /tools/edge
       - /tools/mock-llm
     schedule: {interval: weekly}
     ignore:
       # Language runtimes move deliberately and together: Python with the
-      # api's PYTHON_VERSION and requires-python, Node with .nvmrc - not
-      # one tool image at a time.
+      # api's requires-python, Node with .nvmrc - not one image at a time.
       - dependency-name: python
         update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: node
         update-types: [version-update:semver-major]
     groups:
       base-images: {patterns: ["*"]}
+
+  # Images the compose files run (Postgres, PgBouncer, Valkey, Keycloak, the
+  # monitoring stack). Minor and patch versions only: a new major Postgres
+  # needs a data migration, and a new major of anything else gets read like
+  # a design change, by hand. `make scan-compose` scans them weekly
+  # (.github/workflows/scan.yml).
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: {interval: weekly}
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+    groups:
+      compose-images: {patterns: ["*"]}

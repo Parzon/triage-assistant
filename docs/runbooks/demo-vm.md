@@ -3,7 +3,8 @@
 For showing the product to a manager or a customer, running a pilot, or a
 shared staging host. One VM runs the production-shaped stack: the same
 images, limits and nginx as production. This is not high availability; the
-single points of failure are listed in the failure-modes chapter.
+single points of failure are listed in
+[operations](../handbook/operations.md#single-points-of-failure-on-one-vm).
 
 ✅ = done in this repo (the step or the whole path was exercised), 📘 =
 the procedure for a real cloud VM, not exercised here: no VM was created
@@ -30,7 +31,7 @@ Why those numbers, measured on this stack:
   Prometheus 1 GiB, Grafana 512 MiB, the rest 128–256 MiB each. 8 GB
   leaves the OS and the page cache room.
 - **CPU:** the api is capped at 2 CPUs and Postgres at 2. On 2 api CPUs
-  the lab measured ~1,000 simple reads/s and 500 concurrent streams
+  the load tests measured ~1,000 simple reads/s and 500 concurrent streams
   before saturating. A demo is far below either.
 - **Disk:** images are 2.9 GB (Grafana alone 1.4 GB). Logs are capped per
   container (3 × 10 MB), Prometheus at 2 GB, and 14 daily dumps of 2 M
@@ -64,7 +65,7 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo usermod -aG docker deploy              # root-equivalent: guard this account's key
 sudo ufw default deny incoming && sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw --force enable
 git clone https://github.com/Parzon/triage-assistant.git /srv/triage-assistant
-cd /srv/triage-assistant && cp .env.example .env && chmod 600 .env   # then edit the secrets
+cd /srv/triage-assistant && make .env   # every change-me secret generated; the rest: section 3
 ```
 
 The firewall caveat: Docker's published ports bypass ufw. Docker rewrites
@@ -75,7 +76,8 @@ if ufw says otherwise. See the networking chapter.
 
 ## 3. Configure `.env`
 
-Every secret must differ from `.env.example`. cloud-init already
+Every secret must differ from `.env.example`: the api refuses to start
+in production otherwise (`example_secret`, ADR-0023). cloud-init already
 generated:
 - the database passwords, the Grafana password and the webhook token;
 - the identity provider's client secret, the Keycloak administrator's
@@ -91,6 +93,7 @@ The rest:
 | `LLM_API_KEY` | leave | the key (never committed) |
 | `LLM_MODEL` | leave | the model name |
 | `HTTP_PORT` | `80` | `80` |
+| `PROD_CHECKS_WAIVED` | `mock_model,demo_identity_provider` | empty once the organisation's identity provider is connected (below); `demo_identity_provider` until then |
 | `IMAGE_PREFIX` | `ghcr.io/<owner>/triage-assistant` to run released images, or leave `triage-assistant` to build on the VM | same |
 
 **Who signs in.** With `idp` in the profiles, the bundled Keycloak serves
@@ -291,6 +294,15 @@ A backup nobody has restored is a hope, not a backup. Rehearse a restore
 onto a clean host (`make restore file=...` on a fresh `make prod-up`) after
 schema changes, and before relying on a backup.
 
+**Retention** runs on the same schedule ([privacy](../privacy.md)): what is
+past its retention goes (expired sessions, inactive users, old alerts),
+and the audit trail is pruned by its owner. Days to keep: your policy's.
+
+```
+17 3 * * * cd /srv/triage-assistant && make retention apply=1 ENV=prod >> backups/retention.log 2>&1
+27 3 * * * cd /srv/triage-assistant && make audit-prune days=400 ENV=prod >> backups/retention.log 2>&1
+```
+
 ## 8. Cutting a release
 
 ```
@@ -345,7 +357,7 @@ before `make deploy` to check a release where it's about to run.
 - [ ] `/api/ready` says `"identity_provider": "ok"`
 - [ ] Grafana's dashboard has data (through the tunnel)
 - [ ] A backup from today exists, off the host
-- [ ] The failure story is ready if asked: `docs/handbook/failure-modes.md`
+- [ ] The failure story is ready if asked: [the failure matrix](../handbook/operations.md#the-matrix)
 
 ## 11. Teardown
 

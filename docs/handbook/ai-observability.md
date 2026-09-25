@@ -14,9 +14,7 @@ A trace is that record. This chapter covers:
 - what tracing costs, measured;
 - the gotchas met building it.
 
-The decision record is ADR-0018. The hands-on part is
-[labs/ai-observability](../../labs/ai-observability/README.md): an answer
-gets worse, and you find out why from telemetry alone.
+The decision record is ADR-0018.
 
 ✅ = built and measured here (gpt-oss:20b, nomic-embed-text, Jaeger 2.21).
 📘 = not built yet.
@@ -93,7 +91,7 @@ With the endpoint set, `make evals`:
   spans sit under the case.
 
 The report records each answer's `trace_id` and the prompt version. From a
-failing answer to what it was given: one click (lab, exercise 5).
+failing answer to what it was given: one click.
 
 ## What never goes on a span ✅
 
@@ -112,7 +110,7 @@ trail ([AI security](ai-security.md)).
   whoever can open it. Content in traces undoes both.
 - **It keeps what it gets for its own retention,** under other access
   rules, often copied to a vendor.
-- **Measured (lab, exercise 6):** with content on, one reader saw a
+- **Measured:** with content on, one reader saw a
   finance user's question ("payroll export failed for 1,200 employees")
   and another team's runbooks. Redaction had removed the password in it,
   and nothing else.
@@ -192,9 +190,9 @@ The dev api (one process), 200 signed-in alert-list requests a second for
 | Setting | Default | Notes |
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty (off) | OTLP/HTTP; `/v1/traces` is appended. `make obs-up` sets `http://jaeger:4318` |
-| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0 | `parentbased_traceidratio` with 0.1 keeps 10%; a caller's decision wins |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0; in production `parentbased_traceidratio` / 0.1 (ADR-0023) | a caller's decision wins with the `parentbased_` ones |
 | `OTEL_SERVICE_NAME` | `triage-assistant-api` | the eval harness reports as `triage-assistant-evals` |
-| `TRACE_CONTENT` | false | content on spans, redacted: development only |
+| `TRACE_CONTENT` | false | content on spans, redacted: development only; production refuses to start with it |
 | `TRACE_EXPORT_TIMEOUT_S` | 2 | one export's budget, retries included; bounds shutdown when the backend is down |
 | `APP_VERSION` | `dev` | compose passes `IMAGE_TAG`: `service.version`, `app_info` |
 

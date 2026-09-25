@@ -25,14 +25,15 @@ project this team builds should follow.
 ## Development environment
 `make setup && make up` brings up `api` + `pgbouncer` + `db` + `redis`
 (Valkey) + `web` with hot reload, plus `mock-llm` and `keycloak` (the
-`mock` and `idp` profiles); `.env` (created from `.env.example`)
-provides local settings. Compose is split in three: `compose.yaml` (base),
+`mock` and `idp` profiles); `.env` (made from `.env.example` by `make
+setup`, every secret generated) provides local settings. Compose is split in three: `compose.yaml` (base),
 `compose.override.yaml` (dev, merged automatically), `compose.prod.yaml`
 (production shape, `make prod-up`). Toolchains live in the containers:
 Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
 
 ## Build & test commands
-Run `make` to list every target. The ones you need most:
+`make` lists the commands for the first weeks; `make help-all` lists every
+target, by section. The ones you need most:
 - Start / stop the dev stack: `make up` / `make down`
 - Lint + format check: `make lint`; auto-format: `make fmt`
 - Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
@@ -43,16 +44,30 @@ Run `make` to list every target. The ones you need most:
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
   same command CI runs), `make test-fast` (unit only, seconds)
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
+- Supply chain (ADR-0022, CI's `security` job): `make secrets-scan`
+  (gitleaks, every commit), `make scan` (Trivy: the production images and
+  the web's runtime dependencies; a fixable HIGH or CRITICAL fails),
+  `make scan-compose` (the compose files' images, weekly). Base images
+  are pinned by tag and digest: change both, or let Dependabot do it.
 - Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge;
   signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)
 - Sessions for scripts: `make session [groups="team:default:admin org:admin"]` prints a
   cookie; `make revoke email=...` ends a user's sessions (add `ENV=prod`)
+- The assistant's off switch (ADR-0024): `make assistant [off="why" | on=1]`
+  (add `ENV=prod`); org admins have it in the UI (`PUT /api/assistant`).
+  Runbook: docs/runbooks/turn-the-assistant-off.md
+- Personal data (docs/privacy.md, ADR-0025): `make retention [apply=1]`,
+  `make user-export email=...`, `make user-forget email=... [yes=1]` (add
+  `ENV=prod`); dry runs unless told. A new table, log field or span
+  attribute holding personal data gets a row in docs/privacy.md, and a
+  retention.
 - Audit trail: `make audit a="--action runbook.saved --target 17"` (add
   `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
-  owner (the api cannot). Hands-on: `labs/ai-security/` (redaction measured,
-  an investigation; docs/handbook/ai-security.md)
+  owner (the api cannot). Redaction's score: `python -m evals.redaction` in
+  the api container; `tests/unit/test_redaction_corpus.py` fails if a
+  change catches less (docs/handbook/ai-security.md)
 - Cost: tokens per answer and where they go, cost per 1,000 questions,
-  self-hosted throughput: `labs/ai-cost/` (docs/handbook/ai-cost.md).
+  self-hosted throughput: docs/handbook/ai-cost.md.
   `OLLAMA_NUM_PARALLEL` sets how many answers the local model batches
 - Agents and MCP (docs/handbook/agents.md): `CHAT_MODE=agent` switches the
   chat to the agent; compare it with the pipeline by running `make evals
@@ -72,8 +87,8 @@ Run `make` to list every target. The ones you need most:
   user input).
 - Debugging: `make debug-up` (breakpoints from VS Code, `.vscode/launch.json`),
   `make trace id=<request id>` (one request across nginx and the api, then
-  its Jaeger link), `labs/ai-observability/` (a worse answer, diagnosed from its
-  trace; docs/handbook/ai-observability.md),
+  its Jaeger link; a worse answer, diagnosed from its trace:
+  docs/handbook/ai-observability.md),
   `make db-activity` / `db-locks` / `db-top-queries` (add `ENV=prod` for
   the production stack).
 - Releases and hosts: a `vX.Y.Z` tag on main publishes the api, web and edge images (amd64 + arm64) to GHCR
@@ -97,8 +112,8 @@ Run `make` to list every target. The ones you need most:
 - Runbook search (RAG, docs/handbook/rag.md): after changing `EMBEDDING_MODEL`,
   `EMBEDDING_DIMENSIONS` or `EMBEDDING_DOCUMENT_PREFIX`, run `make reembed` (add
   `ENV=prod`). Before merging a retrieval or embedding change: `make evals
-  a="--target retrieval"` (recall@k, MRR), before/after in the PR. Hands-on
-  debugging: `labs/rag-debugging/` (`make rag-overfiltering-lab`).
+  a="--target retrieval"` (recall@k, MRR), before/after in the PR. A team
+  filter under the vector index, measured: `make bench-rag-filter`.
 - Mock LLM behaviour: `make mock` shows its config and counters;
   `make mock c='{"fail_mode": "http_429"}'` / `c='{"tokens_per_s": 5}'`
   changes it; `make mock c=reset` restores defaults
@@ -115,6 +130,14 @@ should-we/how, with the technical plan, before a non-trivial change;
 someone later if left unexplained — write one whenever you make an
 irreversible or non-obvious call (a new dependency, a schema choice, a
 deployment pattern), even if nobody asked for it.
+
+The way in is `START_HERE.md`; keep it and its two companions current:
+- a new file gets a line in `docs/code-map.md` (★ if it is on the path of
+  a question);
+- a new technology gets an entry in `TECH_STACK.md`: its role, whether a
+  new project starts with it, and the trigger for adding it;
+- a new chapter-sized topic goes into an existing chapter of
+  `docs/handbook/` before it becomes a new one.
 
 ## Code style
 - Python: ruff defaults, type hints on new functions.
@@ -137,6 +160,13 @@ issue (`Closes #N`). Squash merge only. See `CONTRIBUTING.md`.
 Never commit secrets. `.env` is gitignored; `.env.example` is the
 template. Any new third-party dependency needs a one-line justification
 in the PR description.
+
+Production is safe by default (ADR-0023): `APP_ENV=prod` changes some
+defaults and refuses to start on unsafe settings (`production_problems`
+in `app/config.py`). A new setting that is unsafe in production gets a
+check there and a test in `tests/unit/test_config.py`, not a checklist
+line. `.env.example` waives only the three checks a local production-
+shaped stack needs (`PROD_CHECKS_WAIVED`); never add to them.
 
 Access control, for every change that touches data:
 - Every data route takes `principal: CurrentUser` and filters by
@@ -168,6 +198,9 @@ Access control, for every change that touches data:
 - A regular expression run on text others write (alerts, runbooks,
   questions) has every scan bounded, and a test that hostile input stays
   linear (`test_hostile_text_is_redacted_in_linear_time`).
+- Every path that calls a chat model checks the off switch first
+  (`switch.current`, as `routes/chat.py` does): a new one refuses with
+  503 `assistant_disabled` while it is off, and counts `chat_refusals`.
 - Tools live in `app/tools.py`, shared by the agent and the MCP server,
   under docs/handbook/ai-security.md's rules: they act with the asker's
   rights, take the team from the session, ask the person before changing
@@ -185,6 +218,10 @@ Access control, for every change that touches data:
   the PR description first.
 - Don't edit a merged `docs/adr/*.md` file — write a new ADR that
   supersedes it instead.
+- Don't make a scan pass by exempting its finding. An entry in
+  `.trivyignore.yaml` needs a statement (why, who accepted) and an expiry
+  at most 90 days out; a line in `.gitleaks.toml` or `.gitleaksignore`
+  needs the value shown to be fake. A real secret is rotated first.
 - Don't weaken, delete or re-label an eval case, a calibration answer or a
   retrieval question to make a run pass. A failing case is a claim to investigate: read the
   answer and the judge's reason, and change a check only when the check is

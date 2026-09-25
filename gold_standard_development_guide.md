@@ -16,20 +16,25 @@ needs a real cloud account). Where the two differ, trust ✅.
 
 ## Read this first
 
+New here? Start with [START_HERE.md](START_HERE.md): the diagram, the
+reading path in four levels, and the five commands. This file is for
+after that.
+
 | You are… | Read, in order |
 |---|---|
 | deciding about the project (not reading code) | [the overview](docs/overview.md) → [PRD-0001](docs/prd/0001-triage-assistant.md) |
-| starting a new service from this template | [using this template](docs/handbook/using-this-template.md) → [code style](docs/handbook/code-style.md) → [tech stack](docs/handbook/tech-stack.md) → the rules below |
-| a new developer | Day one (below) → [dev environment](docs/handbook/dev-environment.md) → [daily work](docs/handbook/daily-work.md) → [testing](docs/handbook/testing.md) → the gotchas below |
+| starting a new service from this template | [using this template](docs/handbook/using-this-template.md) → [the tech stack](TECH_STACK.md) (what a new project starts with, what it adds later) → [code style](docs/handbook/code-style.md) → the rules below |
+| a new developer | [START_HERE](START_HERE.md) → Day one (below) → [dev environment](docs/handbook/dev-environment.md) → [daily work](docs/handbook/daily-work.md) → [testing](docs/handbook/testing.md) → the gotchas below |
 | reviewing a PR | the rules and the gotchas below; [testing](docs/handbook/testing.md) (what each endpoint needs) |
-| on call | [alert runbook](docs/runbooks/alerts.md) → [debugging](docs/handbook/debugging.md) → [failure modes](docs/handbook/failure-modes.md) |
+| on call | [alert runbook](docs/runbooks/alerts.md) → [operations](docs/handbook/operations.md) (symptom → tool, then the failure matrix) |
 | preparing a demo or a server | [the VM runbook](docs/runbooks/demo-vm.md) (includes the request to send IT) |
-| on the infrastructure team | [environments and shipping](docs/handbook/environments-and-shipping.md) (the handoff table) → [infrastructure Q&A](docs/handbook/infrastructure-qa.md) (reproducibility, scale) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
-| taking it to production | [going to production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) |
+| on the infrastructure team | [production](docs/handbook/production.md) (the handoff table, reproducibility, scale, the managed-platform mapping) → [networking](docs/handbook/networking.md) → [security](docs/handbook/security.md) |
+| taking it to production | [production](docs/handbook/production.md) (stages, SLOs, canaries, game days, what was never tested) → [the VM runbook](docs/runbooks/demo-vm.md) → [privacy](docs/privacy.md) |
 | changing the prompt, the model or the provider | [AI engineering](docs/handbook/ai-engineering.md): evals, the judge, reasoning models, the prompt's measured history |
-| changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` → [the RAG debugging lab](labs/rag-debugging/README.md) |
-| an answer got worse or slower | [AI observability](docs/handbook/ai-observability.md): read its trace → [the AI observability lab](labs/ai-observability/README.md) |
-| deciding what to build next | [architecture](docs/handbook/architecture.md) → [failure modes](docs/handbook/failure-modes.md) (bottlenecks, single points of failure) → "Not done yet" below |
+| changing runbook search, or the embedding model | [RAG](docs/handbook/rag.md): the pipeline, the measurements, `make reembed` |
+| an answer got worse or slower | [AI observability](docs/handbook/ai-observability.md): read its trace |
+| asked what the service holds about a person | [privacy](docs/privacy.md): the inventory, export, erasure, retention |
+| deciding what to build next | [architecture](docs/handbook/architecture.md) → [operations](docs/handbook/operations.md#single-points-of-failure-on-one-vm) (single points of failure, bottlenecks) → "Not done yet" below |
 
 ## The system on one page
 
@@ -44,7 +49,8 @@ browser ──:443───► │ edge (Caddy)  HTTPS, automatic certificates; 
                    │   │  every request: session cookie → user and teams (one query)              │
                    │   ├─► PgBouncer :5432 (transaction pooling) ─► Postgres 17 + pgvector        │
                    │   │     alerts and runbooks (owned by teams), users, memberships, sessions   │
-                   │   ├─► Valkey :6379 (rate-limit counters; if down, requests pass: fail-open)  │
+                   │   ├─► Valkey :6379 (rate-limit counters; if down they fail open, but the     │
+                   │   │     chat's fail closed in production)                                    │
                    │   ├─► the identity provider's back channel (code exchange, keys; Keycloak)   │
                    │   └─► the model: any OpenAI-compatible API (mock-llm locally), SSE to user;  │
                    │         its embeddings for runbook search                                    │
@@ -85,13 +91,12 @@ host, a secret store on a platform.
 apps/api/        FastAPI service (Python 3.13, uv): app/, evals/ (the model's evals, the retrieval benchmark), tests/{unit,integration}, migrations/
 apps/web/        React + Vite UI (Node 24); nginx config for production
 tools/           mock-llm (a provider stand-in with failure modes, chat and embeddings), the TLS edge image
-labs/            hands-on exercises, one fault at a time: rag-debugging (each stage of runbook retrieval)
 tests/           e2e (Playwright through production nginx), load (k6)
 infra/           observability (Prometheus rules + tests, Alertmanager, Grafana as code), postgres roles, keycloak (the demo realm), vm (cloud-init)
 scripts/         deploy, backup, restore, failure drills, SQL helpers
 docs/            overview.md, handbook/ (the chapters), runbooks/, adr/ (decisions), prd/ rfc/ (templates + this project's own)
 compose*.yaml    base / dev (auto-merged) / prod shape / test / debug overlays
-Makefile         every command; `make` lists them
+Makefile         every command; `make` lists the first weeks', `make help-all` all
 ```
 
 ## Day one: from clone to a merged change
@@ -101,7 +106,8 @@ Makefile         every command; `make` lists them
    plus make and git. Not Python, Node or Postgres.
 2. `git clone https://github.com/Parzon/triage-assistant.git && cd
    triage-assistant`
-3. `make setup` creates `.env` from `.env.example` and builds the images.
+3. `make setup` creates `.env` from `.env.example`, every secret
+   generated, and builds the images.
 4. `make up && make ps`: every service `(healthy)`. Open
    http://localhost:5173, sign in as `alice` (password: `DEMO_USER_PASSWORD`
    in `.env`), and ask the assistant about an alert. `bob`, `carol` (org
@@ -112,7 +118,7 @@ Makefile         every command; `make` lists them
 7. `make prod-up && make e2e` if you touched anything a browser or nginx
    sees.
 8. Push, open a PR (`Closes #N`, how you verified it, one line per new
-   dependency). CI's five checks must pass. Squash-merge.
+   dependency). CI's six checks must pass. Squash-merge.
 
 ## The rules
 
@@ -127,7 +133,7 @@ Each rule exists because breaking it cost something measurable here.
    e2e`, `make image-check`. ([testing](docs/handbook/testing.md))
 3. **Build once, promote the same image.** A `vX.Y.Z` tag publishes it;
    hosts pull it by tag; `latest` is never deployed.
-   ([shipping](docs/handbook/environments-and-shipping.md), ADR-0011)
+   ([shipping](docs/handbook/production.md#one-artifact-promoted), ADR-0011)
 4. **Configuration from the environment; secrets never in git, images or
    logs.** A leaked secret is rotated, not deleted.
    ([security](docs/handbook/security.md))
@@ -140,12 +146,12 @@ Each rule exists because breaking it cost something measurable here.
    request id. ([ADR-0010](docs/adr/0010-database-timeouts-and-failure-behaviour.md))
 7. **Liveness is not readiness.** `/health` checks nothing external.
    `/ready` checks hard dependencies, and reports soft ones (Valkey)
-   without failing. ([failure modes](docs/handbook/failure-modes.md))
+   without failing. ([failure modes](docs/handbook/operations.md#failure-modes))
 8. **Nothing blocks the event loop.** One synchronous call inside async
    code made `/health` take 4.8 s, and linters did not notice.
-   ([performance](docs/handbook/performance.md))
+   ([performance](docs/handbook/operations.md#performance-and-load))
 9. **Metrics have bounded labels; dashboards and alerts are code, and
-   alerts have tests.** ([observability](docs/handbook/observability.md))
+   alerts have tests.** ([observability](docs/handbook/operations.md#watching))
 10. **Migrations are backward compatible and never lock a table
     silently**: expand/contract, `lock_timeout`, concurrent indexes.
     ([daily work](docs/handbook/daily-work.md))
@@ -160,13 +166,15 @@ Each rule exists because breaking it cost something measurable here.
     ([networking](docs/handbook/networking.md))
 14. **Measure before optimising; one change at a time; keep the numbers.**
     Open-model load, production-sized data.
-    ([performance](docs/handbook/performance.md),
-    [load testing](docs/handbook/load-testing.md))
+    ([performance](docs/handbook/operations.md#performance-and-load),
+    [load testing](docs/handbook/operations.md#the-method))
 15. **Drill the failures, and re-drill after changing the path.** The
     worst bug here (a permanent pool leak) appeared only when a database
-    froze under load. ([failure modes](docs/handbook/failure-modes.md))
-16. **Pin everything**: lockfiles with hashes, image tags, Actions by
-    commit SHA; updates arrive as PRs.
+    froze under load. ([failure modes](docs/handbook/operations.md#failure-modes))
+16. **Pin everything, and scan what you ship**: lockfiles with hashes,
+    base images and scanners by digest, Actions by commit SHA; updates
+    arrive as PRs. A fixable HIGH or CRITICAL finding fails the build;
+    an accepted risk has a reason and an expiry. (ADR-0022)
     ([security](docs/handbook/security.md))
 17. **Write the decision down.** An ADR for any "why is it like this?",
     a runbook for any procedure needed under pressure, a line in the
@@ -208,32 +216,29 @@ Each rule exists because breaking it cost something measurable here.
 
 ## The handbook
 
+The technologies, and when a new project needs each one:
+[TECH_STACK.md](TECH_STACK.md). The chapters:
+
 | Chapter | Read it when |
 |---|---|
 | [Using this template](docs/handbook/using-this-template.md) | starting a new service from this repo: rename, settings, package visibility, replacing the domain |
 | [Code style](docs/handbook/code-style.md) | writing code here: functions or classes, errors, async, tests, rules for AI engineering teams and AI coding agents |
-| [Tech stack](docs/handbook/tech-stack.md) | every technology: why it, what else, its version, its trap (Playwright's three packages included) |
 | [Development environment](docs/handbook/dev-environment.md) | setting up a machine: Linux, macOS, Windows, Apple Silicon, corporate proxies |
 | [Daily work](docs/handbook/daily-work.md) | adding a dependency, an endpoint, a setting, a migration, a metric; the Git workflow; **every setting, in one table** |
 | [Testing](docs/handbook/testing.md) | writing tests; what each layer proves; which layer caught which real bug |
-| [Debugging](docs/handbook/debugging.md) | something is wrong: symptom → tool, how each tool works, real output |
-| [Observability](docs/handbook/observability.md) | adding metrics, panels or alerts; reading the dashboard |
-| [AI observability](docs/handbook/ai-observability.md) | an answer got worse or slower: tracing it through retrieval and the model; what spans may hold; what tracing costs; with a hands-on [lab](labs/ai-observability/README.md) |
-| [Performance](docs/handbook/performance.md) | something is slow; capacity numbers; how the bottlenecks were found |
-| [Load testing](docs/handbook/load-testing.md) | choosing a tool; open vs closed models; reference scripts for six tools |
+| [Operations](docs/handbook/operations.md) | something is wrong (symptom → tool); metrics, alerts and logs; what happens when each part fails (measured); something is slow, capacity, load tests |
+| [AI observability](docs/handbook/ai-observability.md) | an answer got worse or slower: tracing it through retrieval and the model; what spans may hold; what tracing costs |
 | [Networking](docs/handbook/networking.md) | Docker networking, nginx, load balancers, a cloud network design |
-| [Environments and shipping](docs/handbook/environments-and-shipping.md) | laptop → CI → staging → production; managed-platform mapping; the infra handoff |
 | [Architecture](docs/handbook/architecture.md) | the monolith, what to split first and when, the scaling path |
 | [AI engineering](docs/handbook/ai-engineering.md) | changing the prompt or the model; writing eval cases; trusting an LLM judge; reasoning models; a real model on your machine |
-| [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed`; with a hands-on [debugging lab](labs/rag-debugging/README.md) |
+| [RAG](docs/handbook/rag.md) | runbook search: how retrieval works, a team filter under a vector index, choosing an embedding model, `make reembed` |
 | [Security](docs/handbook/security.md) | sign-in and roles (and connecting your identity provider), secrets, least privilege, exposure, supply chain, LLM-specific risks |
-| [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped; with a hands-on [lab](labs/ai-cost/README.md) |
+| [AI cost](docs/handbook/ai-cost.md) | what an answer costs and where its tokens go (measured); the levers, and which do not apply here; a bill that jumped |
 | [Agents](docs/handbook/agents.md) | an agent or a pipeline (measured); how the agent and its tools work; the tools over MCP; approval gates and multi-agent designs, not built |
-| [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools; with a hands-on [lab](labs/ai-security/README.md) |
-| [Failure modes](docs/handbook/failure-modes.md) | what happens when each part fails (measured), SPOFs, bottlenecks, game days |
-| [Going to production](docs/handbook/production.md) | the stages to real users and their exit criteria; SLOs; canaries; game days; incidents; everything never tested |
-| [Infrastructure Q&A](docs/handbook/infrastructure-qa.md) | an infrastructure team's questions: reproducibility, scale, limits, backups, Kubernetes |
-| Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md) | an alert fired; setting up or operating a server |
+| [AI security](docs/handbook/ai-security.md) | what the model reads and what it can affect: redaction (measured), the audit trail, output handling, and the rules before the assistant gets tools |
+| [Production](docs/handbook/production.md) | environments; build once, promote; releases and canaries; the infrastructure team's questions (reproducibility, scale, backups); the managed-platform mapping; the stages to real users; SLOs, game days, incidents; everything never tested |
+| [Privacy](docs/privacy.md) | what the service holds about people, where, for how long; export, erasure, retention |
+| Runbooks: [alerts](docs/runbooks/alerts.md), [one VM](docs/runbooks/demo-vm.md), [turn the assistant off](docs/runbooks/turn-the-assistant-off.md) | an alert fired; setting up or operating a server; the assistant is the incident |
 
 ## Gotchas: the complete list
 
@@ -271,7 +276,7 @@ something bites.
   act on exit only; "unhealthy" matters to `depends_on` and orchestrators.
 - **`docker kill` counts as a manual stop:** the container stayed down
   (exit 137, RestartCount 0). Simulate crashes with SIGKILL from the host
-  PID namespace. ([failure modes](docs/handbook/failure-modes.md))
+  PID namespace. ([failure modes](docs/handbook/operations.md#failure-modes))
 - **Inside a container, PID 1 ignores SIGKILL** sent from within its own
   PID namespace.
 - **A stopped container vanishes from Docker DNS.** Clients get a name
@@ -292,12 +297,12 @@ something bites.
   stale dependencies. Use `run --build`.
 - **A memory limit without `memswap_limit` allows as much again in
   swap.** A 50 MB limit reached 95 MB, silently, with no OOM.
-  ([failure modes](docs/handbook/failure-modes.md))
+  ([failure modes](docs/handbook/operations.md#failure-modes))
 - **Lowering a live container's memory limit OOM-kills processes even
   with swap allowed**: reclaim gives up quickly. Use it for drills only.
 - **Docker's `OOMKilled` flag can read `false` after PID 1 was
   OOM-killed.** Read the kernel log and cAdvisor's counter.
-  ([debugging](docs/handbook/debugging.md))
+  ([debugging](docs/handbook/operations.md#debugging-tools))
 - **An OOM-killed gunicorn worker leaves the container "healthy"**: the
   only traces are a log line, the cgroup counter and the alert.
 - **A directory bind mount pins the directory, not the path.** `git
@@ -402,7 +407,7 @@ something bites.
 ### Python, async, FastAPI, gunicorn
 - **A synchronous call in async code blocks every request on the
   worker.** `ruff --select ASYNC` did not flag an SDK's sync client.
-  ([performance](docs/handbook/performance.md))
+  ([performance](docs/handbook/operations.md#performance-and-load))
 - **On a busy event loop, every wall-clock timeout fires early**: limiter
   fail-opens and pool timeouts at 46% CPU. Watch `event_loop_lag_seconds`.
 - **`asyncio.timeout()` cancels once, and cleanup can block again**
@@ -430,7 +435,7 @@ something bites.
 - **`uvicorn --reload` runs the app in a child process with stdin on
   `/dev/null`**: pdb needs a foreground server without reload, and
   debugpy can't debug the child.
-  ([debugging](docs/handbook/debugging.md))
+  ([debugging](docs/handbook/operations.md#debugging-tools))
 - **A paused breakpoint stops the whole event loop**: every request on
   that worker waits.
 - **A forgotten `breakpoint()` hangs a production worker** until gunicorn
@@ -439,7 +444,7 @@ something bites.
   directory must exist first, and the variable must never be `""`. An
   empty value still turns multiprocess mode on (it checks presence). A
   one-off CLI in the server's container must remove the variable before
-  its imports. ([observability](docs/handbook/observability.md))
+  its imports. ([observability](docs/handbook/operations.md#watching))
 - **The openai SDK depends on `httpx2`, not `httpx`.** Importing `httpx`
   worked only because it was a dev dependency, and the production image
   crashed.
@@ -472,7 +477,7 @@ something bites.
   `pool.checkedout()`.
 - **SQLAlchemy discards overflow connections on return**: bursty load
   churned them (196 logins in 20 s), a metastable slow state. Pool 20,
-  overflow 0. ([performance](docs/handbook/performance.md))
+  overflow 0. ([performance](docs/handbook/operations.md#performance-and-load))
 - **Pre-ping adds round trips per checkout**, and can double the wait
   during a frozen database: one run took 10.6 s instead of 5.3 s, most
   likely two PgBouncer queue waits in a row.
@@ -480,7 +485,7 @@ something bites.
   planner walk the global time index and filter**: 13 ms (103k rows
   discarded) when one of a user's teams was large but quiet, growing with
   the table. A LATERAL join reads each team through its own index:
-  0.06 ms, bounded. ([performance](docs/handbook/performance.md))
+  0.06 ms, bounded. ([performance](docs/handbook/operations.md#performance-and-load))
 - **Adding a validated foreign key blocks writes for the whole scan**:
   add it `NOT VALID`, then `VALIDATE CONSTRAINT` in its own transaction.
 - **An unnamed constraint cannot be dropped by a downgrade** that Alembic
@@ -529,7 +534,7 @@ something bites.
 - **Authentication doubled the CPU of the cheapest request.** A query per
   table and a transaction of its own made p95 1.07 s at 1,000 req/s.
   One query, in the request's transaction: 19.7 ms.
-  ([performance](docs/handbook/performance.md))
+  ([performance](docs/handbook/operations.md#performance-and-load))
 - **Deleting a `__Host-` cookie needs `Secure` too**: browsers ignore a
   `Set-Cookie` for that prefix without it.
 - **RFC 6749 form-encodes the client id and secret before base64**
@@ -649,8 +654,7 @@ All measured with gpt-oss:20b and gemma3:27b; the evidence is in
   shows the processor. Recreate the container.
 
 ### AI security
-The evidence is in [AI security](docs/handbook/ai-security.md) and
-[the lab](labs/ai-security/README.md).
+The evidence is in [AI security](docs/handbook/ai-security.md).
 - **`\bpassword` never matches `DB_PASSWORD`**: `_` is a word character.
   The first redactor caught 17 of 54 secrets in real log shapes. Match
   names that *end* with the word, and leave `max_tokens` alone.
@@ -694,13 +698,13 @@ Measured with gpt-oss:20b; the evidence is in [Agents](docs/handbook/agents.md).
 
 ### Runbook retrieval (RAG)
 Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
-[RAG](docs/handbook/rag.md) and [the lab](labs/rag-debugging/README.md).
+[RAG](docs/handbook/rag.md).
 - **A team filter under an approximate vector index can find nothing.**
   HNSW hands back its 40 nearest rows, then the filter runs. With 1% of
   the rows the caller's, a one-team search found 0 of 20, and nothing
   failed. Send the filter as a plain `team_id = ANY(...)`, never behind
   an OR, and turn on iterative scans (pgvector 0.8+) where there is no
-  filter. `make rag-overfiltering-lab` shows all four plans.
+  filter. `make bench-rag-filter` shows all four plans.
 - **Change the embedding model, its dimensions or its document prefix,
   and every stored vector is meaningless against new questions.**
   Similarity search still returns rows. Here each vector carries the key
@@ -772,7 +776,7 @@ Measured building the traces; the evidence is in
 
 ### Observability
 - **A ratio with a numerator that doesn't exist yet is "no data", not 0**:
-  `or vector(0)`. ([observability](docs/handbook/observability.md))
+  `or vector(0)`. ([observability](docs/handbook/operations.md#watching))
 - **`rate()` needs two samples, and a new series' first increment is
   invisible** to `rate()`/`increase()`.
 - **A removed service has no `up` series**: alert with `absent()`.
@@ -826,7 +830,7 @@ Measured building the traces; the evidence is in
 ### Load testing
 - **A closed model (N users waiting on replies) hides the queue**, and
   with it coordinated omission: use arrival-rate executors.
-  ([load testing](docs/handbook/load-testing.md))
+  ([load testing](docs/handbook/operations.md#the-method))
 - **Arrival shape matters as much as rate**: the same 100 req/s gave
   1.5 ms evenly spread, 29 ms in clumps. After sign-in doubled the
   per-request cost, 200 users pacing 1 req/s in step saw p50 182 ms,
@@ -854,7 +858,7 @@ Measured building the traces; the evidence is in
 ### Shell, Git, host
 - **`git checkout <file>` to undo an experiment discards every other
   uncommitted change in that file.** A documented correction was lost this
-  way, and its lab kept saying it had been made. Commit first, or revert
+  way, and the notes kept saying it had been made. Commit first, or revert
   the experiment with a reverse patch (`git diff > x.patch; git apply -R`).
 - **In a YAML folded block (`>-`), a more-indented line keeps its
   newline**: cloud-init's secret loop, continued on an indented line,
@@ -885,11 +889,11 @@ Measured building the traces; the evidence is in
 ## Failure modes, in one table
 
 Measured with `make drills`; the full matrix is in
-[failure modes](docs/handbook/failure-modes.md).
+[failure modes](docs/handbook/operations.md#failure-modes).
 
 | When this fails… | users see… | back after |
 |---|---|---|
-| Valkey (down or frozen) | nothing, but rate limits are off | 0 s |
+| Valkey (down or frozen) | nothing, but rate limits are off; in production the chat answers 503 until it is back | 0 s |
 | PgBouncer or Postgres (down or frozen) | JSON 503 within 5–10 s; nothing hangs, nothing leaks | 1–2 s |
 | the model provider (down, 429, 500, hang, drop) | a typed error in the chat stream; everything else works | 0 s |
 | the identity provider | signed-in users: nothing. New sign-ins fail on the provider's page. `IdentityProviderDown` fires | 0 s |
@@ -904,7 +908,7 @@ A missing index → pool churn → api CPU (~530 signed-in reads/s per core,
 ~920 before sign-in; 500 streams per 2 CPUs, the SDK's per-chunk cost) → event-loop saturation
 turning into timeouts elsewhere → connection budgets (~12 replicas) →
 the provider's quota. Details and numbers:
-[performance](docs/handbook/performance.md).
+[performance](docs/handbook/operations.md#performance-and-load).
 
 ## Decisions
 
@@ -930,6 +934,10 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - an append-only audit trail of what the assistant reads, and who wrote it (0019)
 - an agent mode beside the pipeline, and its read-only tools over MCP (0020)
 - trimming the template to what a project uses (0021)
+- scanning images and commits; pins by digest (0022)
+- production refuses unsafe settings, and changes some defaults (0023)
+- an off switch for the assistant (0024)
+- personal data: retention, export and erasure (0025)
 
 A merged ADR is never edited: a new one supersedes it.
 
@@ -945,8 +953,6 @@ oversight:
   failure modes).
 - **Let's Encrypt for real**: rehearsed against Pebble, its test CA; a
   real domain is the step left.
-- **Image and secret scanning** in CI (GitHub's secret scanning with push
-  protection is on).
 - **Quality evals on a schedule** against the production model, and
   real answers sampled into the eval set. Today quality evals run on
   demand, against a local model.

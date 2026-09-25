@@ -196,7 +196,7 @@ async def authenticate(db: AsyncSession, token: str, settings: Settings) -> Prin
     One query - session, user and memberships together, a row per team - in
     the request's own transaction. Measured: a query per table plus a
     transaction of its own doubled the CPU of the cheapest request
-    (handbook, performance chapter).
+    (docs/handbook/operations.md, "The cost of signing in").
     """
     now = func.now()
     rows = (

@@ -93,7 +93,7 @@ network calls between our own components.
 ## The scaling path
 
 In order: each step is cheaper than the next and buys a known amount
-(performance chapter).
+([operations](operations.md#performance-and-load)).
 
 1. **Fix the query.** The first bottleneck was a missing index (p95 7 s
    → 4 ms). No amount of scaling fixes that.

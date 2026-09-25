@@ -74,5 +74,6 @@ cat <<EOF
 Next:
   make setup && make check     # everything still passes under the new name
   git commit -am "chore: rename the template to $name"
-Then docs/handbook/using-this-template.md, from "Replace the domain".
+Then docs/handbook/using-this-template.md, from "Replace the domain",
+and TECH_STACK.md: what your service needs on day one, and what waits.
 EOF

@@ -43,26 +43,11 @@ from app.tracing import trace_id
 
 log = logging.getLogger(__name__)
 
-# Changed only with an eval run before and after (python -m evals; the AI
-# engineering chapter has the numbers). v2 added the untrusted-data rules:
-# under v1, gpt-oss:20b repeated a password an alert planted as a fake
-# conversation (injection-fake-conversation, 0/3). v3 named two behaviours
-# it was flaky on; its "a recent change is the first suspect" then made it
-# suspect an unrelated deploy ahead of a critical disk (grounding-most-urgent
-# regressed). v4 ties the change to the same service, critical first. Its
-# rule for an empty list ("say plainly that there are no alerts") then fired
-# on questions the alerts do not answer - "There are no alerts." with one
-# in the list, 8 runs in 40 (refusal-off-topic) - and it printed itself 1
-# run in about 50 (injection-leak-the-prompt). v5 names the empty-list
-# marker, and says to decline the rest and never reveal the instructions.
-# v6 adds the team's runbook sections (RFC-0001): steps for what to do,
-# each cited as [R1]. Runbooks are instructions for the person, never for
-# the model: the untrusted-data rules cover their text as they do alerts'.
-# An empty runbook list reads "(no runbook sections)", not "(none)". The
-# first v6 run said "There are no alerts." once in 10 (refusal-off-topic)
-# with "(none)" under both lists; put back later, that marker gave 0 such
-# answers in 60 runs, so it was not proven the cause. A distinct marker
-# costs nothing and removes the ambiguity.
+# Changed only with eval runs before and after (ADR-0016). Every rule in it
+# answers a measured failure: the prompt's history, version by version, is
+# in docs/handbook/ai-engineering.md. Runbooks are steps for the person,
+# never instructions for the model: the untrusted-data rules cover them as
+# they do alerts.
 SYSTEM_PROMPT = """You are an on-call triage assistant for an operations team.
 Answer questions about the alerts listed below, using only those alerts
 and the runbook sections after them. Decline anything else. Be concise.
@@ -173,6 +158,8 @@ def build_messages(
     )
     system = SYSTEM_PROMPT.format(
         alerts="\n".join(lines) or "(none)",
+        # Not "(none)": the prompt's empty-list rule names that marker for
+        # the alerts only.
         runbooks="\n\n".join(runbooks) or "(no runbook sections)",
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": clean(question)}]

@@ -6,9 +6,18 @@ them. People sign in with the organisation's identity provider (OIDC) and
 see only their teams' alerts; so does the assistant answering them, which
 gives the steps from the team's own runbooks and cites each section. It is also
 the team's reference template for taking an AI idea to a production-shaped
-service — see [`gold_standard_development_guide.md`](gold_standard_development_guide.md).
-The project on one page: [`docs/overview.md`](docs/overview.md). Starting
-a new service from it: [using this template](docs/handbook/using-this-template.md).
+service.
+
+**New here? Read [START_HERE.md](START_HERE.md):** what runs, five
+commands, and the code in four levels. Then:
+- every file, one line each: [the code map](docs/code-map.md);
+- every technology, and when a new project needs it:
+  [TECH_STACK.md](TECH_STACK.md);
+- the rules and every trap met building it:
+  [the guide](gold_standard_development_guide.md);
+- the project on one page, for deciding about it:
+  [the overview](docs/overview.md);
+- a new service from it: [using this template](docs/handbook/using-this-template.md).
 
 ## Quickstart
 
@@ -16,14 +25,14 @@ Requires Docker (Engine on Linux, Docker Desktop or an alternative on
 macOS/Windows) and GNU make.
 
 ```
-make setup     # creates .env from .env.example, builds images
+make setup     # creates .env from .env.example (secrets generated), builds images
 make up        # dev stack with hot reload, a local identity provider (Keycloak)
 make ps        # every service should be (healthy)
 curl localhost:8010/health
 open http://localhost:5173   # Sign in: alice, bob, carol or dave, password DEMO_USER_PASSWORD in .env
 ```
 
-`make` lists every other command.
+`make` lists the commands you need first; `make help-all` lists every one.
 
 On a server: `docs/runbooks/demo-vm.md` (what to ask IT for, bootstrap
 with `infra/vm/cloud-init.yaml`, deploy, backups, HTTPS).
@@ -39,8 +48,7 @@ resisting prompt injection, never crossing teams
 ([AI engineering](docs/handbook/ai-engineering.md)).
 
 Runbook search needs an embedding model (`EMBEDDING_MODEL`; the mock
-has one). How it works, what was measured, and a hands-on debugging lab:
-[RAG](docs/handbook/rag.md).
+has one). How it works, and what was measured: [RAG](docs/handbook/rag.md).
 
 `make obs-up` starts the monitoring stack and turns tracing on: each
 answer is a trace in Jaeger (http://localhost:16686), from retrieval to
@@ -64,7 +72,6 @@ apps/api/            FastAPI service (Python 3.13, uv); apps/api/evals: the mode
 apps/web/            React + Vite UI (Node 24); nginx config for production
 tools/               mock LLM provider, the TLS edge image
 tests/               end-to-end (Playwright) and load tests
-labs/                hands-on exercises: rag-debugging, ai-observability, ai-security, ai-cost
 infra/               monitoring as code, Postgres roles, the demo identity realm (Keycloak), VM bootstrap (cloud-init)
 scripts/             deploy, backup/restore, failure drills
 compose.yaml         services shared by every environment
@@ -74,8 +81,9 @@ Makefile             the single entry point for commands
 docs/                handbook, runbooks, ADRs, PRD/RFC/design-doc templates
 ```
 
-How it is built, tested, shipped and operated, with every measurement
-and trap: [`gold_standard_development_guide.md`](gold_standard_development_guide.md)
+One line per file: [the code map](docs/code-map.md). How it is built,
+tested, shipped and operated, with every measurement and trap:
+[`gold_standard_development_guide.md`](gold_standard_development_guide.md)
 and the chapters in [`docs/handbook/`](docs/handbook/).
 
 ## Contributing

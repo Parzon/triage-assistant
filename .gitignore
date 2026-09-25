@@ -30,6 +30,5 @@ test-results/
 .captures/
 # Database dumps (make backup): data, never in git
 backups/
-
-# lab state
-labs/ai-observability/.incident
+# Images saved for the vulnerability scan (make scan), removed after it
+.scan/

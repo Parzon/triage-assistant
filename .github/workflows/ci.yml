@@ -50,7 +50,7 @@ jobs:
       # The exact command developers run: a throwaway compose stack with real
       # Postgres, PgBouncer and Valkey, migrations + `alembic check`, then
       # pytest with the coverage gate from pyproject.toml.
-      - run: cp .env.example .env
+      - run: make .env
       - run: make test-api
       - name: Coverage summary
         if: always()
@@ -76,6 +76,21 @@ jobs:
       # Builds the production api image and asserts: runs as UID 10001, no
       # dev tooling inside, every module imports under a read-only rootfs.
       - run: make image-check
+
+  # Blocks the merge (ADR-0022): a secret in any commit, or a fixable HIGH or
+  # CRITICAL vulnerability in the production images or the web's runtime
+  # dependencies. Accepted risks: .trivyignore.yaml, with reasons and expiry
+  # dates.
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every commit, for the secret scan
+      - name: Leaked secrets, every commit (gitleaks)
+        run: make secrets-scan
+      - name: Vulnerabilities in the production images and the web's dependencies (Trivy)
+        run: make scan
 
   web-build:
     runs-on: ubuntu-24.04
@@ -104,7 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The production-shaped stack exactly as `make prod-up` runs it
       # (nginx, gunicorn, read-only containers), with the mock LLM.
-      - run: cp .env.example .env
+      - run: make .env
       - run: make prod-up
       - name: Browser tests through nginx
         run: make e2e

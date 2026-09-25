@@ -223,9 +223,9 @@ query.
 - **debugpy is never in production.** The debug overlay is a separate
   compose file, bound to 127.0.0.1. An open debugpy port is remote code
   execution.
-- The OpenAPI docs (`/api/docs`) are on by default, which is useful for
-  demos. Set `DOCS_ENABLED=false` on an internet-facing deployment that
-  shouldn't advertise its API.
+- The OpenAPI docs (`/api/docs`) are on in development and off in
+  production by default (ADR-0023): a deployment that wants to advertise
+  its API sets `DOCS_ENABLED=true`.
 
 ## HTTP ✅
 
@@ -348,30 +348,85 @@ security](ai-security.md).
 - ✅ **GitHub Actions pinned to commit SHAs**, not tags. A tag can be
   moved to malicious code, as in the 2025 tj-actions/changed-files
   compromise.
-- ✅ **Pinned versions** of base images and tools.
+- ✅ **Base images pinned by digest**, not only by tag: a tag like
+  `python:3.13-slim` can be moved to other content, a digest cannot.
+  Dependabot moves tag and digest together, and a rebuilt base (same tag,
+  new digest, security fixes inside) arrives as a PR too. The compose
+  files' images (Postgres, Valkey, the monitoring stack) are pinned by
+  tag, bumped by Dependabot (minor and patch), and scanned weekly.
 - ✅ **Release images carry provenance and an SBOM** (what went into them),
   stored next to them in GHCR.
 - ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates weekly,
   grouped, for GitHub Actions, the api (uv), the web (npm), the e2e
-  suite and the Dockerfiles. Each update is a PR that has to pass CI.
-- 📘 **Image scanning** (Trivy or Grype) on the release images, and a
-  policy on what severity blocks a release.
-- 📘 **Secret scanning** in CI (gitleaks via its CLI; the GitHub Action
-  needs a licence for organisations). Enable GitHub's secret-scanning
-  push protection on the repository too.
-- 📘 **Pin base images by digest** too, with Dependabot bumping them:
-  tags like `python:3.13-slim` move under you.
+  suite, the Dockerfiles and the compose files. Each update is a PR that
+  has to pass CI.
+- ✅ **Vulnerability scanning** (Trivy, `make scan`; ADR-0022): the
+  production images (api, web, edge) and the web's runtime dependencies,
+  on every PR, again before a release publishes anything, and weekly from
+  main (`.github/workflows/scan.yml`, with the compose files' images:
+  `make scan-compose`).
+- ✅ **Secret scanning** (gitleaks, `make secrets-scan`): every commit in
+  the history, on every PR. Files of fake credentials on purpose are
+  exempt (`.gitleaks.toml`), and single old findings by fingerprint
+  (`.gitleaksignore`). A real finding: rotate the secret first, since
+  once pushed it is public; then remove it. 📘 Turn on GitHub's
+  secret-scanning push protection too: it stops the push itself.
+- ✅ **The scanners are pinned by digest as well.** In March 2026 Trivy's
+  own releases (0.69.4 to 0.69.6) and the tags of its GitHub Action were
+  replaced by code that stole CI credentials (CVE-2026-33634). They run
+  from images, not third-party Actions.
 
-## Before real users 📘
+**The policy, and who owns it.** A fixable HIGH or CRITICAL finding
+blocks the merge and the release; "fixable" means a fixed version exists
+to move to. When nothing can be moved to yet, the risk may be accepted in
+`.trivyignore.yaml`: one entry per finding, with the reason
+(`statement`) and an expiry date at most 90 days out (`expired_at`).
+`make scan` refuses an entry without either, and the code owners approve
+every change to the file. The severity that blocks, and who may accept,
+are the lead's call: change `SCAN` in the Makefile and `.github/CODEOWNERS`.
 
-- [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and `HSTS_MAX_AGE=31536000` once HTTPS works
-- [ ] `DOCS_ENABLED=false` if the API should not be advertised
-- [ ] Your organisation's identity provider connected (above), the
-      bundled Keycloak's profile removed
-- [ ] Rate limiting that fails closed for chat, if abuse matters more
-      than availability
-- [ ] Image and secret scanning in CI
-- [ ] The provider's data-retention terms reviewed; redaction of
-      secrets in alert text
-- [ ] Backups encrypted and stored off the host
+What the first scan found, and what was done:
+
+| Finding | Where | Done |
+|---|---|---|
+| `msgpack` 1.1.2, `setuptools` 70.3.0 (HIGH, fixed) | inside pip, in the Python base image | pip removed from the production image, which never used it; `make image-check` now refuses an image with pip |
+| `libexpat` 2.8.4 (HIGH, fixed) | nginx's optional modules | the `-slim` nginx variant: same nginx, no optional modules or curl, no findings |
+| 17 in Go and its modules (HIGH, fixed upstream) | the Caddy binary of the TLS edge | no Caddy release carries the fixes yet: accepted until 2026-10-25. The way out before then is building Caddy with xcaddy on a patched Go |
+
+## Before real users
+
+The rule: what a machine can check, a machine checks. What used to be
+this checklist is now refused by code (ADR-0023, ADR-0022):
+
+| The mistake | What catches it |
+|---|---|
+| a `localhost` `PUBLIC_URL` | the api refuses to start in production: `localhost_url` |
+| plain HTTP, or cookies without `Secure` | `insecure_cookies` |
+| the mock model, or its embeddings | `mock_model` |
+| the bundled Keycloak and its demo users | `demo_identity_provider` |
+| a secret left at `.env.example`'s value | `example_secret`; `make setup` and `make .env` generate every one |
+| questions and answers on traces | `trace_content` |
+| the API docs advertised | off by default in production |
+| an unlimited chat when Valkey is down | the chat's limiter fails closed in production |
+| every trace kept, at a cost | a tenth by default in production |
+| a vulnerable image or a committed secret | CI's `security` job: Trivy and gitleaks |
+
+A production deployment that waives a check does it by name, in
+`PROD_CHECKS_WAIVED`, and the api logs each waiver at startup.
+
+What code cannot check stays a checklist 📘:
+
+- [ ] `PROD_CHECKS_WAIVED` empty, or each waiver written down with its reason
+- [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and
+      `HSTS_MAX_AGE=31536000` once HTTPS works on it
+- [ ] A data-processing agreement with the model provider: no training on
+      your data, its retention, the region prompts are processed in
+      ([privacy](../privacy.md))
+- [ ] A data protection impact assessment, and the works council's
+      consent where the audit trail records employees ([privacy](../privacy.md))
+- [ ] Retention periods agreed, and the retention job scheduled
+      ([privacy](../privacy.md))
+- [ ] Backups encrypted, stored off the host, and one restore rehearsed
+- [ ] Someone paged when an alert fires: Alertmanager routes to the app only
+- [ ] A penetration test before the service is reachable from the internet
 - [ ] A security contact and a way to report issues (`SECURITY.md`)

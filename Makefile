@@ -1,4 +1,5 @@
-# Every command a developer needs, in one place: `make` lists them.
+# Every command a developer needs, in one place: `make` lists the ones for
+# the first weeks, `make help-all` every one, by section.
 # Targets are thin wrappers - read a recipe to see the real docker compose
 # command, and run that directly whenever you prefer.
 # Works with the GNU make 3.81 that macOS ships (no newer features used).
@@ -18,20 +19,35 @@ export DEV_UID := $(shell id -u)
 export DEV_GID := $(shell id -g)
 S    ?=
 
-.PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
+.PHONY: help help-all setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check session revoke reembed seed load \
-        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals rag-overfiltering-lab
+        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
+        deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
-help: ## List all targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+# What `make` shows, in this order: the daily loop first (START_HERE.md).
+FIRST := setup up ps logs sh down rebuild check test-fast fmt deps-api deps-web migration mock evals prod-up e2e
+
+help: ## The commands for the first weeks (every command: make help-all)
+	@awk -v first="$(FIRST)" 'BEGIN {FS = ":.*## "; n = split(first, t, " "); for (i = 1; i <= n; i++) at[t[i]] = i} \
+	  /^[a-zA-Z0-9_-]+:.*## / && ($$1 in at) {row[at[$$1]] = sprintf("  \033[36m%-10s\033[0m %s", $$1, $$2)} \
+	  END {for (i = 1; i <= n; i++) if (i in row) print row[i]; print "\n  Every command, by section: make help-all"}' $(MAKEFILE_LIST)
+
+help-all: ## Every command, by section
+	@awk 'BEGIN {FS = ":.*## "} /^# --- / {h = $$0; sub(/^# --- /, "", h); sub(/ -+$$/, "", h); printf "\n%s\n", h} \
+	  /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Dev stack -------------------------------------------------------------------
 
-setup: ## First run: create .env from .env.example, build the dev images
-	@test -f .env || { cp .env.example .env; echo "created .env from .env.example"; }
+setup: .env ## First run: create .env from .env.example (secrets generated), build the dev images
 	$(DEV) build
+
+# Made once, never overwritten. Every change-me value gets a random one:
+# production refuses the template's secrets (ADR-0023).
+.env:
+	@awk 'BEGIN { FS = OFS = "=" } /^[A-Z0-9_]+=change-me/ { c = "openssl rand -hex 24"; c | getline $$2; close(c) } 1' .env.example > .env
+	@chmod 600 .env
+	@echo "created .env from .env.example, with generated secrets"
 
 up: ## Start the dev stack in the background (hot reload)
 	$(DEV) up -d
@@ -121,13 +137,13 @@ ollama-pull: ## Download a model into the local Ollama: make ollama-pull m=llama
 	$(DEV) --profile ollama up -d --wait ollama
 	$(DEV) --profile ollama exec ollama ollama pull $(m)
 
-# --- The RAG debugging lab (labs/rag-debugging/README.md) ---------------------------
+# --- Runbook search under a team filter (docs/handbook/rag.md) --------------------
 
-rag-overfiltering-lab: ## Vector search behind a team filter, four ways, on 50,000 lab sections (dev db; ~3 min)
-	$(DEV) exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-seed.sql
-	$(DEV) exec -T db sh -c 'export TEAM_ID=$$(psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT id FROM teams WHERE slug = '"'"'lab-t42'"'"'"); \
-	  PGPASSWORD="$$APP_DB_PASSWORD" psql -q -h localhost -U "$$APP_DB_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-query.sql
-	$(DEV) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < labs/rag-debugging/overfiltering-cleanup.sql
+bench-rag-filter: ## Vector search behind a team filter, four ways, on 50,000 synthetic sections (dev db; ~3 min)
+	$(DEV) exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-seed.sql
+	$(DEV) exec -T db sh -c 'export TEAM_ID=$$(psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT id FROM teams WHERE slug = '"'"'bench-t42'"'"'"); \
+	  PGPASSWORD="$$APP_DB_PASSWORD" psql -q -h localhost -U "$$APP_DB_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-query.sql
+	$(DEV) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/sql/bench-rag-filter-cleanup.sql
 
 # --- Evals (apps/api/evals; docs/handbook/ai-engineering.md) -------------------------
 # In the running dev api: the service's own settings, prompt and model client.
@@ -154,6 +170,41 @@ fmt: ## Auto-format the api with ruff (files stay owned by you)
 typecheck: ## mypy (strict) on the api, tsc on the web
 	$(DEV) run --rm --no-deps api mypy
 	$(DEV) run --rm --no-deps web npx tsc -b
+
+# --- Supply chain: known vulnerabilities, leaked secrets (ADR-0022) -----------
+# The scanners run from images pinned by digest. In March 2026 Trivy's own
+# releases (0.69.4 to 0.69.6) and its GitHub Action's tags were replaced by
+# code that stole CI credentials: a scanner is supply chain too.
+TRIVY := docker run --rm -v "$(CURDIR):/src:ro" -v triage-assistant-trivy-cache:/root/.cache/trivy \
+  aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+GITLEAKS := docker run --rm $(AS_ME) -v "$(CURDIR):/repo:ro" \
+  ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+# What fails a build or a release: HIGH or CRITICAL, with a fixed version to
+# move to. An accepted risk goes in .trivyignore.yaml with a reason and an
+# expiry date (scripts/check_trivyignore.py refuses one without either).
+SCAN := --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --table-mode detailed \
+  --ignorefile /src/.trivyignore.yaml
+
+# Built here and saved to a file for Trivy: no Docker socket in the scanner.
+scan: ## Scan the production images and the web's dependencies; fail on fixable HIGH/CRITICAL (Trivy)
+	@python3 scripts/check_trivyignore.py
+	docker build -q --target production -t triage-assistant-api:scan apps/api >/dev/null
+	docker build -q --target production -t triage-assistant-web:scan apps/web >/dev/null
+	docker build -q -t triage-assistant-edge:scan tools/edge >/dev/null
+	@mkdir -p .scan; trap 'rm -rf .scan' EXIT; status=0; \
+	  for image in api web edge; do echo "== triage-assistant-$$image"; \
+	    docker save -o .scan/$$image.tar triage-assistant-$$image:scan \
+	    && $(TRIVY) image $(SCAN) --input /src/.scan/$$image.tar || status=1; done; \
+	  echo "== apps/web/package-lock.json (runtime dependencies)"; \
+	  $(TRIVY) fs $(SCAN) --scanners vuln /src/apps/web || status=1; exit $$status
+
+scan-compose: ## Scan the third-party images the compose files run (Postgres, PgBouncer, Valkey, Keycloak, monitoring)
+	@python3 scripts/check_trivyignore.py
+	@status=0; for image in $$($(PROD) --profile '*' config --images | grep -v '^triage-assistant' | sort -u); do \
+	  echo "== $$image"; $(TRIVY) image $(SCAN) $$image || status=1; done; exit $$status
+
+secrets-scan: ## Leaked secrets in every commit (gitleaks); fake credentials on purpose: .gitleaks.toml
+	$(GITLEAKS) git --no-banner --redact --config /repo/.gitleaks.toml --gitleaks-ignore-path /repo/.gitleaksignore /repo
 
 # --- Tests -------------------------------------------------------------------
 
@@ -203,11 +254,13 @@ check: lint typecheck test ## Everything CI checks, before you push
 
 # The production api image, checked the way CI checks it (CI calls this target).
 IMG := triage-assistant-api:check
-image-check: ## Build the production api image; assert non-root, no dev tools, every module imports
+image-check: ## Build the production api image; assert non-root, no dev tools or pip, every module imports
 	docker build -q --target production -t $(IMG) apps/api >/dev/null
 	test "$$(docker run --rm --entrypoint id $(IMG) -u)" = "10001"
 	@if docker run --rm --entrypoint sh $(IMG) -c 'ls /api/.venv/bin' | grep -qxE 'ruff|pytest|uv'; then \
 	  echo "dev tooling found in the production image"; exit 1; fi
+	@if docker run --rm --entrypoint sh $(IMG) -c 'ls -d /usr/local/lib/python3*/site-packages/pip' >/dev/null 2>&1; then \
+	  echo "pip found in the production image"; exit 1; fi
 	@# Tests run with dev dependencies installed, so an import that only resolves
 	@# through a test tool passes CI and crashes production. Read-only rootfs +
 	@# tmpfs /tmp, exactly as compose.prod.yaml runs it.
@@ -216,7 +269,7 @@ image-check: ## Build the production api image; assert non-root, no dev tools, e
 	@# write into the server's metrics directory - here one it could not write.
 	docker run --rm --read-only --tmpfs /tmp -e PROMETHEUS_MULTIPROC_DIR=/not-writable \
 	  --entrypoint python $(IMG) -m app.cli --help >/dev/null
-	@echo "production image: non-root, no dev tools, all modules import, the CLI runs"
+	@echo "production image: non-root, no dev tools or pip, all modules import, the CLI runs"
 
 # --- Debugging toolkit ------------------------------------------------------------
 # ENV=prod points a target at the production-shaped stack instead of dev.
@@ -277,6 +330,9 @@ session: ## Print a session cookie ("name=value"): make session [email=you@examp
 reembed: ## After changing EMBEDDING_* (but the query prefix): embed the runbooks again [ENV=prod]
 	@docker exec $(API_C) python -m app.cli reembed
 
+assistant: ## The assistant's off switch, no sign-in needed: make assistant [off="why" | on=1] [ENV=prod]
+	@docker exec $(API_C) python -m app.cli assistant $(if $(off),--off --reason '$(off)')$(if $(on), --on)
+
 revoke: ## End every session of a user now (after removing their access at the provider): make revoke email=... [ENV=prod]
 	@test -n "$(email)" || { echo 'usage: make revoke email=<address> [ENV=prod]'; exit 2; }
 	@docker exec $(API_C) python -m app.cli revoke --email "$(email)"
@@ -293,7 +349,22 @@ audit-prune: ## Delete audit events older than days= (no default: your retention
 	@$(STACK) exec -T db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
 	  "DELETE FROM audit_events WHERE created_at < now() - make_interval(days => $(days))"'
 
-# --- Performance lab ------------------------------------------------------------
+# --- Personal data (app/privacy.py, docs/privacy.md) ---------------------------
+# Operator commands, audited as the CLI. The deleting ones are dry runs until
+# told otherwise: they print exactly what the real run would delete.
+
+retention: ## Delete what is past its retention: expired sessions, inactive users, old alerts (dry run unless apply=1) [ENV=prod]
+	@docker exec $(API_C) python -m app.cli retention $(if $(apply),--apply)
+
+user-export: ## Everything held about a person, as JSON (an access request): make user-export email=... [ENV=prod]
+	@test -n "$(email)" || { echo 'usage: make user-export email=<address> [ENV=prod]'; exit 2; }
+	@docker exec $(API_C) python -m app.cli user-export --email "$(email)"
+
+user-forget: ## Erase a person's accounts; the audit trail keeps pseudonymous events (dry run unless yes=1) [ENV=prod]
+	@test -n "$(email)" || { echo 'usage: make user-forget email=<address> [yes=1] [ENV=prod]'; exit 2; }
+	@docker exec $(API_C) python -m app.cli user-forget --email "$(email)" $(if $(yes),--yes)
+
+# --- Load tests ------------------------------------------------------------------
 # Load tests run against the production-shaped stack (make prod-up), through
 # nginx, from a container on its network. Raise the rate limits for them:
 #   ALERTS_RATE_LIMIT=1000000 CHAT_RATE_LIMIT=1000000 make prod-up

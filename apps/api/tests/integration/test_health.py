@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Callable
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
@@ -70,3 +71,18 @@ async def test_database_outage_is_not_ready(with_database: Callable[[str], Setti
     status, body = await get(with_database("postgresql://x:y@127.0.0.1:1/triage"), "/ready")
     assert status == 503
     assert body["status"] == "not_ready"
+
+
+async def test_production_logs_each_waived_check_at_startup(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    # model_copy, not a new Settings: the checks themselves are unit-tested
+    # (tests/unit/test_config.py); this is what the log says once they pass.
+    waived = settings.model_copy(
+        update={"app_env": "prod", "prod_checks_waived": frozenset({"mock_model"})}
+    )
+    async with started(create_app(waived)):
+        pass
+    (record,) = [r for r in caplog.records if r.getMessage() == "production checks waived"]
+    assert record.levelname == "WARNING"
+    assert record.checks == ["mock_model"]  # type: ignore[attr-defined]

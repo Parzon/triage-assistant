@@ -2,8 +2,9 @@
 
 The recipes for the changes you will make every week, in the order to do
 them, then the Git workflow and the full list of settings. `make` lists
-every command; each target is a thin wrapper, so read the recipe in the
-Makefile to see the real `docker compose` command.
+the commands for the first weeks, `make help-all` every one; each target
+is a thin wrapper, so read the recipe in the Makefile to see the real
+`docker compose` command.
 
 ## Everyday commands
 
@@ -203,7 +204,7 @@ serving while they run (ADR-0011):
 3. **The alert** in `infra/observability/prometheus/alerts.yml`, with a
    test in `alerts.test.yml`: when it must fire, and when it must not.
    Then run `make obs-check`. A rule on a counter that may not exist yet
-   needs `or vector(0)` or `absent()`: see the observability chapter.
+   needs `or vector(0)` or `absent()`: see [operations](operations.md#dashboards-are-code).
 
 ## Data
 
@@ -270,10 +271,11 @@ until it did, 22 of them could not be set from `.env`.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `APP_ENV` | `dev` | `dev`, `test` or `prod` |
+| `APP_ENV` | `dev` | `dev`, `test` or `prod`. `prod` changes the defaults marked *prod:* below, and refuses to start with unsafe settings (ADR-0023) |
+| `PROD_CHECKS_WAIVED` | empty | production checks this deployment skips on purpose, by name, comma-separated: `localhost_url`, `insecure_cookies`, `mock_model`, `demo_identity_provider`, `example_secret`, `trace_content`. `.env.example` waives the first, third and fourth, for the production-shaped stack on a laptop or in CI; each waiver is logged at startup |
 | `LOG_LEVEL` | `INFO` | |
 | `ROOT_PATH` | empty | the path prefix the proxy strips (`/api`); used in generated URLs |
-| `DOCS_ENABLED` | `true` | the OpenAPI UI at `/api/docs` |
+| `DOCS_ENABLED` | `true`; *prod:* `false` | the OpenAPI UI at `/api/docs` and the schema |
 | `DATABASE_URL` | required | `postgresql://app-role@pgbouncer/...`; the async driver is chosen by the app |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | 20 / 0 | per worker; overflow connections are discarded on return, which churned under bursty load |
 | `DB_POOL_TIMEOUT_S` | 5 | wait for a pooled connection, then 503 |
@@ -283,6 +285,7 @@ until it did, 22 of them could not be set from `.env`.
 | `REDIS_MAX_CONNECTIONS` | 256 | per worker; at least the concurrent requests per worker |
 | `RATELIMIT_WINDOW_S` | 60 | |
 | `ALERTS_RATE_LIMIT` / `CHAT_RATE_LIMIT` | 60 / 10 | per signed-in user per window. Load tests raise both |
+| `CHAT_RATE_LIMIT_FAIL_CLOSED` | `false`; *prod:* `true` | when the limiter's store is down: `true` refuses questions (503 `rate_limiter_unavailable`), where an unlimited chat is an unlimited model bill. Every other route fails open |
 | `AUTH_RATE_LIMIT` | 30 | sign-in redirects and callbacks, per client IP per window |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | required | any OpenAI-compatible endpoint (ADR-0006) |
 | `LLM_CONNECT_TIMEOUT_S` | 5 | |
@@ -307,14 +310,15 @@ until it did, 22 of them could not be set from `.env`.
 | `OIDC_SCOPES` | `openid profile email` | |
 | `OIDC_GROUPS_CLAIM` | `groups` | the claim carrying `team:<slug>:<role>` and `org:admin` (`roles` for Entra ID app roles) |
 | `OIDC_TIMEOUT_S` | 5 | each call to the provider |
+| `USER_RETENTION_DAYS` / `ALERT_RETENTION_DAYS` | 365 / 365 | what `make retention` deletes: users without a sign-in for that long, alerts older than that; empty keeps for ever ([privacy](../privacy.md)) |
 | `SESSION_MAX_AGE_S` / `SESSION_IDLE_TIMEOUT_S` | 43200 / 7200 | a session ends 12 h after sign-in or 2 h after its last request; role changes apply at the next sign-in |
 | `SESSION_COOKIE_SECURE` | `true` | `false` only for plain-HTTP dev (the dev overlay sets it): the cookie is then `triage_session`, not `__Host-triage_session` |
 | `JUDGE_API_KEY` | empty (`LLM_API_KEY`) | development only, for `make evals`: the key of a judge at another provider than the model under test |
 | `APP_VERSION` | `dev` | the release: compose passes `IMAGE_TAG` (the dev overlay, `dev`). On traces and in `app_info` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty (tracing off) | where traces go, over OTLP/HTTP; `make obs-up` sets Jaeger's (AI observability chapter) |
-| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0 | `parentbased_traceidratio` with 0.1 keeps 10% of traces |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0; *prod:* `parentbased_traceidratio` / 0.1 | the standard names; empty means the default. A caller's decision wins with the `parentbased_` ones |
 | `OTEL_SERVICE_NAME` | `triage-assistant-api` | |
-| `TRACE_CONTENT` | false | questions, prompts and answers on spans, redacted: development only |
+| `TRACE_CONTENT` | false | questions, prompts and answers on spans, redacted: development only (production refuses it) |
 | `TRACE_EXPORT_TIMEOUT_S` | 2 | one export's budget; bounds a worker's shutdown when the trace backend is down. Seconds, unlike the spec's `OTEL_EXPORTER_OTLP_TIMEOUT` |
 
 **gunicorn** (`apps/api/gunicorn.conf.py`, production image only):

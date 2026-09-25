@@ -3,8 +3,7 @@
 `environment:` in compose.yaml.
 
 A variable compose does not list never reaches the container: setting it in
-.env changes nothing, and nothing says so. Found in v0.5.0, where 18
-documented settings could not be changed from .env. Run by `make lint`.
+.env changes nothing, and nothing says so. Run by `make lint`.
 """
 
 import ast

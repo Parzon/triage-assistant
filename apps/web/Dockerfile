@@ -1,7 +1,9 @@
-ARG NODE_VERSION=24
+# Base images are pinned by digest as well as tag: a tag can be moved to
+# other content, a digest cannot. Dependabot moves both, in one PR. Node's
+# major follows .nvmrc.
 
 # ---- deps: node_modules from the lockfile, shared by every later stage ----
-FROM node:${NODE_VERSION}-slim AS deps
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
@@ -21,8 +23,11 @@ RUN npm run build
 # ---- production: static files + reverse proxy, non-root on 8080 -----------
 # nginx-unprivileged instead of nginx: the official image starts as root to
 # bind port 80. Mapping host port 80 -> 8080 is done by Docker, so the
-# container itself never needs root.
-FROM nginxinc/nginx-unprivileged:1.30-alpine AS production
+# container itself never needs root. The -slim variant: the same nginx
+# without the optional modules (njs, xslt, image filter, geoip) and curl,
+# which this config never loads - and which brought every known
+# vulnerability the full variant had (make scan).
+FROM nginxinc/nginx-unprivileged:1.30-alpine-slim@sha256:307ca0bded4dda86dade6f5bd2a2551601bec9bac3fd73a21613fabcd9eca66a AS production
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/snippets/ /etc/nginx/snippets/
