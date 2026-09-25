@@ -118,7 +118,7 @@ def production(**overrides: object) -> Settings:
         "oidc_discovery_url": "",
         "oidc_client_id": "triage-web",
         "oidc_client_secret": "oidc-s3cret",
-        "alertmanager_webhook_token": "9c1f0e7d2b4a",
+        "alertmanager_webhook_token": "not-a-real-webhook-token",
         **overrides,
     }
     return Settings(**values)  # type: ignore[arg-type]
