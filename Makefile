@@ -21,7 +21,7 @@ S    ?=
 .PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check scan scan-compose secrets-scan session revoke reembed seed load \
+        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
 help: ## List all targets
@@ -319,6 +319,9 @@ session: ## Print a session cookie ("name=value"): make session [email=you@examp
 
 reembed: ## After changing EMBEDDING_* (but the query prefix): embed the runbooks again [ENV=prod]
 	@docker exec $(API_C) python -m app.cli reembed
+
+assistant: ## The assistant's off switch, no sign-in needed: make assistant [off="why" | on=1] [ENV=prod]
+	@docker exec $(API_C) python -m app.cli assistant $(if $(off),--off --reason '$(off)')$(if $(on), --on)
 
 revoke: ## End every session of a user now (after removing their access at the provider): make revoke email=... [ENV=prod]
 	@test -n "$(email)" || { echo 'usage: make revoke email=<address> [ENV=prod]'; exit 2; }

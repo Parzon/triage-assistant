@@ -59,6 +59,10 @@ async def reset_data(app: FastAPI) -> None:
         for table in tables:
             await conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608 - fixed names
         await conn.execute(text("DELETE FROM teams WHERE slug <> 'default'"))
+        # One row that outlives every test: each starts with the assistant on.
+        await conn.execute(
+            text("UPDATE assistant_switch SET enabled = true, reason = NULL, changed_by = NULL")
+        )
     await app.state.redis.flushdb()
 
 

@@ -1,15 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
 import { Account } from './components/Account'
+import { AssistantSwitch } from './components/AssistantSwitch'
 import { Chat } from './components/Chat'
 import { NewAlert } from './components/NewAlert'
 import { RecentAlerts } from './components/RecentAlerts'
 import { SignIn } from './components/SignIn'
-import { atLeast, fetchMe } from './lib/api'
+import { atLeast, fetchAssistant, fetchMe } from './lib/api'
 
 export default function App() {
   // Who is signed in decides what renders. Any 401 later (session expired,
   // revoked, signed out in another tab) refetches this - see main.tsx.
   const me = useQuery({ queryKey: ['me'], queryFn: fetchMe, staleTime: 60_000 })
+  // Whether the assistant answers (its off switch): known before anyone
+  // types a question. Unknown (loading, failed) counts as on.
+  const assistant = useQuery({
+    queryKey: ['assistant'],
+    queryFn: fetchAssistant,
+    staleTime: 30_000,
+    enabled: Boolean(me.data),
+  })
 
   if (me.isPending) {
     return (
@@ -46,7 +55,8 @@ export default function App() {
           administrators to add you to a team group.
         </p>
       )}
-      <Chat />
+      <Chat assistant={assistant.data} />
+      {me.data.org_admin && <AssistantSwitch status={assistant.data} />}
       {writable.length > 0 && <NewAlert teams={writable} />}
       <RecentAlerts teams={me.data.teams} />
     </main>

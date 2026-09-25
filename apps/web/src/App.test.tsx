@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import App from './App'
-import type { Me } from './lib/api'
+import type { AssistantStatus, Me } from './lib/api'
 
 const ALICE: Me = {
   id: 1,
@@ -15,14 +15,18 @@ const ALICE: Me = {
   ],
 }
 
-/** The api, by path: /api/me answers `me` (null = signed out, 401). */
-function api(me: Me | null) {
+const ON: AssistantStatus = { enabled: true, reason: null, changed_at: '2026-09-25T09:00:00Z' }
+
+/** The api, by path: /api/me answers `me` (null = signed out, 401), and
+ *  /api/assistant the off switch's state. */
+function api(me: Me | null, assistant: AssistantStatus = ON) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       if (url === '/api/me') {
         return me ? new Response(JSON.stringify(me)) : new Response('{}', { status: 401 })
       }
+      if (url === '/api/assistant') return new Response(JSON.stringify(assistant))
       return new Response(JSON.stringify({ items: [], next_cursor: null }))
     }),
   )
@@ -85,6 +89,20 @@ describe('App', () => {
     api({ ...ALICE, org_admin: true, teams: [{ slug: 'default', name: 'Default', role: 'admin' }] })
     renderApp()
     expect(await screen.findByRole('list', { name: 'Your access' })).toHaveTextContent('org admin')
+  })
+
+  it('tells everyone when the assistant is switched off, and why', async () => {
+    api(ALICE, { enabled: false, reason: 'the model gives bad advice', changed_at: ON.changed_at })
+    renderApp()
+    expect(await screen.findByText(/switched off: the model gives bad advice/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Question')).toBeDisabled()
+    expect(screen.queryByRole('region', { name: 'The assistant' })).not.toBeInTheDocument()
+  })
+
+  it('offers org admins the switch', async () => {
+    api({ ...ALICE, org_admin: true })
+    renderApp()
+    expect(await screen.findByRole('region', { name: 'The assistant' })).toBeInTheDocument()
   })
 
   it('says so when the service cannot be reached', async () => {

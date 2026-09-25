@@ -5,12 +5,14 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 
-from app import agent, tools
+from app import agent, switch, tools
 from app.access import Principal
 from app.audit import Actor, record
 from app.config import Settings
 from app.db import DbSession
+from app.errors import ApiError
 from app.logs import request_id_var
+from app.metrics import chat_refusals
 from app.queries import newest_alerts
 from app.ratelimit import rate_limit
 from app.runbooks import Retrieval, search_runbooks
@@ -40,6 +42,18 @@ async def chat_stream(
 ) -> SSEResponse:
     state = request.app.state
     settings: Settings = state.settings
+    # The off switch (app/switch.py, ADR-0024), before anything that calls
+    # a model: the question's embedding included, in either mode.
+    turned = await switch.current(db)
+    if not turned.enabled:
+        chat_refusals.labels("assistant_disabled").inc()
+        raise ApiError(
+            503,
+            "assistant_disabled",
+            "the assistant is switched off",
+            reason=turned.reason,
+            since=turned.changed_at.isoformat(),
+        )
     if settings.chat_mode == "agent":
         return await _agent_answer(payload, principal, db, state)
     # The model sees exactly what the asker may see: their teams' alerts,

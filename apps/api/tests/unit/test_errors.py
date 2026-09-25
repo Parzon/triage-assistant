@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import BaseModel, model_validator
 from sqlalchemy.exc import DBAPIError
 
 from app.errors import connection_failed, install_error_handlers
@@ -46,6 +47,16 @@ def test_an_invalidated_connection_is_unavailable_whatever_the_sqlstate() -> Non
     assert connection_failed(dbapi_error(None, invalidated=True))
 
 
+class Checked(BaseModel):
+    value: int
+
+    @model_validator(mode="after")
+    def _positive(self) -> "Checked":
+        if self.value < 1:
+            raise ValueError("value must be positive")
+        return self
+
+
 @pytest.fixture
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
@@ -55,6 +66,10 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
     @app.get("/raise/{sqlstate}")
     async def raise_(sqlstate: str) -> None:
         raise dbapi_error(sqlstate)
+
+    @app.post("/checked")
+    async def checked(body: Checked) -> None:
+        return None
 
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -72,3 +87,11 @@ async def test_a_sql_bug_stays_a_500(client: httpx.AsyncClient) -> None:
     response = await client.get("/raise/42601")
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_error"
+
+
+async def test_a_validators_own_error_is_a_422_not_a_500(client: httpx.AsyncClient) -> None:
+    # Its ValueError travels in the error's context: it must reach JSON as text.
+    response = await client.post("/checked", json={"value": 0})
+    assert response.status_code == 422
+    (detail,) = response.json()["error"]["details"]
+    assert detail["msg"] == "Value error, value must be positive"

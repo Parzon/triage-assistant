@@ -156,6 +156,18 @@ event to an append-only store outside the database (object storage with a
 retention lock, a separate logging account), or chain each row's hash to
 the previous one and publish the latest elsewhere.
 
+## The off switch ✅
+
+When the assistant is the incident - harmful advice, a provider breach, a
+runaway bill - an org admin switches it off in the app, with a reason, or
+an operator does with `make assistant off="..."` (no sign-in needed). It
+takes effect on every server at once, without a deploy: the state is one
+row in Postgres, read on every question. Off, questions are refused with
+503 `assistant_disabled` and the reason, before any model call; alerts,
+runbooks and the MCP tools keep working. Each flip is an audit event with
+the reason's hash. ADR-0024; the procedure: [turn the assistant
+off](../runbooks/turn-the-assistant-off.md).
+
 ## Output handling ✅
 
 The answer is rendered as text (`white-space: pre-wrap`), never as HTML or

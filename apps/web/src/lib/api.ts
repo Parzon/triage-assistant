@@ -175,6 +175,32 @@ export async function createAlert(alert: NewAlert): Promise<Alert> {
   return res.json()
 }
 
+// --- The assistant's off switch (ADR-0024) ------------------------------------
+
+export interface AssistantStatus {
+  enabled: boolean
+  /** While it is off: why, as the org admin who switched it off wrote it. */
+  reason: string | null
+  changed_at: string
+}
+
+export async function fetchAssistant(): Promise<AssistantStatus> {
+  const res = await fetch('/api/assistant')
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+
+/** Org admins only; switching it off needs a reason, which everyone sees. */
+export async function setAssistant(enabled: boolean, reason?: string): Promise<AssistantStatus> {
+  const res = await fetch('/api/assistant', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, reason: reason || null }),
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+
 // --- Who is signed in -------------------------------------------------------
 // The session is an httpOnly cookie: this code never sees it, and never needs
 // to. It only asks the api who the cookie belongs to.

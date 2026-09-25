@@ -114,6 +114,22 @@ tests:
               summary: "more than 5% of api requests fail with 5xx"
               runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#higherrorrate"
 
+  - name: Questions refused by the off switch are not errors
+    interval: 1m
+    input_series:
+      # 100 requests/min: 70 reads, 30 questions answered 503 because an org
+      # admin switched the assistant off (ADR-0024).
+      - series: 'http_requests_total{route="/alerts",status="200",method="GET"}'
+        values: "0+70x15"
+      - series: 'http_requests_total{route="/chat/stream",status="503",method="POST"}'
+        values: "0+30x15"
+      - series: 'chat_refusals_total{reason="assistant_disabled"}'
+        values: "0+30x15"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: HighErrorRate
+        exp_alerts: []
+
   - name: Truncated answers are not model errors, but have their own warning
     interval: 1m
     input_series:

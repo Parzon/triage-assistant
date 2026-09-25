@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.access import RoleName
 from app.models import TEAM_SLUG
@@ -170,3 +170,23 @@ class AuditPage(BaseModel):
     items: list[AuditEventOut]
     # Pass as ?before= for the next (older) page; None: no more.
     next_before: int | None
+
+
+class AssistantIn(BaseModel):
+    enabled: bool
+    # Required to switch it off: everyone who asks reads it, and the audit
+    # trail keeps its hash.
+    reason: str | None = Field(None, min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def _a_reason_to_switch_off(self) -> "AssistantIn":
+        if not self.enabled and not self.reason:
+            raise ValueError("switching the assistant off needs a reason")
+        return self
+
+
+class AssistantOut(BaseModel):
+    enabled: bool
+    # While it is off: why, as the admin wrote it.
+    reason: str | None
+    changed_at: datetime

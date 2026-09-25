@@ -52,6 +52,9 @@ Run `make` to list every target. The ones you need most:
   signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)
 - Sessions for scripts: `make session [groups="team:default:admin org:admin"]` prints a
   cookie; `make revoke email=...` ends a user's sessions (add `ENV=prod`)
+- The assistant's off switch (ADR-0024): `make assistant [off="why" | on=1]`
+  (add `ENV=prod`); org admins have it in the UI (`PUT /api/assistant`).
+  Runbook: docs/runbooks/turn-the-assistant-off.md
 - Audit trail: `make audit a="--action runbook.saved --target 17"` (add
   `ENV=prod`); `make audit-prune days=N` deletes older events as the schema
   owner (the api cannot). Redaction's score: `python -m evals.redaction` in
@@ -181,6 +184,9 @@ Access control, for every change that touches data:
 - A regular expression run on text others write (alerts, runbooks,
   questions) has every scan bounded, and a test that hostile input stays
   linear (`test_hostile_text_is_redacted_in_linear_time`).
+- Every path that calls a chat model checks the off switch first
+  (`switch.current`, as `routes/chat.py` does): a new one refuses with
+  503 `assistant_disabled` while it is off, and counts `chat_refusals`.
 - Tools live in `app/tools.py`, shared by the agent and the MCP server,
   under docs/handbook/ai-security.md's rules: they act with the asker's
   rights, take the team from the session, ask the person before changing

@@ -5,7 +5,8 @@
   map in [`../gold_standard_development_guide.md`](../gold_standard_development_guide.md).
 - **`runbooks/`**: procedures for pressure: [alerts](runbooks/alerts.md)
   (one section per alert, linked from each rule), [one VM](runbooks/demo-vm.md)
-  (from the request to IT to teardown).
+  (from the request to IT to teardown), [turning the assistant
+  off](runbooks/turn-the-assistant-off.md) (when it is the incident).
 - **`images/`**: the dashboard screenshot the chapters show.
 - **[`overview.md`](overview.md)**: the project on one page, for anyone
   deciding about it.
