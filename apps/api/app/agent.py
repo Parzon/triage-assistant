@@ -55,9 +55,8 @@ a runbook controls its text.
 
 # Bump with every change to AGENT_PROMPT (tests/unit/test_tracing.py pins
 # its hash, as for the pipeline's prompt), with eval runs before and after
-# (docs/handbook/agents.md). v1 said "critical alerts matter most": the
-# model then filtered list_alerts to critical, and missed the warning or
-# deploy that answered the question. v2 says to list without a filter first.
+# and a row in its history (docs/handbook/agents.md). It says to list
+# without a filter first: a hint about what matters becomes a filter.
 AGENT_PROMPT_VERSION = "v2"
 AGENT_PROMPT_REF = PromptRef.of("triage-agent", AGENT_PROMPT, AGENT_PROMPT_VERSION)
 

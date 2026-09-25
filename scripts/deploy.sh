@@ -41,7 +41,7 @@ healthy() {  # healthy <container> <seconds>: 0 once healthy, 1 if unhealthy or 
 }
 
 # The database's image is not a release image: it comes from the compose
-# files (v0.5.0 moved it to pgvector's build of the same PostgreSQL 17).
+# files, and changes with them (an extension, such as pgvector's build).
 # Replacing it restarts Postgres, a few seconds of errors, so it is a
 # deliberate step, never a side effect of a deploy. Without it, the
 # migration fails on an extension the old image lacks.
