@@ -152,7 +152,7 @@ class Alert(Base):
         # 0.1ms, severity=critical 43ms -> 3.8ms. A second index on
         # (severity, created_at, id) takes that to 0.06ms but costs every
         # insert (~2x this one's); add it when a rarer filter shows up in
-        # the SlowRequests alert, not before. See the performance chapter.
+        # the SlowRequests alert, not before (docs/handbook/operations.md).
         Index("ix_alerts_created_at_id", "created_at", "id"),
         # One team's alerts, newest first: what almost every user reads.
         # Several teams are read one team at a time and merged (see

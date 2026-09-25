@@ -20,6 +20,8 @@ Everything else is the platform, and stays as it is.
 | **Keep** | The model seam and the mock | `app/llm.py`, `tools/mock-llm/` |
 | **Keep** | The eval harness, the retrieval benchmark's harness | `apps/api/evals/*.py` |
 | **Keep** | Credentials redacted before any model call | `app/redact.py` |
+| **Keep** | The audit trail, the off switch, retention, export and erasure | `app/audit.py`, `app/switch.py`, `app/privacy.py`; ADR-0019, ADR-0024, ADR-0025 |
+| **Keep** | Production's refusals of unsafe settings, and the scans | `production_problems` in `app/config.py` (ADR-0023); `make scan`, `make secrets-scan` (ADR-0022) |
 | **Keep or drop** | Answers from documents (runbooks here): sections, hybrid search, citations, re-embedding. Point it at your documents (policies, contracts), or leave `EMBEDDING_MODEL` empty and chat uses its own context alone | `app/runbooks.py`, `app/routes/runbooks.py`, `app/vector.py`; [RAG](rag.md), ADR-0017 |
 | **Keep** | Deploys, backups, drills, monitoring | `scripts/`, `infra/observability/` |
 | **Replace** | The data model and its migrations | `app/models.py`, `apps/api/migrations/versions/` |
@@ -32,7 +34,12 @@ Everything else is the platform, and stays as it is.
 | **Replace** | Browser tests, load scripts | `tests/e2e/specs/`, `tests/load/` |
 | **Replace** | The demo identity realm's users and groups, if your teams differ | `infra/keycloak/triage-realm.json` |
 | **Configure** | The model provider, the identity provider, the public URL, secrets | `.env` (from `.env.example`) |
-| **Configure** | The registry and the hosts | `IMAGE_PREFIX`; [the VM runbook](../runbooks/demo-vm.md), [environments](environments-and-shipping.md) |
+| **Configure** | The registry and the hosts | `IMAGE_PREFIX`; [the VM runbook](../runbooks/demo-vm.md), [production](production.md#the-environments) |
+| **Rewrite** | The personal-data inventory, for your tables | [privacy](../privacy.md) |
+
+Which pieces a new service needs on day one, and which wait for a
+trigger (PgBouncer, Valkey, the TLS edge, monitoring, agent mode, MCP):
+[the tech stack](../../TECH_STACK.md).
 
 ## 1. Create the repository
 

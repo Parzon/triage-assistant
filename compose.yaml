@@ -316,7 +316,7 @@ services:
       MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD}
     # pg_stat_statements records timing for every distinct query: the first
     # place to look for "which query is slow" (make psql, then the queries
-    # in the handbook's performance chapter).
+    # in docs/handbook/operations.md).
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
     # Docker's default 64MB /dev/shm is too small for parallel queries
     # ("could not resize shared memory segment").

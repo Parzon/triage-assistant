@@ -229,4 +229,5 @@ The same images; the edge is simply not started. Remove `edge` from
   the internal service names (dev-environment chapter).
 
 The managed-service equivalents of each container, and what changes in
-this repo to use them, are in the environments-and-shipping chapter.
+this repo to use them, are in
+[production](production.md#moving-to-a-managed-platform).

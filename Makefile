@@ -1,4 +1,5 @@
-# Every command a developer needs, in one place: `make` lists them.
+# Every command a developer needs, in one place: `make` lists the ones for
+# the first weeks, `make help-all` every one, by section.
 # Targets are thin wrappers - read a recipe to see the real docker compose
 # command, and run that directly whenever you prefer.
 # Works with the GNU make 3.81 that macOS ships (no newer features used).
@@ -18,14 +19,23 @@ export DEV_UID := $(shell id -u)
 export DEV_GID := $(shell id -g)
 S    ?=
 
-.PHONY: help setup up rebuild down nuke ps logs sh psql redis-cli config \
+.PHONY: help help-all setup up rebuild down nuke ps logs sh psql redis-cli config \
         migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant retention user-export user-forget reembed seed load \
+        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
-help: ## List all targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+# What `make` shows, in this order: the daily loop first (START_HERE.md).
+FIRST := setup up ps logs sh down rebuild check test-fast fmt deps-api deps-web migration mock evals prod-up e2e
+
+help: ## The commands for the first weeks (every command: make help-all)
+	@awk -v first="$(FIRST)" 'BEGIN {FS = ":.*## "; n = split(first, t, " "); for (i = 1; i <= n; i++) at[t[i]] = i} \
+	  /^[a-zA-Z0-9_-]+:.*## / && ($$1 in at) {row[at[$$1]] = sprintf("  \033[36m%-10s\033[0m %s", $$1, $$2)} \
+	  END {for (i = 1; i <= n; i++) if (i in row) print row[i]; print "\n  Every command, by section: make help-all"}' $(MAKEFILE_LIST)
+
+help-all: ## Every command, by section
+	@awk 'BEGIN {FS = ":.*## "} /^# --- / {h = $$0; sub(/^# --- /, "", h); sub(/ -+$$/, "", h); printf "\n%s\n", h} \
+	  /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Dev stack -------------------------------------------------------------------
 

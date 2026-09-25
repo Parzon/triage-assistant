@@ -1,6 +1,6 @@
 """/metrics reflects real traffic. The test process runs one worker, so the
 default registry is used; multiprocess mode is exercised by the production
-image (see the observability chapter for the side-by-side)."""
+image (docs/handbook/operations.md has the side-by-side)."""
 
 import asyncio
 import re

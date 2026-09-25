@@ -15,8 +15,8 @@ layer caught in this repo. All numbers are from the current `main`.
 | evals, plumbing | the mock, through the model and api targets | every CI run (in the integration suite) | `make test-api` | the eval harness, the service and the gate work end to end; isolation and injection cases hold with a canned model |
 | evals, retrieval | the running service and its embedding model | 22 questions, before an embedding or retrieval change | `make evals a="--target retrieval"` | runbook search finds the section that answers: recall@k and MRR per mode ([RAG](rag.md)) |
 | evals, quality | a real model (Ollama locally, or a provider) | 19 cases, before a prompt or model change | `make evals a="--judge --repeat 10 --baseline ..."` | answers stay grounded, refuse what the alerts do not say, resist injection, never cross teams: a pass rate per case ([AI engineering](ai-engineering.md)) |
-| load | the production stack | on demand | `make load` | capacity, latency under load (performance chapter) |
-| failure drills | the production stack | 22 drills | `make drills` | what users see when each dependency fails, and that it recovers (failure-modes chapter) |
+| load | the production stack | on demand | `make load` | capacity, latency under load ([operations](operations.md#performance-and-load)) |
+| failure drills | the production stack | 22 drills | `make drills` | what users see when each dependency fails, and that it recovers ([operations](operations.md#failure-modes)) |
 | release smoke | the *published* images, amd64 and arm64 | every release | `scripts/smoke-release.sh <prefix> <tag>` | what was pushed runs: HTTPS with a verified chain, write, read, a streamed answer |
 
 `make test` runs the api and web suites exactly as CI does. `make check`

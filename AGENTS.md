@@ -32,7 +32,8 @@ setup`, every secret generated) provides local settings. Compose is split in thr
 Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
 
 ## Build & test commands
-Run `make` to list every target. The ones you need most:
+`make` lists the commands for the first weeks; `make help-all` lists every
+target, by section. The ones you need most:
 - Start / stop the dev stack: `make up` / `make down`
 - Lint + format check: `make lint`; auto-format: `make fmt`
 - Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
@@ -129,6 +130,14 @@ should-we/how, with the technical plan, before a non-trivial change;
 someone later if left unexplained — write one whenever you make an
 irreversible or non-obvious call (a new dependency, a schema choice, a
 deployment pattern), even if nobody asked for it.
+
+The way in is `START_HERE.md`; keep it and its two companions current:
+- a new file gets a line in `docs/code-map.md` (★ if it is on the path of
+  a question);
+- a new technology gets an entry in `TECH_STACK.md`: its role, whether a
+  new project starts with it, and the trigger for adding it;
+- a new chapter-sized topic goes into an existing chapter of
+  `docs/handbook/` before it becomes a new one.
 
 ## Code style
 - Python: ruff defaults, type hints on new functions.

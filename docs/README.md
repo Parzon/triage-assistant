@@ -1,8 +1,11 @@
 # docs/
 
 - **`handbook/`**: how this service is built, tested, debugged, shipped
-  and operated, with the measurements behind every choice. Start from the
-  map in [`../gold_standard_development_guide.md`](../gold_standard_development_guide.md).
+  and operated, with the measurements behind every choice. New here:
+  [`../START_HERE.md`](../START_HERE.md) first; every chapter, and when to
+  read it, is in [the guide](../gold_standard_development_guide.md#the-handbook).
+- **[`code-map.md`](code-map.md)**: one line per file, saying what it is
+  for.
 - **`runbooks/`**: procedures for pressure: [alerts](runbooks/alerts.md)
   (one section per alert, linked from each rule), [one VM](runbooks/demo-vm.md)
   (from the request to IT to teardown), [turning the assistant

@@ -3,8 +3,8 @@
 One section per alert in `infra/observability/prometheus/alerts.yml`,
 each rule linking here through its `runbook_url`: what it means for
 users, what to run first, what caused it before. Commands assume the
-production stack on the host (`ENV=prod`). The debugging chapter explains
-each tool.
+production stack on the host (`ENV=prod`). [Operations](../handbook/operations.md#debugging-tools)
+explains each tool.
 
 First, for any alert: `make ps ENV=prod` (what is unhealthy or
 restarting), `curl -s localhost/api/ready` (which dependency), and the
@@ -238,7 +238,7 @@ off the host. Prometheus is capped at 2 GB, and container logs at
 **Users:** nothing yet. Next comes an OOM kill.
 **Check:** the dashboard's memory-by-container panel: a steady climb (a
 leak) or a step (a larger working set after a deploy)? `tracemalloc`
-snapshots show growth per request (the debugging chapter).
+snapshots show growth per request ([operations](../handbook/operations.md#which-profiler-for-which-question)).
 
 ## ContainerOOMKilled
 

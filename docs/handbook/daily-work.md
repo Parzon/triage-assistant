@@ -2,8 +2,9 @@
 
 The recipes for the changes you will make every week, in the order to do
 them, then the Git workflow and the full list of settings. `make` lists
-every command; each target is a thin wrapper, so read the recipe in the
-Makefile to see the real `docker compose` command.
+the commands for the first weeks, `make help-all` every one; each target
+is a thin wrapper, so read the recipe in the Makefile to see the real
+`docker compose` command.
 
 ## Everyday commands
 
@@ -203,7 +204,7 @@ serving while they run (ADR-0011):
 3. **The alert** in `infra/observability/prometheus/alerts.yml`, with a
    test in `alerts.test.yml`: when it must fire, and when it must not.
    Then run `make obs-check`. A rule on a counter that may not exist yet
-   needs `or vector(0)` or `absent()`: see the observability chapter.
+   needs `or vector(0)` or `absent()`: see [operations](operations.md#dashboards-are-code).
 
 ## Data
 

@@ -30,7 +30,7 @@ keeps everything else:
 | On-call engineers | the right alert first, the likely cause (a recent deploy to the same service), the runbook's steps with their source, and a plain "the alerts do not say" instead of a guess |
 | Team leads | per-team ownership: responders add alerts, admins manage them, and nobody sees another team's incidents |
 | Security and compliance | company sign-in; access enforced twice, in the service and in the database; the model never given data the asker could not read; credentials removed before any model sees them; an audit trail of who wrote what the assistant reads, and what every answer was given, that the service itself cannot rewrite; no secrets in code |
-| Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([infrastructure Q&A](handbook/infrastructure-qa.md)) |
+| Platform and infrastructure | three container images, one database, measured capacity, a documented handoff ([production](handbook/production.md#handing-it-to-an-infrastructure-team)) |
 | Other engineering teams | a working starting point, and a documented way to adopt it ([using this template](handbook/using-this-template.md)) |
 
 ## Where it stands (v0.8.0, September 2026)
@@ -50,6 +50,13 @@ keeps everything else:
 | Agent or pipeline | an agent that chooses what to read passed 14 of the 19 cases, against 18 for the fixed pipeline; told to read what the pipeline reads, 17, at 3.8× the tokens. The pipeline stays the default; the agent's read-only tools are also offered to other AI tools (MCP) |
 | Keeping secrets from the model | credentials are removed before anything reaches a model: 21 of 24 credential shapes it was not written against, up from 11, and no ordinary text changed |
 | Releases | 8 releases, for Intel and ARM servers, each smoke-tested after publishing, and deployed on a production-shaped host with no failed request |
+
+Since v0.8.0, not yet released: the assistant can be switched off in
+seconds, without a deploy, with the reason shown to everyone; production
+refuses to start with unsafe settings; every image and commit is scanned
+for known vulnerabilities and leaked secrets; personal data has an
+inventory, a retention job, and a person's export and erasure
+([privacy](privacy.md)).
 
 📘 **Not yet:**
 - a cloud server with a real domain;
@@ -84,6 +91,9 @@ read that alert anyway.
 | Alert and runbook text sent to an external AI provider | provider terms with zero data retention, or a model in the company's own cloud; known credential formats removed before anything is sent |
 | A runbook's wrong or dangerous step repeated by the assistant | every step names its section and the section's date; runbooks stay the teams' own; every version's author, and every answer's sources, are on record |
 | Cost runaway | per-user rate limits, output limits, a cost panel; a provider budget alarm is stage 3 |
+| The assistant itself becomes the incident | an off switch for org admins: every question refused before any model call, alerts and runbooks still working, the switch audited |
+| A known vulnerability or a leaked secret ships | images and commits scanned in every build and release; accepted risks carry a reason and an expiry |
+| Personal data kept longer than it may be | an inventory of what is held; a retention job; a person's export and erasure; the legal decisions listed for the privacy officer |
 | One server is a single point of failure | acceptable for a pilot; a second host or a managed platform is stage 5 |
 
 ## The documents
@@ -93,5 +103,5 @@ read that alert anyway.
 | What are we building, and why? | [PRD-0001](prd/0001-triage-assistant.md) |
 | How was a feature proposed, and what did it cost? | [RFC-0001](rfc/0001-answers-grounded-in-runbooks.md): answers that cite the team's runbooks (accepted and built, with the costs measured) |
 | What should come next? | "Not done yet" in [the guide](../gold_standard_development_guide.md#not-done-yet) |
-| Why was each technical decision made? | [the ADRs](adr/) (18) |
+| Why was each technical decision made? | [the ADRs](adr/) (25) |
 | How is it built, run and repaired? | [the guide](../gold_standard_development_guide.md) and the [handbook](handbook/) |

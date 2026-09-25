@@ -3,7 +3,8 @@
 For showing the product to a manager or a customer, running a pilot, or a
 shared staging host. One VM runs the production-shaped stack: the same
 images, limits and nginx as production. This is not high availability; the
-single points of failure are listed in the failure-modes chapter.
+single points of failure are listed in
+[operations](../handbook/operations.md#single-points-of-failure-on-one-vm).
 
 ✅ = done in this repo (the step or the whole path was exercised), 📘 =
 the procedure for a real cloud VM, not exercised here: no VM was created
@@ -356,7 +357,7 @@ before `make deploy` to check a release where it's about to run.
 - [ ] `/api/ready` says `"identity_provider": "ok"`
 - [ ] Grafana's dashboard has data (through the tunnel)
 - [ ] A backup from today exists, off the host
-- [ ] The failure story is ready if asked: `docs/handbook/failure-modes.md`
+- [ ] The failure story is ready if asked: [the failure matrix](../handbook/operations.md#the-matrix)
 
 ## 11. Teardown
 
