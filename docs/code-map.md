@@ -20,7 +20,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `asgi.py` | the entrypoint gunicorn and uvicorn load; process-wide setup (logging, tracing) |
 | `main.py` | the application factory: creates the engine, clients and settings in the lifespan, mounts the routes |
 | `config.py` | every setting, read from the environment and checked at startup; production refuses unsafe ones (ADR-0023) |
-| `routes/chat.py` ★ | `POST /chat/stream`: checks the off switch and the rate limit, gathers the context, streams the answer |
+| `routes/chat.py` ★ | `POST /chat/stream`: checks the rate limit, then the off switch; gathers the context, streams the answer |
 | `queries.py` ★ | the reads shared by routes: the alert list and the chat's context use the same visibility rule |
 | `runbooks.py` ★ | runbooks split into sections, embedded, and searched (full-text and vector, the asker's teams only) |
 | `redact.py` ★ | removes credentials from alerts, runbooks and questions before any model sees them |

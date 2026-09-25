@@ -55,7 +55,7 @@ The core, and the one to know by heart. It needs the dev stack
 
 ```
 POST /api/chat/stream
-  routes/chat.py    is the assistant on? is the asker within their rate limit?
+  routes/chat.py    is the asker within their rate limit? is the assistant on?
   queries.py        the asker's teams' newest alerts        ┐ only what the asker
   runbooks.py       the runbook sections that match         ┘ may read
   redact.py         credentials removed
