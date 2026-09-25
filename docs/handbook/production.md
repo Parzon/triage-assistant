@@ -132,8 +132,8 @@ For two to four weeks:
   wrong becomes an eval case, anonymised. Its trace says what it was
   given: note the trace id with the report (the chat's `meta` event has
   it).
-- **Trace a share of requests,** not all: `OTEL_TRACES_SAMPLER=
-  parentbased_traceidratio`, `OTEL_TRACES_SAMPLER_ARG=0.1` kept p95 within
+- **Trace a share of requests,** not all: production's default keeps a
+  tenth (`parentbased_traceidratio`, 0.1; ADR-0023), which kept p95 within
   0.2 ms of no tracing; every trace doubled it. Send them to the
   platform's OpenTelemetry Collector, and restrict who can read the trace
   store: it ignores teams ([AI observability](ai-observability.md)).

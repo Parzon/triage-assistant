@@ -8,9 +8,11 @@ version, which model, how many tokens, when the first token came.
 
 Off unless OTEL_EXPORTER_OTLP_ENDPOINT is set (`make obs-up` sets it, and
 starts Jaeger). The standard OTEL_* variables apply: OTEL_TRACES_SAMPLER
-and OTEL_TRACES_SAMPLER_ARG for sampling, OTEL_SERVICE_NAME,
-OTEL_RESOURCE_ATTRIBUTES. Spans follow the GenAI semantic conventions
-(gen_ai.*), which are still marked "Development": names may change.
+and OTEL_TRACES_SAMPLER_ARG for sampling (read through Settings, which
+defaults them to every trace in development and a tenth in production),
+OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES. Spans follow the GenAI
+semantic conventions (gen_ai.*), which are still marked "Development":
+names may change.
 
 What spans never hold by default: questions, prompts, answers, alert or
 runbook text. A trace store is read by everyone who debugs, across every
@@ -30,6 +32,13 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_OFF,
+    ALWAYS_ON,
+    ParentBased,
+    Sampler,
+    TraceIdRatioBased,
+)
 
 from app.config import Settings
 from app.redact import redact
@@ -75,13 +84,27 @@ def configure_tracing(settings: Settings, processor: SpanProcessor | None = None
     resource = Resource.create(
         {SERVICE_NAME: settings.otel_service_name, SERVICE_VERSION: settings.app_version}
     )
-    # The sampler comes from OTEL_TRACES_SAMPLER (default: every trace,
-    # following the caller's decision when a trace context arrives).
-    _provider = TracerProvider(resource=resource)
+    # Given, not left to the SDK: it would read OTEL_TRACES_SAMPLER itself,
+    # with the same default everywhere.
+    _provider = TracerProvider(resource=resource, sampler=make_sampler(settings))
     _provider.add_span_processor(processor)
     trace.set_tracer_provider(_provider)
     log.info("tracing on", extra={"endpoint": settings.otel_exporter_otlp_endpoint or "test"})
     return True
+
+
+def make_sampler(settings: Settings) -> Sampler:
+    """OTEL_TRACES_SAMPLER and its argument, as the SDK reads them, with
+    this service's defaults (app/config.py)."""
+    kind = settings.otel_traces_sampler.removeprefix("parentbased_")
+    root: Sampler
+    if kind == "always_on":
+        root = ALWAYS_ON
+    elif kind == "always_off":
+        root = ALWAYS_OFF
+    else:
+        root = TraceIdRatioBased(settings.otel_traces_sampler_arg)
+    return ParentBased(root) if settings.otel_traces_sampler.startswith("parentbased_") else root
 
 
 def tracing_on() -> bool:

@@ -64,7 +64,7 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo usermod -aG docker deploy              # root-equivalent: guard this account's key
 sudo ufw default deny incoming && sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw --force enable
 git clone https://github.com/Parzon/triage-assistant.git /srv/triage-assistant
-cd /srv/triage-assistant && cp .env.example .env && chmod 600 .env   # then edit the secrets
+cd /srv/triage-assistant && make .env   # every change-me secret generated; the rest: section 3
 ```
 
 The firewall caveat: Docker's published ports bypass ufw. Docker rewrites
@@ -75,7 +75,8 @@ if ufw says otherwise. See the networking chapter.
 
 ## 3. Configure `.env`
 
-Every secret must differ from `.env.example`. cloud-init already
+Every secret must differ from `.env.example`: the api refuses to start
+in production otherwise (`example_secret`, ADR-0023). cloud-init already
 generated:
 - the database passwords, the Grafana password and the webhook token;
 - the identity provider's client secret, the Keycloak administrator's
@@ -91,6 +92,7 @@ The rest:
 | `LLM_API_KEY` | leave | the key (never committed) |
 | `LLM_MODEL` | leave | the model name |
 | `HTTP_PORT` | `80` | `80` |
+| `PROD_CHECKS_WAIVED` | `mock_model,demo_identity_provider` | empty once the organisation's identity provider is connected (below); `demo_identity_provider` until then |
 | `IMAGE_PREFIX` | `ghcr.io/<owner>/triage-assistant` to run released images, or leave `triage-assistant` to build on the VM | same |
 
 **Who signs in.** With `idp` in the profiles, the bundled Keycloak serves

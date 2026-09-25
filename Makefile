@@ -29,9 +29,15 @@ help: ## List all targets
 
 # --- Dev stack -------------------------------------------------------------------
 
-setup: ## First run: create .env from .env.example, build the dev images
-	@test -f .env || { cp .env.example .env; echo "created .env from .env.example"; }
+setup: .env ## First run: create .env from .env.example (secrets generated), build the dev images
 	$(DEV) build
+
+# Made once, never overwritten. Every change-me value gets a random one:
+# production refuses the template's secrets (ADR-0023).
+.env:
+	@awk 'BEGIN { FS = OFS = "=" } /^[A-Z0-9_]+=change-me/ { c = "openssl rand -hex 24"; c | getline $$2; close(c) } 1' .env.example > .env
+	@chmod 600 .env
+	@echo "created .env from .env.example, with generated secrets"
 
 up: ## Start the dev stack in the background (hot reload)
 	$(DEV) up -d

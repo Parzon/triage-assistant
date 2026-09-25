@@ -9,7 +9,7 @@ import pytest
 
 from app.config import Settings
 from app.main import create_app
-from tests.integration.conftest import SignIn, signed_in, started
+from tests.integration.conftest import MockLLM, SignIn, signed_in, started
 
 ALERT = {"team": "default", "source": "prometheus", "severity": "info", "message": "m"}
 
@@ -66,3 +66,31 @@ async def test_fails_open_fast_when_redis_hangs(
     assert statuses == [201] * 3
     # 3 requests, each waiting at most the limiter budget plus the insert.
     assert elapsed < 1.5
+
+
+@pytest.mark.parametrize(("fail_closed", "status"), [(True, 503), (False, 200)])
+async def test_the_chat_fails_closed_when_its_setting_says_so(
+    with_redis: Callable[[str], Settings],
+    mock_llm: MockLLM,
+    caplog: pytest.LogCaptureFixture,
+    fail_closed: bool,
+    status: int,
+) -> None:
+    """Production's default (ADR-0023): with Redis down, a question is
+    refused before any model call, while every other route still fails
+    open."""
+    settings = with_redis("redis://127.0.0.1:1/0").model_copy(
+        update={"chat_rate_limit_fail_closed": fail_closed}
+    )
+    app = create_app(settings)
+    async with started(app), await signed_in(app, "team:default:responder") as client:
+        chat = await client.post("/chat/stream", json={"message": "what is on fire?"})
+        alert = await client.post("/alerts", json=ALERT)
+    assert chat.status_code == status
+    assert alert.status_code == 201
+    if fail_closed:
+        assert chat.json()["error"]["code"] == "rate_limiter_unavailable"
+        assert chat.headers["retry-after"] == "5"
+        assert "ratelimit-remaining" not in chat.headers
+        assert (await mock_llm.stats())["requests"] == 0
+        assert "failing closed" in caplog.text

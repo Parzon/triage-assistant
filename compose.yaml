@@ -25,8 +25,6 @@ services:
       # Traces (ADR-0018): off unless an OTLP endpoint is set. make obs-up
       # sets it to the jaeger service below.
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
-      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
       TRACE_EXPORT_TIMEOUT_S: ${TRACE_EXPORT_TIMEOUT_S:-2}
       # Questions, prompts and answers on spans (redacted): development only.
       TRACE_CONTENT: ${TRACE_CONTENT:-false}
@@ -71,9 +69,15 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       # The api's other settings (app/config.py; the handbook's settings
       # reference): passed when .env or the shell sets them, and absent
-      # otherwise, so the code's default applies. A variable compose does not
-      # list never reaches the container, whatever .env says.
+      # otherwise, so the code's default applies - for these first ones, a
+      # default that differs in production (APP_ENV=prod, ADR-0023). A
+      # variable compose does not list never reaches the container, whatever
+      # .env says.
       DOCS_ENABLED:
+      OTEL_TRACES_SAMPLER:
+      OTEL_TRACES_SAMPLER_ARG:
+      CHAT_RATE_LIMIT_FAIL_CLOSED:
+      PROD_CHECKS_WAIVED:
       DB_POOL_SIZE:
       DB_MAX_OVERFLOW:
       DB_POOL_TIMEOUT_S:

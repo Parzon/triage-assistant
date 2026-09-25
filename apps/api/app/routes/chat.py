@@ -29,7 +29,12 @@ SSE_HEADERS = {
 }
 
 
-@router.post("/chat/stream", dependencies=[Depends(rate_limit("chat", "chat_rate_limit"))])
+@router.post(
+    "/chat/stream",
+    dependencies=[
+        Depends(rate_limit("chat", "chat_rate_limit", "chat_rate_limit_fail_closed")),
+    ],
+)
 async def chat_stream(
     payload: ChatRequest, request: Request, principal: CurrentUser, db: DbSession
 ) -> SSEResponse:

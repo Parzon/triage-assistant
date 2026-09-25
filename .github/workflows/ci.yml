@@ -50,7 +50,7 @@ jobs:
       # The exact command developers run: a throwaway compose stack with real
       # Postgres, PgBouncer and Valkey, migrations + `alembic check`, then
       # pytest with the coverage gate from pyproject.toml.
-      - run: cp .env.example .env
+      - run: make .env
       - run: make test-api
       - name: Coverage summary
         if: always()
@@ -119,7 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The production-shaped stack exactly as `make prod-up` runs it
       # (nginx, gunicorn, read-only containers), with the mock LLM.
-      - run: cp .env.example .env
+      - run: make .env
       - run: make prod-up
       - name: Browser tests through nginx
         run: make e2e

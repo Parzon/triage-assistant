@@ -17,8 +17,11 @@ export COMPOSE_PROFILES=mock,edge,idp SITE_ADDRESS=localhost HTTP_BIND=127.0.0.1
 export HTTP_PORT=${SMOKE_PORT:-18088} EDGE_HTTP_PORT=${SMOKE_HTTP_PORT:-18080} EDGE_HTTPS_PORT=${SMOKE_HTTPS_PORT:-18443}
 BASE=https://localhost:$EDGE_HTTPS_PORT
 export PUBLIC_URL=$BASE
+# A local demo on purpose: the production checks it means are waived by
+# name (ADR-0023), whatever this host's .env says.
+export PROD_CHECKS_WAIVED=localhost_url,mock_model,demo_identity_provider
 COMPOSE=(docker compose -p triage-assistant-smoke -f compose.yaml -f compose.prod.yaml)
-[ -f .env ] || cp .env.example .env
+[ -f .env ] || make -s .env
 PASSWORD=${DEMO_USER_PASSWORD:-$(sed -n 's/^DEMO_USER_PASSWORD=//p' .env)}
 CA=$(mktemp) JAR=$(mktemp)
 trap '"${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true; rm -f "$CA" "$JAR"' EXIT

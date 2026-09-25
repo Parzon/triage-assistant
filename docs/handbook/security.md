@@ -223,9 +223,9 @@ query.
 - **debugpy is never in production.** The debug overlay is a separate
   compose file, bound to 127.0.0.1. An open debugpy port is remote code
   execution.
-- The OpenAPI docs (`/api/docs`) are on by default, which is useful for
-  demos. Set `DOCS_ENABLED=false` on an internet-facing deployment that
-  shouldn't advertise its API.
+- The OpenAPI docs (`/api/docs`) are on in development and off in
+  production by default (ADR-0023): a deployment that wants to advertise
+  its API sets `DOCS_ENABLED=true`.
 
 ## HTTP ✅
 
@@ -393,16 +393,40 @@ What the first scan found, and what was done:
 | `libexpat` 2.8.4 (HIGH, fixed) | nginx's optional modules | the `-slim` nginx variant: same nginx, no optional modules or curl, no findings |
 | 17 in Go and its modules (HIGH, fixed upstream) | the Caddy binary of the TLS edge | no Caddy release carries the fixes yet: accepted until 2026-10-25. The way out before then is building Caddy with xcaddy on a patched Go |
 
-## Before real users 📘
+## Before real users
 
-- [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and `HSTS_MAX_AGE=31536000` once HTTPS works
-- [ ] `DOCS_ENABLED=false` if the API should not be advertised
-- [ ] Your organisation's identity provider connected (above), the
-      bundled Keycloak's profile removed
-- [ ] Rate limiting that fails closed for chat, if abuse matters more
-      than availability
-- [ ] Image and secret scanning in CI
-- [ ] The provider's data-retention terms reviewed; redaction of
-      secrets in alert text
-- [ ] Backups encrypted and stored off the host
+The rule: what a machine can check, a machine checks. What used to be
+this checklist is now refused by code (ADR-0023, ADR-0022):
+
+| The mistake | What catches it |
+|---|---|
+| a `localhost` `PUBLIC_URL` | the api refuses to start in production: `localhost_url` |
+| plain HTTP, or cookies without `Secure` | `insecure_cookies` |
+| the mock model, or its embeddings | `mock_model` |
+| the bundled Keycloak and its demo users | `demo_identity_provider` |
+| a secret left at `.env.example`'s value | `example_secret`; `make setup` and `make .env` generate every one |
+| questions and answers on traces | `trace_content` |
+| the API docs advertised | off by default in production |
+| an unlimited chat when Valkey is down | the chat's limiter fails closed in production |
+| every trace kept, at a cost | a tenth by default in production |
+| a vulnerable image or a committed secret | CI's `security` job: Trivy and gitleaks |
+
+A production deployment that waives a check does it by name, in
+`PROD_CHECKS_WAIVED`, and the api logs each waiver at startup.
+
+What code cannot check stays a checklist 📘:
+
+- [ ] `PROD_CHECKS_WAIVED` empty, or each waiver written down with its reason
+- [ ] A real domain in `SITE_ADDRESS` (runbook, section 5), and
+      `HSTS_MAX_AGE=31536000` once HTTPS works on it
+- [ ] A data-processing agreement with the model provider: no training on
+      your data, its retention, the region prompts are processed in
+      ([privacy](../privacy.md))
+- [ ] A data protection impact assessment, and the works council's
+      consent where the audit trail records employees ([privacy](../privacy.md))
+- [ ] Retention periods agreed, and the retention job scheduled
+      ([privacy](../privacy.md))
+- [ ] Backups encrypted, stored off the host, and one restore rehearsed
+- [ ] Someone paged when an alert fires: Alertmanager routes to the app only
+- [ ] A penetration test before the service is reachable from the internet
 - [ ] A security contact and a way to report issues (`SECURITY.md`)

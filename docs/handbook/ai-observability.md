@@ -190,9 +190,9 @@ The dev api (one process), 200 signed-in alert-list requests a second for
 | Setting | Default | Notes |
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty (off) | OTLP/HTTP; `/v1/traces` is appended. `make obs-up` sets `http://jaeger:4318` |
-| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0 | `parentbased_traceidratio` with 0.1 keeps 10%; a caller's decision wins |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on` / 1.0; in production `parentbased_traceidratio` / 0.1 (ADR-0023) | a caller's decision wins with the `parentbased_` ones |
 | `OTEL_SERVICE_NAME` | `triage-assistant-api` | the eval harness reports as `triage-assistant-evals` |
-| `TRACE_CONTENT` | false | content on spans, redacted: development only |
+| `TRACE_CONTENT` | false | content on spans, redacted: development only; production refuses to start with it |
 | `TRACE_EXPORT_TIMEOUT_S` | 2 | one export's budget, retries included; bounds shutdown when the backend is down |
 | `APP_VERSION` | `dev` | compose passes `IMAGE_TAG`: `service.version`, `app_info` |
 

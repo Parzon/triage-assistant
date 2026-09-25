@@ -4,6 +4,7 @@ lifespan and hung on app.state, so tests build an app with their own
 settings and nothing is created at import time."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -23,6 +24,8 @@ from app.routes import alerts, audit, auth, chat, health, runbooks
 from app.tracing import configure_tracing, shutdown_tracing, tracing_on
 from app.triage import PROMPT
 
+log = logging.getLogger(__name__)
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
@@ -30,6 +33,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
+        if settings.app_env == "prod" and settings.prod_checks_waived:
+            # Meant for a laptop or CI; on a server, someone should notice.
+            log.warning(
+                "production checks waived", extra={"checks": sorted(settings.prod_checks_waived)}
+            )
         # Per worker, after gunicorn's fork (see configure_tracing).
         owns_tracing = configure_tracing(settings)
         app_info.labels(

@@ -64,8 +64,8 @@ Grafana.
 
 | Fault | What users see while it lasts | Alert if it lasts | Back after restore |
 |---|---|---|---|
-| Valkey stopped | everything works; `/ready` says `redis: degraded`; **no rate limiting** (fail-open, ADR-0004) | `RedisDown` (1 min), `RateLimiterFailingOpen` | 0 s |
-| Valkey frozen | same; each limiter call gives up after its 200 ms budget | same | 0 s |
+| Valkey stopped | reads, writes and sign-in work, **without rate limiting** (fail-open, ADR-0004); `/ready` says `redis: degraded`. The chat answers 503 `rate_limiter_unavailable` in 14 ms: in production it fails closed (ADR-0023) | `RedisDown` (1 min), `RateLimiterFailingOpen`, `RateLimiterFailingClosed` | 0 s |
+| Valkey frozen | same; each limiter call gives up after its 200 ms budget (the chat's 503 came after 217 ms) | same | 0 s |
 | PgBouncer stopped | JSON 503 `database_unavailable` in 2 ms; chat refused before streaming | `PgBouncerDown`, `HighErrorRate` | 1 s |
 | PgBouncer frozen | 503 after 5.0 s (connect timeout) | `PgBouncerDown` (exporter can't query), `HighErrorRate` | 0 s |
 | Postgres stopped | 503 in 15 ms (PgBouncer refuses at once while logins fail), sessions included: nobody is signed in without the database. Sign-in answers 503 JSON too (it stores its state there first) | `PostgresDown`, `HighErrorRate` | 1–2 s |

@@ -22,6 +22,11 @@ on the api (`RestartCount`, `ExitCode`: 137 = killed, often OOM).
 - A crash *loop* does fire it. Look for the traceback at startup: a
   missing dependency in the production image, invalid settings
   (`WEB_CONCURRENCY=""`), or an unreachable database at migration time.
+- "APP_ENV=prod refuses to start with these settings": a production check
+  failed (ADR-0023). The log names each one and why. Fix the setting, or,
+  if this deployment means it (a demo on the mock model), waive it by
+  name in `PROD_CHECKS_WAIVED`. `make deploy` never swaps in an api that
+  does not become healthy, so the old one keeps serving meanwhile.
 - A container stopped with `docker kill` stays down: it counts as a
   manual stop.
 
@@ -108,6 +113,17 @@ gap no span explains. Locally, asyncio debug mode names the blocking call.
 **Users:** requests pass without limits.
 **Check:** RedisDown first. If Valkey is up, the limiter is timing out
 (200 ms budget) because the event loop is busy: EventLoopLagHigh.
+
+## RateLimiterFailingClosed
+
+**Users:** the assistant answers 503 `rate_limiter_unavailable` to every
+question. Alerts and runbooks work (their limits fail open). Production
+only: there the chat fails closed, since each question is a model call
+and an unlimited chat is an unlimited bill (ADR-0023).
+**Check:** as for RateLimiterFailingOpen: RedisDown, then EventLoopLagHigh.
+**If Valkey cannot come back soon** and answers matter more than the
+bill: `CHAT_RATE_LIMIT_FAIL_CLOSED=false` in `.env`, then `make deploy`
+with the running tag. Put it back after.
 
 ## DatabasePoolSaturated
 

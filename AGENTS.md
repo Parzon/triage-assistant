@@ -25,8 +25,8 @@ project this team builds should follow.
 ## Development environment
 `make setup && make up` brings up `api` + `pgbouncer` + `db` + `redis`
 (Valkey) + `web` with hot reload, plus `mock-llm` and `keycloak` (the
-`mock` and `idp` profiles); `.env` (created from `.env.example`)
-provides local settings. Compose is split in three: `compose.yaml` (base),
+`mock` and `idp` profiles); `.env` (made from `.env.example` by `make
+setup`, every secret generated) provides local settings. Compose is split in three: `compose.yaml` (base),
 `compose.override.yaml` (dev, merged automatically), `compose.prod.yaml`
 (production shape, `make prod-up`). Toolchains live in the containers:
 Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
@@ -143,6 +143,13 @@ issue (`Closes #N`). Squash merge only. See `CONTRIBUTING.md`.
 Never commit secrets. `.env` is gitignored; `.env.example` is the
 template. Any new third-party dependency needs a one-line justification
 in the PR description.
+
+Production is safe by default (ADR-0023): `APP_ENV=prod` changes some
+defaults and refuses to start on unsafe settings (`production_problems`
+in `app/config.py`). A new setting that is unsafe in production gets a
+check there and a test in `tests/unit/test_config.py`, not a checklist
+line. `.env.example` waives only the three checks a local production-
+shaped stack needs (`PROD_CHECKS_WAIVED`); never add to them.
 
 Access control, for every change that touches data:
 - Every data route takes `principal: CurrentUser` and filters by

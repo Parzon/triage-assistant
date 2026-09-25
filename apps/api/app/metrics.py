@@ -166,7 +166,8 @@ identity_provider_up = Gauge(
 
 ratelimit_decisions = Counter(
     "ratelimit_decisions_total",
-    "Rate limiter outcomes: allowed, rejected, or fail_open (Redis unreachable).",
+    "Rate limiter outcomes: allowed or rejected; with Redis unreachable, fail_open "
+    "(let through) or fail_closed (refused: the chat, in production).",
     ["scope", "decision"],
 )
 

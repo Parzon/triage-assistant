@@ -56,6 +56,27 @@ tests:
         alertname: SignInsFailing
         exp_alerts: []
 
+  - name: A chat refused by its rate limiter fires after a minute; one let through does not
+    interval: 15s
+    input_series:
+      # Four chat questions a minute refused from the start: Valkey is down
+      # and the chat fails closed (production).
+      - series: 'ratelimit_decisions_total{scope="chat", decision="fail_closed"}'
+        values: "0+1x20"
+      - series: 'ratelimit_decisions_total{scope="alerts", decision="fail_open"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: RateLimiterFailingClosed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RateLimiterFailingClosed
+        exp_alerts:
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: "the assistant refuses questions: its rate limiter cannot reach Redis"
+              runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#ratelimiterfailingclosed"
+
   - name: Redis down fires only after one minute
     interval: 15s
     input_series:

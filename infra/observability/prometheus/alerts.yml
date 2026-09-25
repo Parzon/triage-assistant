@@ -97,6 +97,16 @@ groups:
           summary: "requests are passing unlimited: the rate limiter cannot reach Redis"
           runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#ratelimiterfailingopen"
 
+      # The chat fails closed in production (ADR-0023): the same outage
+      # refuses questions, and only chat traffic may be flowing.
+      - alert: RateLimiterFailingClosed
+        expr: sum(rate(ratelimit_decisions_total{decision="fail_closed"}[5m])) > 0
+        for: 1m
+        labels: {severity: high}
+        annotations:
+          summary: "the assistant refuses questions: its rate limiter cannot reach Redis"
+          runbook_url: "https://github.com/Parzon/triage-assistant/blob/main/docs/runbooks/alerts.md#ratelimiterfailingclosed"
+
       - alert: DatabasePoolSaturated
         expr: max(pgbouncer_pools_client_waiting_connections) > 0
         for: 2m

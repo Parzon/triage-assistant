@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The compose files interpolate .env: the template's values are enough
-      # to list the images.
-      - run: cp .env.example .env
+      # The compose files interpolate .env: one made from the template is
+      # enough to list the images.
+      - run: make .env
       - name: Third-party images the compose files run
         run: make scan-compose
 

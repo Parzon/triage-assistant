@@ -82,6 +82,15 @@ async def test_fails_open_when_redis_errors(caplog: pytest.LogCaptureFixture) ->
     assert "failing open" in caplog.text
 
 
+async def test_fails_closed_when_the_scope_asks_to(caplog: pytest.LogCaptureFixture) -> None:
+    decision = await limiter(FakeRedis(error=RedisConnectionError("down"))).hit(
+        "chat", "c", limit=10, window_s=60, fail_closed=True
+    )
+    assert not decision.allowed
+    assert decision.degraded
+    assert "failing closed" in caplog.text
+
+
 async def test_fails_open_within_budget_when_redis_hangs() -> None:
     rl = limiter(FakeRedis(delay_s=10), timeout_s=0.02)
     start = time.perf_counter()
