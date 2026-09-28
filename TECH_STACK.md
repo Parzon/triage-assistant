@@ -2,8 +2,9 @@
 
 Every technology in this repository: its role, what it does here,
 whether a new project should start with it, when to add it if not, and
-why. Then how to decide when to add architecture, and when to take it
-away.
+why. Then [how sign-in works](#how-sign-in-works) (passwords, JWTs,
+sessions, secrets), and how to decide when to add architecture, and when
+to take it away.
 
 No versions here: a version table goes stale within weeks. The lockfiles
 and image lines are the truth, and Dependabot moves them: `apps/api/uv.lock`,
@@ -234,7 +235,9 @@ CloudFront for the files and an ALB for `/api` can replace it.
 **OIDC with PKCE** ◐ · day one<br>
 Company sign-in. The api holds the tokens; the browser only ever gets a
 cookie (ADR-0013). Teams and roles come from the provider's groups claim
-(`team:<slug>:<role>`), so access is managed where people are.
+(`team:<slug>:<role>`), so access is managed where people are. Step by
+step, with what is hashed and what is secret: [how sign-in
+works](#how-sign-in-works).
 
 **Keycloak** ○ · day one locally, never in production<br>
 A stand-in identity provider with four demo users, so development and
@@ -342,6 +345,95 @@ routes alerts (to a pager, for a real team). **Exporters and cAdvisor**
 ○: collect metrics from Postgres, PgBouncer, Valkey, the host and the
 containers; a managed platform's own container metrics replace them. All
 with Prometheus, not before it.
+
+## How sign-in works
+
+The short answers:
+- **Passwords:** the app never sees one. People type theirs on the
+  identity provider's page, and the provider stores it salted and hashed
+  (the demo Keycloak uses Argon2id). In production, that is the
+  organisation's provider's job.
+- **JWT:** exactly one, the ID token: the provider's signed statement of
+  who signed in. The api checks it once, at sign-in, and never sends it
+  to the browser.
+- **The session is not a JWT.** It is 32 random bytes in a cookie;
+  Postgres stores their SHA-256, and every request looks it up.
+- **Salts** protect secrets people choose, because those can be guessed,
+  so only passwords need them. A session token is 256 random bits, with
+  nothing to guess: a plain SHA-256 is enough, and a slow salted hash
+  would only slow every request. The database's own passwords are salted
+  too: Postgres stores them as SCRAM-SHA-256.
+
+**Step by step** (as a diagram: [security](docs/handbook/security.md#how-signing-in-works)):
+1. **Sign in** opens `/api/auth/login`. The api makes three random
+   values and keeps them for 10 minutes:
+   - `state`, which ties the provider's answer to this browser (it is
+     also set in a short-lived cookie);
+   - a `nonce`, which ties the ID token to this sign-in;
+   - a PKCE verifier, without which a stolen code is useless.
+2. **The provider's page** takes the password, and MFA if the
+   organisation uses it. The app sees neither.
+3. **Back at `/api/auth/callback`** with a one-time code, the api checks
+   `state`. It then trades the code, the verifier and its **client
+   secret** for an ID token, on a direct connection the browser never
+   sees.
+4. **The ID token** is checked with PyJWT:
+   - its signature, against the public keys the provider publishes
+     (RS256 here; `none` and HMAC are refused);
+   - its issuer, audience (this app), expiry and nonce.
+
+   The provider also sends an access token. The api drops it: it calls
+   nothing else as the user.
+5. **Roles** come from the token's `groups` claim (`team:payments:responder`,
+   `org:admin`). They replace the user's memberships at every sign-in.
+6. **The session** starts: a new random token in the cookie, and its
+   SHA-256 in the `sessions` table. From then on, each request costs one
+   query and no call to the provider. The ID token stays in that row only
+   to end the provider's session at sign-out.
+
+**The cookie** is `__Host-triage_session` (plain `triage_session` in
+development over http). It is `HttpOnly`, so scripts can't read it; it is
+also `Secure` and `SameSite=Lax`. By default a session ends:
+- 12 hours after sign-in;
+- after 2 hours idle;
+- at sign-out;
+- when an operator ends it with `make revoke email=...`.
+
+Every POST, PUT, PATCH and DELETE must also carry `Origin: <PUBLIC_URL>`
+(the CSRF check).
+
+**Why not a JWT as the session?** It would save one database read per
+request, but:
+- it cannot be ended before it expires, not even by signing out, unless
+  you keep a list of revoked tokens, which is a session table again;
+- it carries the roles it was issued with until it expires;
+- it grows with every claim, and anyone holding it can read them: a JWT
+  is signed, not encrypted;
+- it adds a signing key to guard and rotate.
+
+Here the read is part of the one query each request makes anyway
+([operations](docs/handbook/operations.md#the-cost-of-signing-in)).
+ADR-0013 has the alternatives.
+
+**The secrets.** `make setup` generates each one (`openssl rand -hex 24`)
+except the model provider's key, which you type in. Production refuses to
+start while one of the api's own is still an example value (ADR-0023).
+
+| Secret | Proves | To |
+|---|---|---|
+| `OIDC_CLIENT_SECRET` | this api is the registered application | the identity provider, when trading a code |
+| `APP_DB_PASSWORD`, `POSTGRES_PASSWORD`, `MONITOR_DB_PASSWORD` | the api, the schema owner, the metrics exporter | Postgres |
+| `LLM_API_KEY` | this service | the model provider (the mock needs none) |
+| `ALERTMANAGER_WEBHOOK_TOKEN` | Alertmanager: a service, so a bearer token, not a session | the internal webhook, compared in constant time |
+| `KEYCLOAK_ADMIN_PASSWORD`, `DEMO_USER_PASSWORD` | the demo provider's admin and users | Keycloak, locally only |
+| `GRAFANA_ADMIN_PASSWORD` | the dashboards' admin | Grafana |
+
+The provider's signing key never leaves the provider: the api fetches
+only its public half. More detail:
+- where secrets live on a laptop, a VM and a managed platform:
+  [production](docs/handbook/production.md#secrets);
+- every attack on sign-in, what stops it, and its test:
+  [security](docs/handbook/security.md#each-attack-and-what-stops-it).
 
 ## When to add architecture, and when to take it away
 

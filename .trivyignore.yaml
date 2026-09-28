@@ -83,3 +83,54 @@ vulnerabilities:
     paths: ["usr/bin/caddy"]
     statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
     expired_at: 2026-10-25
+
+  # prom/alertmanager:v0.34.1 (compose-images). Its own most recent bump
+  # (grpc-go 1.83.1) predates this CVE's fix. Checked against Docker Hub's
+  # tag list 2026-09-28: v0.34.1 is still upstream's newest release. Found
+  # by the weekly scan's first run; proposed for the code owner's review.
+  - id: CVE-2026-84445
+    paths: ["bin/alertmanager", "bin/amtool"]
+    statement: "No fixed Alertmanager release yet: v0.34.1 (2026-09-17) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+
+  # prom/node-exporter:v1.12.1 (compose-images). The fixes are in newer
+  # golang.org/x/net, golang.org/x/crypto and the Go stdlib, not yet in a
+  # node_exporter build: v1.12.1 is still upstream's newest release,
+  # checked against Docker Hub's tag list 2026-09-28. Found by the weekly
+  # scan's first run; proposed for the code owner's review.
+  - id: CVE-2026-56854
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-33818
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-39821
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-46600
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-56853
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-56858
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-56859
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-56860
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27
+  - id: CVE-2026-56862
+    paths: ["bin/node_exporter"]
+    statement: "No fixed node_exporter release yet: v1.12.1 (2026-07-14) is upstream's newest, checked 2026-09-28. Proposed for the code owner's review."
+    expired_at: 2026-12-27

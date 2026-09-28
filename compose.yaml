@@ -356,7 +356,7 @@ services:
   # from .env (the mock would drop out); list them all instead.
 
   prometheus:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.0
     profiles: ["observability"]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
