@@ -195,7 +195,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `.github/workflows/ci.yml` | every push: lint, tests, build, scans, e2e |
 | `.github/workflows/release.yml` | a `vX.Y.Z` tag: scan, build for amd64 and arm64, publish, smoke-test |
 | `.github/workflows/scan.yml` | weekly: the compose images and this repo's own, for new vulnerabilities |
-| `.github/dependabot.yml` | weekly update PRs: packages, Actions, base images, compose images |
+| `.github/dependabot.yml` | monthly update PRs: packages, Actions, base images, compose images |
 | `.github/CODEOWNERS`, `pull_request_template.md`, `ISSUE_TEMPLATE/` | reviews, and the shape of PRs and issues |
 | `.trivyignore.yaml` | accepted vulnerabilities, each with a reason and an expiry |
 | `.gitleaks.toml`, `.gitleaksignore` | the secret scan's settings, and fake credentials shown to be fake |

@@ -1,24 +1,25 @@
-# Dependency update PRs, weekly and grouped (one PR per ecosystem, not one
-# per package). Each is an ordinary PR: CI must pass before merging, and a
+# Dependency update PRs, monthly and grouped (one PR per ecosystem, not one
+# per package). Monthly, not weekly: a vulnerable dependency still gets its
+# own security PR at once, and everything else can wait for the batch. Each is an ordinary PR: CI must pass before merging, and a
 # major version gets read like any other change. GitHub Actions stay pinned
 # to commit SHAs; Dependabot moves the SHA and its version comment together.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     groups:
       actions: {patterns: ["*"]}
 
   - package-ecosystem: uv
     directory: /apps/api
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     groups:
       api-minor-and-patch: {update-types: [minor, patch]}
 
   - package-ecosystem: npm
     directory: /apps/web
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     ignore:
       # The Node types follow the Node runtime's major (apps/web/.nvmrc),
       # not npm's newest release.
@@ -29,7 +30,7 @@ updates:
 
   - package-ecosystem: npm
     directory: /tests/e2e
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     groups:
       e2e: {patterns: ["*"]}
 
@@ -42,7 +43,7 @@ updates:
       - /apps/web
       - /tools/edge
       - /tools/mock-llm
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     ignore:
       # Language runtimes move deliberately and together: Python with the
       # api's requires-python, Node with .nvmrc - not one image at a time.
@@ -60,7 +61,7 @@ updates:
   # (.github/workflows/scan.yml).
   - package-ecosystem: docker-compose
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: monthly}
     ignore:
       - dependency-name: "*"
         update-types: [version-update:semver-major]

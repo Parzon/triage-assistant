@@ -26,7 +26,6 @@ from datetime import datetime
 from typing import Literal
 
 from opentelemetry import trace
-from opentelemetry.util.types import AttributeValue
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +36,7 @@ from app.llm import Embedder, LLMError
 from app.metrics import embedding_requests, retrieval_duration
 from app.models import Runbook, RunbookChunk, Team
 from app.redact import redact
-from app.tracing import text_parts
+from app.tracing import SpanAttributes, text_parts
 from app.vector import to_text
 
 log = logging.getLogger(__name__)
@@ -427,7 +426,7 @@ async def search_runbooks(
     sections came back, by id and rank: enough to see what the model was
     given, and to read the sections themselves through the api, under the
     asker's access. Their text stays out (app/tracing.py)."""
-    attributes: dict[str, AttributeValue] = {
+    attributes: SpanAttributes = {
         "gen_ai.operation.name": "retrieval",
         "gen_ai.data_source.id": "runbooks",
         "gen_ai.retrieval.top_k": k,
