@@ -13,6 +13,17 @@
 #       statement: "Only reachable through X, which this image never runs. Accepted by @lead."
 #       expired_at: 2026-12-01
 vulnerabilities:
+  # The api image's Debian base (python:3.13-slim). Debian fixed both in
+  # openssl 3.5.7-1~deb13u3; the official image still ships deb13u2, and
+  # this waits for its rebuild. QUIC (75804) and DTLS (84782) are not
+  # served by this image: Python's ssl module speaks TLS over TCP only.
+  # Short expiry: bump the base digest as soon as the image is rebuilt.
+  - id: CVE-2026-75804
+    statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; QUIC is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
+    expired_at: 2026-10-14
+  - id: CVE-2026-84782
+    statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; DTLS is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
+    expired_at: 2026-10-14
   # The TLS edge's Caddy binary (tools/edge). 2.11.4 is the newest release,
   # built with Go 1.26.3 and older golang.org/x modules; the fixes exist
   # upstream but in no Caddy release yet (caddyserver/caddy#8055 asks for
