@@ -5,10 +5,10 @@
 # uv comes from its official image at a pinned version. `pip install uv`
 # installed whatever was newest at build time (builds not reproducible)
 # and left pip + uv (80MB) inside the runtime image.
-FROM ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.21@sha256:a7aed3216253ee804de3e2d8afa5073baa1a177335345d43845cd4165e43b711 AS uv
 
 # ---- deps: virtualenv with runtime dependencies only ----------------------
-FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS deps
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS deps
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -51,7 +51,7 @@ EXPOSE 8010
 CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8010", "--reload"]
 
 # ---- production -------------------------------------------------------------
-FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS production
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS production
 # Numeric UID: Kubernetes' runAsNonRoot can only verify a numeric USER.
 # pip goes: the virtualenv below is complete, and the base image's pip
 # carries its own vendored libraries with their own vulnerabilities
