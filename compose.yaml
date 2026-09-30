@@ -157,7 +157,7 @@ services:
   # use Apple's GPU) and point LLM_BASE_URL at
   # http://host.docker.internal:11434/v1.
   ollama:
-    image: ollama/ollama:0.34.3
+    image: ollama/ollama:0.34.4
     profiles: ["ollama"]
     environment:
       # Unload a model after 5 idle minutes: its GPU memory goes back.
@@ -453,7 +453,7 @@ services:
     logging: *logging
 
   redis-exporter:
-    image: oliver006/redis_exporter:v1.91.1
+    image: oliver006/redis_exporter:v1.92.0
     profiles: ["observability"]
     environment:
       REDIS_ADDR: redis://redis:6379
