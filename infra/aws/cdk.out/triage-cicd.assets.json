@@ -1,0 +1,36 @@
+{
+  "version": "54.0.0",
+  "files": {
+    "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d": {
+      "displayName": "triage-cicd/Custom::AWSCDKOpenIdConnectProviderCustomResourceProvider Code",
+      "source": {
+        "path": "asset.c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d",
+        "packaging": "zip"
+      },
+      "destinations": {
+        "132218943026-ap-south-1-d6a8ff81": {
+          "bucketName": "cdk-hnb659fds-assets-132218943026-ap-south-1",
+          "objectKey": "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d.zip",
+          "region": "ap-south-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::132218943026:role/cdk-hnb659fds-file-publishing-role-132218943026-ap-south-1"
+        }
+      }
+    },
+    "e2c6fabb609eeedc5c8405277024a081cf86f21d28bf94359a0fed78089d8e63": {
+      "displayName": "triage-cicd Template",
+      "source": {
+        "path": "triage-cicd.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "132218943026-ap-south-1-cf57d4b0": {
+          "bucketName": "cdk-hnb659fds-assets-132218943026-ap-south-1",
+          "objectKey": "e2c6fabb609eeedc5c8405277024a081cf86f21d28bf94359a0fed78089d8e63.json",
+          "region": "ap-south-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::132218943026:role/cdk-hnb659fds-file-publishing-role-132218943026-ap-south-1"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}
