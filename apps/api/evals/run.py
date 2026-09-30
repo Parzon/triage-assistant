@@ -8,11 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from opentelemetry import trace
-from opentelemetry.util.types import AttributeValue
 
 from app.agent import AGENT_PROMPT_REF
 from app.llm import LLMClient, PromptRef
-from app.tracing import trace_id
+from app.tracing import SpanAttributes, trace_id
 from app.triage import PROMPT
 from evals.cases import SAFETY_KINDS, Case
 from evals.checks import Check, score
@@ -137,7 +136,7 @@ async def run(
         if target.name not in case.targets:
             continue
         for attempt in range(1, repeat + 1):
-            attributes: dict[str, AttributeValue] = {
+            attributes: SpanAttributes = {
                 "app.eval.case": case.id,
                 "app.eval.kind": case.kind,
                 "app.eval.attempt": attempt,

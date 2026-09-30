@@ -356,8 +356,8 @@ security](ai-security.md).
   tag, bumped by Dependabot (minor and patch), and scanned weekly.
 - ✅ **Release images carry provenance and an SBOM** (what went into them),
   stored next to them in GHCR.
-- ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates weekly,
-  grouped, for GitHub Actions, the api (uv), the web (npm), the e2e
+- ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates monthly,
+  grouped (a vulnerable dependency still gets its own PR at once), for GitHub Actions, the api (uv), the web (npm), the e2e
   suite, the Dockerfiles and the compose files. Each update is a PR that
   has to pass CI.
 - ✅ **Vulnerability scanning** (Trivy, `make scan`; ADR-0022): the

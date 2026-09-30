@@ -159,6 +159,12 @@ def provider_attributes(base_url: str) -> dict[str, Any]:
     return {"gen_ai.provider.name": provider, "server.address": host, "server.port": port}
 
 
+# What we put on spans. The SDK's own name for this,
+# opentelemetry.util.types.AttributeValue, stopped being a plain alias in
+# 1.45 (mypy: "not valid as a type"), and the values here are all scalars.
+SpanAttributes = dict[str, str | bool | int | float]
+
+
 def text_parts(text: str) -> str:
     """Content as the conventions shape it ([{"type": "text", ...}]), JSON
     encoded, redacted and cut to MAX_CONTENT_CHARS."""
