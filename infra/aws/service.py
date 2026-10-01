@@ -282,7 +282,7 @@ class AppStack(Stack):
                 "Cache",
                 replication_group_description="triage rate limits and cache",
                 engine="valkey",
-                engine_version="8.0",
+                engine_version="8.1",  # the version compose runs (valkey:8.1-alpine)
                 cache_node_type="cache.t4g.micro",
                 num_cache_clusters=1,
                 automatic_failover_enabled=False,
