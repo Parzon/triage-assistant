@@ -67,8 +67,9 @@ REPO = HERE.parents[1]  # the repository root: the mock LLM is built from it, it
 DB_NAME = "triage"
 # How long an init container may take to succeed. Without it, an init container that hangs
 # (dbinit waiting for a database that is down) holds the task PENDING, billed; with it, ECS stops
-# the task and the service scheduler retries (measured: stopped 3.5 min after launch). Fargate allows 2-120 s, so a migration that needs
-# longer belongs in a one-off task (`aws ecs run-task`) before the deploy, not in the task.
+# the task and the service scheduler retries (measured: stopped 3.5 min after launch). Fargate
+# allows 2-120 s, so a migration that needs longer belongs in a one-off task (`aws ecs run-task`)
+# before the deploy, not in the task.
 INIT_TIMEOUT = Duration.seconds(120)
 X86 = ecs.RuntimePlatform(
     cpu_architecture=ecs.CpuArchitecture.X86_64,
