@@ -938,6 +938,7 @@ The ADRs in [docs/adr](docs/adr/) record what was decided and why:
 - production refuses unsafe settings, and changes some defaults (0023)
 - an off switch for the assistant (0024)
 - personal data: retention, export and erasure (0025)
+- third-party image findings are reported; base images bump weekly (0026)
 
 A merged ADR is never edited: a new one supersedes it.
 

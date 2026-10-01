@@ -47,7 +47,8 @@ target, by section. The ones you need most:
 - Supply chain (ADR-0022, CI's `security` job): `make secrets-scan`
   (gitleaks, every commit), `make scan` (Trivy: the production images and
   the web's runtime dependencies; a fixable HIGH or CRITICAL fails),
-  `make scan-compose` (the compose files' images, weekly). Base images
+  `make scan-compose` (the compose files' images, weekly, report only:
+  ADR-0026). Base images
   are pinned by tag and digest: change both, or let Dependabot do it.
 - Browser tests: `make prod-up && make e2e` (Playwright, over HTTPS through the TLS edge;
   signs in through Keycloak's page once, `tests/e2e/specs/auth.setup.ts`)

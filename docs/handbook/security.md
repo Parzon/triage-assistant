@@ -358,13 +358,14 @@ security](ai-security.md).
   stored next to them in GHCR.
 - ✅ **Dependabot** (`.github/dependabot.yml`) proposes updates monthly,
   grouped (a vulnerable dependency still gets its own PR at once), for GitHub Actions, the api (uv), the web (npm), the e2e
-  suite, the Dockerfiles and the compose files. Each update is a PR that
-  has to pass CI.
+  suite and the compose files; the Dockerfiles' base images weekly
+  (ADR-0026). Each update is a PR that has to pass CI.
 - ✅ **Vulnerability scanning** (Trivy, `make scan`; ADR-0022): the
   production images (api, web, edge) and the web's runtime dependencies,
   on every PR, again before a release publishes anything, and weekly from
-  main (`.github/workflows/scan.yml`, with the compose files' images:
-  `make scan-compose`).
+  main (`.github/workflows/scan.yml`). The same weekly run scans the
+  compose files' images (`make scan-compose`) and only reports: the
+  findings are in images this repo does not build (ADR-0026).
 - ✅ **Secret scanning** (gitleaks, `make secrets-scan`): every commit in
   the history, on every PR. Files of fake credentials on purpose are
   exempt (`.gitleaks.toml`), and single old findings by fingerprint
