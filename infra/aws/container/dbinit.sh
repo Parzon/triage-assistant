@@ -1,6 +1,8 @@
 # One-off, idempotent: the least-privileged role the api connects as. RDS runs no init
 # scripts, so this does what infra/postgres/initdb does for the compose database.
 # libpq reads PGHOST, PGUSER, PGPASSWORD, PGDATABASE and PGSSLMODE from the environment.
+# Ride out a short database blip (a reboot takes ~45 s) instead of failing the task at once.
+for _ in $(seq 30); do pg_isready -q && break; sleep 2; done
 psql -v ON_ERROR_STOP=1 -v app_password="$APP_DB_PASSWORD" <<'SQL'
 SELECT 'CREATE ROLE triage_app LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'triage_app') \gexec
 ALTER ROLE triage_app PASSWORD :'app_password';
