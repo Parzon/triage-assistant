@@ -65,10 +65,9 @@ from constructs import Construct
 HERE = Path(__file__).parent
 REPO = HERE.parents[1]  # the repository root: the mock LLM is built from it, it is not released
 DB_NAME = "triage"
-# How long an init container may take to succeed. Without it, a failed init container (dbinit
-# during a database outage: exit 2) leaves the task PENDING forever, billed, waiting for a
-# dependency that cannot succeed; measured: 13 minutes until stopped by hand. With it, ECS stops
-# the task and the service scheduler retries. Fargate allows 2-120 s, so a migration that needs
+# How long an init container may take to succeed. Without it, an init container that hangs
+# (dbinit waiting for a database that is down) holds the task PENDING, billed; with it, ECS stops
+# the task and the service scheduler retries (measured: stopped 3.5 min after launch). Fargate allows 2-120 s, so a migration that needs
 # longer belongs in a one-off task (`aws ecs run-task`) before the deploy, not in the task.
 INIT_TIMEOUT = Duration.seconds(120)
 X86 = ecs.RuntimePlatform(
@@ -374,7 +373,14 @@ class AppStack(Stack):
             stop_timeout=Duration.seconds(120),  # let chat streams finish (Fargate's maximum)
             logging=to(api_logs, "api"),
         )
+        # Every init container is a direct dependency of the essential api: when one fails, the
+        # api gives up and ECS stops the task. Through a chain (api -> migrate -> dbinit) a dbinit
+        # that fails fast leaves migrate "stopped" without running, and the task PENDING forever
+        # (measured with one-off tasks: the chain stuck >4 min; direct: stopped in 1.5 min).
         api.add_container_dependencies(
+            ecs.ContainerDependency(
+                container=dbinit, condition=ecs.ContainerDependencyCondition.SUCCESS
+            ),
             ecs.ContainerDependency(
                 container=migrate, condition=ecs.ContainerDependencyCondition.SUCCESS
             ),
