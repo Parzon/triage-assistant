@@ -191,7 +191,7 @@ services:
   # container, the realm imported from the file whenever the container is
   # created: fine for development, CI and demos - never the production IdP.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.4
+    image: quay.io/keycloak/keycloak:26.8.0
     profiles: ["idp"]
     # Refuses to start - rather than create demo users with an empty
     # password - when .env lacks the passwords. (A compose-level ${VAR:?}
@@ -453,7 +453,7 @@ services:
     logging: *logging
 
   redis-exporter:
-    image: oliver006/redis_exporter:v1.92.0
+    image: oliver006/redis_exporter:v1.92.1
     profiles: ["observability"]
     environment:
       REDIS_ADDR: redis://redis:6379
