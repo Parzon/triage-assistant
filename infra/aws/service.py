@@ -1,7 +1,7 @@
 """Stages 4-5: the app on ECS Fargate behind an ALB, with RDS Postgres.
 
   internet -> ALB :80 -+- /api/metrics, /api/alerts/alertmanager -> 404 (as nginx does)
-                       +- /api/*  -> rewrite to /* -> api task :8010   (target health: /ready)
+                       +- /api/*  -> rewrite to /* -> api task :8010   (target health: /health)
                        +- else    -> web task :8080 (nginx, static)   (target health: /healthz)
 
   api task (one network namespace, so the containers talk over localhost):
@@ -456,9 +456,14 @@ class AppStack(Stack):
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
             targets=[api_svc.load_balancer_target(container_name="api", container_port=8010)],
-            # Readiness, at the load balancer: send traffic only while the database answers.
+            # Liveness, not readiness. ECS replaces any task its load balancer calls unhealthy,
+            # so a deep check (/ready: the database) turns a database outage into task churn:
+            # measured, every api task marked unhealthy and replacements stuck in dbinit. Kubernetes
+            # separates the two (readinessProbe /ready, livenessProbe /health); ECS has one signal.
+            # Readiness at start is covered by the init containers: migrate succeeds only if the
+            # database answers. A database outage still shows: /api/ready 503 and the 5xx alarm.
             health_check=elbv2.HealthCheck(
-                path="/ready", interval=Duration.seconds(10), healthy_threshold_count=2
+                path="/health", interval=Duration.seconds(10), healthy_threshold_count=2
             ),
             deregistration_delay=Duration.seconds(30),
         )

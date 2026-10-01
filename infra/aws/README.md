@@ -9,21 +9,28 @@ the production differences are marked in the code (`production:` comments).
 | `triage-cicd` | GitHub OIDC provider; roles for the Release `ecr` job and the Deploy workflow | free |
 | `triage-network` | VPC, 2 AZs, public + isolated subnets, no NAT gateway | free |
 | `triage-vm` | one VM running compose (`docs/runbooks/demo-vm.md`), no SSH: SSM only | ~$0.10/h |
-| `triage-app` | ECS Fargate (api, web) + RDS Postgres + ALB | ~$0.11/h |
+| `triage-app` | ECS Fargate (2 api, 2 web) + RDS Postgres + ElastiCache Valkey + ALB | ~$0.17/h |
 
 ```
 internet -> ALB :80 -+- /api/metrics, /api/alerts/alertmanager -> 404
-                     +- /api/*  -> rewritten to /* -> api task (target health: /ready)
+                     +- /api/*  -> rewritten to /* -> api task (target health: /health)
                      +- else    -> web task, nginx serving the built app (target health: /healthz)
 
 api task (containers share localhost):
   dbinit, migrate   init containers: the app's least-privileged DB role, then migrations as owner
-  valkey, mock-llm  sidecars
-  api               starts after both init containers succeed and the sidecars are healthy
+  mock-llm          sidecar
+  api               starts after both init containers succeed and the sidecar is healthy
+Valkey: one ElastiCache node shared by every api task (rate limits must be counted once).
+2 tasks per service, one per AZ; the api scales to 4 on requests per target.
 ```
 
 Why the ALB routes `/api`: the web image's nginx resolves `api:8010` through Docker's DNS
 (`127.0.0.11`), which Fargate does not have. On ECS, nginx only serves files.
+
+Why the ALB checks `/health`, not `/ready`: ECS replaces every task its load balancer calls
+unhealthy. With `/ready` (which needs the database), stopping RDS made ECS replace api tasks
+whose replacements could not start; with `/health`, a database outage leaves the tasks alone and
+the api answers 503 until the database is back.
 
 ## Use
 
