@@ -1,0 +1,6 @@
+cdk.out*/
+.venv/
+__pycache__/
+# Lookup cache: names the AWS account, so it stays out of this public repository.
+cdk.context.json
+outputs.json

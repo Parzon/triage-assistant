@@ -1,0 +1,5 @@
+[project]
+name = "triage-aws"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = ["aws-cdk-lib>=2.170", "constructs>=10"]

@@ -1,0 +1,78 @@
+name: Deploy (AWS demo)
+
+# Deploys a released version to the ECS demo stack (infra/aws, stack triage-app):
+# - automatically, after the Release workflow publishes a version tag and its `ecr` job has
+#   copied the images to ECR;
+# - by hand, for any released version. A rollback is this: run it with the last good tag.
+# AWS trusts this job's OIDC token only inside the GitHub environment "aws-demo" (role
+# triage-gha-deploy), so that environment's protection rules (required reviewers, a wait
+# timer, allowed branches) gate every deploy. Off until the repository variable
+# AWS_DEPLOY_ROLE_ARN is set.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy, e.g. 0.8.1 (an earlier one rolls back)"
+        required: true
+
+permissions:
+  contents: read
+
+# One deploy at a time; a second one waits rather than racing the first.
+concurrency:
+  group: deploy-aws-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.AWS_DEPLOY_ROLE_ARN != '' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-24.04
+    environment:
+      name: aws-demo
+      url: ${{ steps.smoke.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Which version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          tag="${INPUT_TAG:-${RELEASE_REF#v}}"
+          [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release version: '$tag'" >&2; exit 1; }
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      # The infrastructure code comes from main, the image from the release: an older version
+      # deploys onto today's infrastructure, so rolling the app back never rolls the infra back.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+      # Rolling deploy; CloudFormation waits until ECS is stable. A release whose tasks keep
+      # failing is rolled back by the ECS deployment circuit breaker, and this step fails.
+      - name: cdk deploy triage-app
+        working-directory: infra/aws
+        run: |
+          CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          export CDK_DEFAULT_ACCOUNT
+          uv sync --frozen
+          npx --yes aws-cdk@2.1143.0 deploy triage-app --exclusively --require-approval never \
+            -c tag="$TAG" --outputs-file outputs.json
+      - id: smoke
+        name: Smoke test through the load balancer
+        working-directory: infra/aws
+        run: |
+          url=$(jq -r '."triage-app".Url' outputs.json)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$url/api/ready"
