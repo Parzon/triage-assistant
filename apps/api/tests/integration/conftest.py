@@ -14,7 +14,9 @@ the identity provider itself.
 import asyncio
 import os
 import socket
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from types import SimpleNamespace
 
 import pytest
 import uvicorn
@@ -23,6 +25,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy import text
 
+from app import ratelimit
 from app.config import Settings
 from app.main import create_app
 from app.oidc import Identity
@@ -41,6 +44,16 @@ ClientFactory = Callable[[str], AsyncClient]
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(autouse=True)
+def one_rate_limit_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The limiter counts per window of the clock. A test that started just
+    before a window ended had its count reset half-way: six 201s where the
+    sixth should be a 429 (CI on main, 2026-09-30). The limiter's clock
+    stands still for each test; everything else keeps the real one."""
+    now = time.time()
+    monkeypatch.setattr(ratelimit, "time", SimpleNamespace(time=lambda: now))
 
 
 @pytest.fixture

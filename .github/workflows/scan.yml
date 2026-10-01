@@ -1,10 +1,12 @@
 name: Weekly scan
 
 # New vulnerabilities are published every day, in images nobody changed:
-# the compose files' third-party images (Postgres, PgBouncer, Valkey,
-# Keycloak, the monitoring stack) and this repo's own images, rebuilt from
-# main. A red run here is work for the week (ADR-0022): bump the image, or
-# accept the risk in .trivyignore.yaml with a reason and an expiry date.
+# this repo's own images, rebuilt from main, and the compose files'
+# third-party images (Postgres, PgBouncer, Valkey, Keycloak, the monitoring
+# stack). A finding in our own images turns the run red: bump the base, or
+# accept the risk in .trivyignore.yaml with a reason and an expiry date
+# (ADR-0022). The third-party scan only reports (ADR-0026): read its log
+# when you bump those images.
 
 on:
   schedule:
@@ -17,6 +19,9 @@ permissions:
 jobs:
   compose-images:
     runs-on: ubuntu-24.04
+    # Hundreds of findings in images this repo does not build: a run that
+    # is red every week teaches people to ignore red (ADR-0026).
+    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The compose files interpolate .env: one made from the template is

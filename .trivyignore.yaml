@@ -13,16 +13,22 @@
 #       statement: "Only reachable through X, which this image never runs. Accepted by @lead."
 #       expired_at: 2026-12-01
 vulnerabilities:
-  # The api image's Debian base (python:3.13-slim). Debian fixed both in
-  # openssl 3.5.7-1~deb13u3; the official image still ships deb13u2, and
-  # this waits for its rebuild. QUIC (75804) and DTLS (84782) are not
-  # served by this image: Python's ssl module speaks TLS over TCP only.
+  # The api image's Debian base (python:3.13-slim). Debian fixed all three
+  # in its security archive (openssl 3.5.7-1~deb13u3, pcre2
+  # 10.46-1~deb13u3); the official image still ships deb13u2, and this
+  # waits for its rebuild. QUIC (75804) and DTLS (84782) are not served by
+  # this image: Python's ssl module speaks TLS over TCP only. PCRE2 (103111)
+  # is linked only by grep and libselinux, which the app never runs:
+  # Python's re is its own engine.
   # Short expiry: bump the base digest as soon as the image is rebuilt.
   - id: CVE-2026-75804
     statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; QUIC is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
     expired_at: 2026-10-14
   - id: CVE-2026-84782
     statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; DTLS is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
+    expired_at: 2026-10-14
+  - id: CVE-2026-103111
+    statement: "Fixed in Debian pcre2 10.46-1~deb13u3, not yet in python:3.13-slim; only grep and libselinux link PCRE2, and the app runs neither. Accepted by the code owner (@Parzon), 2026-10-01."
     expired_at: 2026-10-14
   # The TLS edge's Caddy binary (tools/edge). 2.11.4 is the newest release,
   # built with Go 1.26.3 and older golang.org/x modules; the fixes exist

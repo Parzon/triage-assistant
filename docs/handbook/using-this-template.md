@@ -95,7 +95,7 @@ What this repository uses (read from GitHub's API), and why:
 | Merge buttons | squash only; delete the branch on merge | one commit per PR on `main`, titled by the PR |
 | Branch protection on `main` | see the next list | nothing reaches `main` without CI and a review |
 | Secret scanning, with push protection | on | refuses a push containing a recognised credential |
-| Dependabot security updates | on | PRs for vulnerable dependencies; `.github/dependabot.yml` adds monthly grouped version updates |
+| Dependabot security updates | on | PRs for vulnerable dependencies; `.github/dependabot.yml` adds grouped version updates, monthly (base images weekly) |
 | Private vulnerability reporting | linked from `.github/ISSUE_TEMPLATE/config.yml` | security reports never land in a public issue |
 | Template repository | on here only | leave it off on your copy |
 
