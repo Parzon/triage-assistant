@@ -165,6 +165,11 @@ class AppStack(Stack):
             deletion_protection=False,  # production: True
             removal_policy=RemovalPolicy.DESTROY,  # production: SNAPSHOT
         )
+        # Delete the database before its master secret. The template refers to the secret only
+        # inside a {{resolve:secretsmanager:...}} reference, and CloudFormation deleted both at
+        # once: the DB's delete handler then could not resolve the secret -> DELETE_FAILED
+        # (recovery: delete-stack --retain-resources for what is already gone).
+        db.node.add_dependency(owner.node.default_child)  # the secret only, not its attachment
         db_env = {
             "DB_HOST": db.db_instance_endpoint_address,
             "DB_PORT": db.db_instance_endpoint_port,

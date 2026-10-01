@@ -49,6 +49,11 @@ npx aws-cdk@2.1143.0 destroy triage-app --exclusively --force
 ./ops.sh leftovers                                  # anything still costing money
 ```
 
+Before destroying `triage-app`, unset `AWS_DEPLOY_ROLE_ARN`: otherwise the next release tag
+re-creates the whole stack. If a delete ends in `DELETE_FAILED` on resources that are already
+gone, finish it with `aws cloudformation delete-stack --stack-name triage-app --retain-resources
+<their logical IDs>`.
+
 Deploys after setup go through `.github/workflows/deploy.yml`: automatically after a release,
 or by hand with any released version (that is the rollback). It needs the repository variable
 `AWS_DEPLOY_ROLE_ARN` (the `triage-cicd.DeployRoleArn` output) and a GitHub environment named
