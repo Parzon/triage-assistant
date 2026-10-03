@@ -19,8 +19,9 @@ services:
       # The Vite dev proxy sets X-Forwarded-For (xfwd), like nginx in prod.
       FORWARDED_ALLOW_IPS: "*"
       # Sign-in in development: the browser is on the Vite dev server, over
-      # plain HTTP, and reaches Keycloak through its /auth proxy. Browsers
-      # drop Secure cookies on http://, so these cannot be Secure here.
+      # plain HTTP, and reaches Keycloak through its /auth proxy. Safari drops
+      # Secure cookies on http://, localhost included (Chrome and Firefox keep
+      # them on localhost), so these are not Secure here.
       PUBLIC_URL: http://localhost:${WEB_PORT:-5173}
       OIDC_ISSUER: http://localhost:${WEB_PORT:-5173}/auth/realms/triage
       SESSION_COOKIE_SECURE: "false"

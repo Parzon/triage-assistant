@@ -27,6 +27,15 @@ PROJECT=triage-assistant-prod
 COMPOSE=(docker compose -p "$PROJECT" -f compose.yaml -f compose.prod.yaml)
 step() { printf '\n== %s  %s\n' "$(date -u +%T)" "$*"; }
 
+# The api refuses the template's secrets at startup (ADR-0023), but only the
+# ones it receives. The database owner's, the monitor's, Grafana's and
+# Keycloak's never reach it, so they are checked here.
+if left=$(grep -oE '^[A-Z0-9_]+=change-me' .env 2>/dev/null); then
+  echo ".env still holds the template's values for: $(cut -d= -f1 <<< "$left" | tr '\n' ' ')" >&2
+  echo "Generate them as make .env does (openssl rand -hex 24), then deploy again." >&2
+  exit 1
+fi
+
 containers() {  # running containers of one service
   docker ps -q --filter "label=com.docker.compose.project=$PROJECT" \
     --filter "label=com.docker.compose.service=$1"
@@ -63,6 +72,18 @@ if [ "${PULL:-1}" = 1 ]; then
   "${COMPOSE[@]}" pull --quiet api web migrate edge
 fi
 
+# Every image of this release must be on the host now. A missing one would not
+# fail the steps below: compose builds a service that has a build section, so
+# this checkout would run under the release's name (measured: `run migrate`
+# built ...-api:<tag> from the working tree). make prod-up refuses the same.
+missing=$("${COMPOSE[@]}" config --images | grep -E -- "-(api|web|edge):${TAG//./\\.}\$" | sort -u |
+  while read -r image; do docker image inspect "$image" >/dev/null 2>&1 || echo "$image"; done)
+if [ -n "$missing" ]; then
+  echo "not on this host: $(tr '\n' ' ' <<< "$missing")" >&2
+  echo "Deploy with PULL=1 (the default), or build this checkout first: make prod-build." >&2
+  exit 1
+fi
+
 # A rollback: the database already carries a newer release's migrations,
 # which this image's Alembic has never heard of ("Can't locate revision").
 # Run this release's code on the newer schema, without migrating. That is
@@ -72,7 +93,19 @@ fi
 # deliberate, separate step.
 current=$("${COMPOSE[@]}" exec -T db sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT version_num FROM alembic_version" 2>/dev/null' || true)
-if [ -n "$current" ] && ! "${COMPOSE[@]}" run --rm --no-deps -T migrate alembic show "$current" >/dev/null 2>&1; then
+ahead=no
+if [ -n "$current" ] && ! shown=$("${COMPOSE[@]}" run --rm --no-deps -T migrate alembic show "$current" 2>&1); then
+  # Only this message means "a newer release migrated it". Any other failure
+  # (Docker unavailable, an image that does not start) is a failed deploy,
+  # not a rollback: reading it as one would skip the migration.
+  if ! grep -q "Can't locate revision" <<< "$shown"; then
+    printf '%s\n' "$shown" >&2
+    echo "could not check the database's revision against $TAG: deploy stopped" >&2
+    exit 1
+  fi
+  ahead=yes
+fi
+if [ "$ahead" = yes ]; then
   step "the database ($current) is ahead of $TAG: rolling back the code only, no migration"
 else
   step "migrate"

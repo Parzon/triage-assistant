@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -40,14 +41,19 @@ from app.llm import Embedder
 from app.metrics import prompt_redactions, tool_calls
 from app.queries import newest_alerts
 from app.redact import redact
-from app.runbooks import Hit, search_runbooks
-from app.schemas import Severity
+from app.runbooks import Hit, Retrieval, search_runbooks
+from app.schemas import AlertOut, Severity
 from app.triage import alert_line, section_text
 
 log = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 TIMEOUT_S = 15.0
+
+# Calls still running, referenced until they end: one past its deadline is
+# left to finish, not cancelled (_in_time), and must not be garbage-collected
+# mid-flight.
+_running: set[asyncio.Future[Any]] = set()
 
 
 class ListAlertsArgs(BaseModel):
@@ -197,17 +203,49 @@ async def _run(name: str, arguments: str | dict[str, Any] | None, ctx: ToolConte
         return Result(f"Unknown tool. The tools are {', '.join(TOOLS)}.", False, "unknown tool")
     try:
         raw = arguments if isinstance(arguments, dict) else json.loads(arguments or "{}")
-        async with asyncio.timeout(TIMEOUT_S):
-            if name == "search_runbooks":
-                return await _search_runbooks(SearchRunbooksArgs.model_validate(raw), ctx)
-            return await _list_alerts(ListAlertsArgs.model_validate(raw), ctx)
+        schema = SearchRunbooksArgs if name == "search_runbooks" else ListAlertsArgs
+        args = schema.model_validate(raw)
     except (json.JSONDecodeError, ValidationError) as exc:
         return Result(f"Invalid arguments: {_first_error(exc)}", False, "invalid arguments")
-    except TimeoutError:
-        return Result("The tool timed out. Answer with what you have.", False, "timed out")
+    # What a call read reaches the model, and the list citations are checked
+    # against, only when it arrives in time: a late call changes neither.
+    if isinstance(args, SearchRunbooksArgs):
+        retrieval = await _in_time(_search_runbooks(args, ctx))
+        return _timed_out() if retrieval is None else _sections_result(retrieval, ctx)
+    alerts = await _in_time(_list_alerts(args, ctx))
+    return _timed_out() if alerts is None else _alerts_result(alerts, args, ctx)
 
 
-async def _list_alerts(args: ListAlertsArgs, ctx: ToolContext) -> Result:
+async def _in_time[T](work: Coroutine[Any, Any, T]) -> T | None:
+    """`work`'s result, or None once TIMEOUT_S has passed.
+
+    Waited for, never cancelled. Cancelling a database call makes asyncpg
+    wait, with no time limit, for the server to acknowledge the cancel, and a
+    connection that died meanwhile never does: measured with Postgres frozen,
+    a call cancelled at 15 s was still waiting 90 s later, after Postgres was
+    back, and its pooled connection leaked (app/db.py; routes/health.py's
+    probe does the same). Left alone, a late call ends when the database
+    answers or its connection closes, bounded by the role's statement_timeout
+    and the embedding timeout. The asker's hang-up does not cancel it either.
+    """
+    task = asyncio.ensure_future(work)
+    _running.add(task)
+    task.add_done_callback(_finished)
+    done, _ = await asyncio.wait({task}, timeout=TIMEOUT_S)
+    return task.result() if task in done else None
+
+
+def _finished(task: asyncio.Future[Any]) -> None:
+    _running.discard(task)
+    if not task.cancelled():
+        task.exception()  # retrieved: a late call's error is not logged as unhandled
+
+
+def _timed_out() -> Result:
+    return Result("The tool timed out. Answer with what you have.", False, "timed out")
+
+
+async def _list_alerts(args: ListAlertsArgs, ctx: ToolContext) -> list[AlertOut]:
     async with ctx.sessionmaker() as db:
         await set_transaction_settings(db, tenant_settings(ctx.principal))
         alerts = await newest_alerts(
@@ -223,6 +261,10 @@ async def _list_alerts(args: ListAlertsArgs, ctx: ToolContext) -> Result:
             alerts=[a.id for a in alerts],
         )
         await db.commit()
+    return alerts
+
+
+def _alerts_result(alerts: list[AlertOut], args: ListAlertsArgs, ctx: ToolContext) -> Result:
     ctx.alert_ids.update(a.id for a in alerts)
     if not alerts:
         return Result("(none)", True, "no alerts")
@@ -232,7 +274,7 @@ async def _list_alerts(args: ListAlertsArgs, ctx: ToolContext) -> Result:
     )
 
 
-async def _search_runbooks(args: SearchRunbooksArgs, ctx: ToolContext) -> Result:
+async def _search_runbooks(args: SearchRunbooksArgs, ctx: ToolContext) -> Retrieval:
     async with ctx.sessionmaker() as db:
         await set_transaction_settings(db, tenant_settings(ctx.principal))
         # Embeds the query first, with no transaction open (search_runbooks).
@@ -257,6 +299,10 @@ async def _search_runbooks(args: SearchRunbooksArgs, ctx: ToolContext) -> Result
             ],
         )
         await db.commit()
+    return retrieval
+
+
+def _sections_result(retrieval: Retrieval, ctx: ToolContext) -> Result:
     if not retrieval.hits:
         return Result("(no runbook sections)", True, "no sections")
     blocks = []

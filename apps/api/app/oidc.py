@@ -100,7 +100,11 @@ class OIDCClient:
         self._metadata: ProviderMetadata | None = None
         self._metadata_at = 0.0
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._keys_at = 0.0
+        # Never fetched. Not 0.0: time.monotonic() counts from boot, so on a
+        # machine up for less than JWKS_MIN_REFRESH_S (a new container, a
+        # fresh VM) 0.0 reads as "fetched moments ago" and the first sign-in
+        # fails with an unknown key.
+        self._keys_at = float("-inf")
         # The last check's verdict (watch_identity_provider); None = not yet.
         self.reachable: bool | None = None
 

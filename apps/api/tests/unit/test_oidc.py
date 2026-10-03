@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 
 import httpx2
@@ -173,6 +174,17 @@ async def test_rotated_keys_are_fetched_once_not_per_token(
         with pytest.raises(InvalidToken):
             await client.verify(token(kid="made-up"), nonce=NONCE)
     assert provider.hits["certs"] == 2
+
+
+async def test_the_first_sign_in_after_boot_fetches_the_keys(
+    client: OIDCClient, provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # time.monotonic() counts from boot: a new container or VM is seconds in,
+    # less than JWKS_MIN_REFRESH_S, and the key set has never been fetched.
+    # Patched in app.oidc only: the event loop reads the real clock.
+    monkeypatch.setattr("app.oidc.time", SimpleNamespace(monotonic=lambda: 30.0))
+    await client.verify(token(), nonce=NONCE)
+    assert provider.hits["certs"] == 1
 
 
 async def test_metadata_naming_another_issuer_is_not_trusted(

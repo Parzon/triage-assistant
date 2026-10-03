@@ -70,8 +70,8 @@ cd /srv/triage-assistant && make .env   # every change-me secret generated; the 
 
 The firewall caveat: Docker's published ports bypass ufw. Docker rewrites
 the destination in the NAT table before ufw's rules run. Here that's
-safe, because `compose.prod.yaml` publishes only nginx and binds the
-dashboards to 127.0.0.1. Anything you add with `ports:` is reachable even
+safe, because `compose.prod.yaml` publishes only the TLS edge (80 and
+443) and binds nginx and the dashboards to 127.0.0.1. Anything you add with `ports:` is reachable even
 if ufw says otherwise. See the networking chapter.
 
 ## 3. Configure `.env`

@@ -93,21 +93,25 @@ iterative scans on.
 
 | Embedding model | Prefixes | Hybrid recall@1 / @3 / @5 | Hybrid MRR | Semantic alone recall@1 / @5 | Search p50 |
 |---|---|---|---|---|---|
-| nomic-embed-text (137M) | yes | 0.79 / 0.95 / 1.00 | 0.88 | 0.84 / 1.00 | 20 ms |
-| nomic-embed-text | no | 0.79 / 0.95 / 1.00 | 0.88 | 0.84 / 1.00 | 18 ms |
-| embeddinggemma (300M) | yes | 0.84 / 0.95 / 1.00 | 0.91 | 0.79 / 1.00 | 18 ms |
-| embeddinggemma | no | 0.89 / 0.95 / 1.00 | 0.93 | 0.89 / 1.00 | 18 ms |
-| qwen3-embedding:0.6b (at 768 of 1024) | yes | 0.79 / 1.00 / 1.00 | 0.89 | 0.79 / 1.00 | 40 ms |
-| qwen3-embedding:0.6b | no | 0.79 / 1.00 / 1.00 | 0.89 | 0.79 / 1.00 | 48 ms |
+| nomic-embed-text (137M) | yes | 0.79 / 0.95 / 1.00 | 0.87 | 0.84 / 1.00 | 16 ms |
+| nomic-embed-text | no | 0.79 / 0.95 / 1.00 | 0.87 | 0.84 / 1.00 | 17 ms |
+| embeddinggemma (300M) | yes | 0.84 / 0.95 / 1.00 | 0.91 | 0.79 / 1.00 | 20 ms |
+| embeddinggemma | no | 0.89 / 0.95 / 1.00 | 0.93 | 0.89 / 1.00 | 20 ms |
+| qwen3-embedding:0.6b (at 768 of 1024) | yes | 0.84 / 1.00 / 1.00 | 0.91 | 0.84 / 1.00 | 40 ms |
+| qwen3-embedding:0.6b | no | 0.84 / 1.00 / 1.00 | 0.90 | 0.79 / 1.00 | 40 ms |
 
-Keyword search alone, the same whatever the model: recall@1 0.63, @5 0.95,
-MRR 0.74, 4 ms.
+Keyword search alone, the same whatever the model: recall@1 0.68, @5 0.95,
+MRR 0.77, 4 ms. Before a fix to the keyword query, which stemmed the
+question a second time so that "database", "release" and "response" never
+matched: recall@1 0.63, MRR 0.74. With the fix, "release" lifts the rollback
+question to first place, and "database" now also matches the disk runbook,
+which pushes one pool question from second to third.
 
 What the table says, and does not:
 - **All three models find every answer in the first 5** results.
   Differences at @1 are 2 questions of 19: noise at this size. The
   benchmark cannot rank the models, only show that each works.
-- **Keyword search alone** ranks the right section first for 63% of
+- **Keyword search alone** ranks the right section first for 68% of
   questions, and misses the paraphrase entirely. Hybrid and semantic
   search do better.
 - **Hybrid is not always better than semantic alone.** Fusion weights

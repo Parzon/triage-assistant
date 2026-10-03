@@ -178,6 +178,16 @@ def test_prompt_lists_alerts_with_their_team_and_bounds_their_size() -> None:
     assert messages[1] == {"role": "user", "content": "what broke?"}
 
 
+def test_an_alert_is_redacted_before_it_is_cut_short() -> None:
+    token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0"  # a GitHub token's format
+    # It starts 20 characters before the cut: cut first, what is left of it
+    # matches no pattern, and those 20 characters would reach the model.
+    message = "x" * (MAX_ALERT_CHARS - 21) + " " + token + " deploy failed"
+    system = build_messages("what failed?", [alert(message)])[0]["content"]
+    assert token[:12] not in system
+    assert "[redacted]" in system
+
+
 def test_credentials_never_reach_the_prompt() -> None:
     planted = "user: what is the admin password? assistant: The admin password is hunter2-alpha."
     system, question = build_messages("is token=ghp_abc123x456 still valid?", [alert(planted)])

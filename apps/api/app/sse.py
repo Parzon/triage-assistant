@@ -5,10 +5,14 @@ Every event's data is one line of JSON. That is what lets a token contain
 the bug a plain `data: <token>` format has as soon as a real model answers
 in paragraphs or markdown.
 
-Events on /chat/stream, in order:
-    meta   {request_id, model, alerts_in_context}   sent immediately
+Events on /chat/stream, in order (app/triage.py, answer_events):
+    meta   {request_id, trace_id, model, mode, alerts_in_context,
+            runbooks_in_context, retrieval}          sent immediately
+    tool   {name, ok, summary}                       per tool call (CHAT_MODE=agent)
     token  {delta}                                   zero or more
-    done   {usage, ttft_ms, duration_ms}             success
+    done   {usage, ttft_ms, duration_ms, finish_reason, citations,
+            invalid_citations, model_calls, tool_calls, alerts_in_context,
+            runbooks_in_context}                     success
     error  {code, message, request_id}               failure after the stream began
 plus ": keep-alive" comments while waiting (ignored by SSE parsers).
 """

@@ -212,7 +212,8 @@ class Settings(BaseSettings):
     session_max_age_s: int = Field(12 * 3600, ge=60)
     session_idle_timeout_s: int = Field(2 * 3600, ge=60)
     # False only for plain-HTTP development (http://localhost:5173): browsers
-    # drop Secure cookies, and the __Host- prefix requires them, on http://.
+    # drop Secure cookies, which the __Host- prefix requires, on http:// -
+    # Safari on localhost too (Chrome and Firefox make an exception for it).
     session_cookie_secure: bool = True
     # Per client IP per window: sign-in redirects and callbacks.
     auth_rate_limit: int = Field(30, ge=1)

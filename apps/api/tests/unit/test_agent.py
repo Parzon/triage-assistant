@@ -5,6 +5,7 @@ tests/integration/test_agent.py."""
 import asyncio
 import copy
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from prometheus_client import REGISTRY
 
 from app import agent, tools
 from app.llm import Finish, Message, PromptRef, ToolCall, Usage
+from app.schemas import AlertOut
 from app.triage import Item, ToolEvent
 
 
@@ -63,9 +65,19 @@ def alerts_read(monkeypatch: pytest.MonkeyPatch) -> list[tools.ListAlertsArgs]:
     """list_alerts without a database: records its arguments."""
     seen: list[tools.ListAlertsArgs] = []
 
-    async def fake(args: tools.ListAlertsArgs, ctx: tools.ToolContext) -> tools.Result:
+    async def fake(args: tools.ListAlertsArgs, ctx: tools.ToolContext) -> list[AlertOut]:
         seen.append(args)
-        return tools.Result("- [critical] db-1 disk at 96%", True, "1 alerts")
+        created = datetime(2026, 9, 22, 18, 5, tzinfo=UTC)
+        return [
+            AlertOut(
+                id=7,
+                team="db",
+                severity="critical",
+                created_at=created,
+                source="prometheus",
+                message="db-1 disk at 96%",
+            )
+        ]
 
     monkeypatch.setattr(tools, "_list_alerts", fake)
     return seen
@@ -80,7 +92,7 @@ async def test_the_model_reads_through_a_tool_then_answers(
 ) -> None:
     llm = ScriptedLLM([call("list_alerts", '{"severity": "critical"}')])
     items = await run(llm)
-    assert ToolEvent("list_alerts", True, "1 alerts") in items
+    assert ToolEvent("list_alerts", True, "1 critical alerts") in items
     assert [i for i in items if isinstance(i, str)] == ["The answer."]
     assert alerts_read[0].severity == "critical"
     # The second call sees its own tool call, then the result under its id.
@@ -145,16 +157,22 @@ async def test_an_invented_tool_is_refused_and_counted_as_unknown() -> None:
     assert after == (before or 0) + 1
 
 
-async def test_a_slow_tool_times_out_and_the_model_is_told(
+async def test_a_slow_tool_times_out_and_is_left_to_finish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def hang(args: tools.ListAlertsArgs, ctx: tools.ToolContext) -> tools.Result:
-        await asyncio.sleep(10)
-        raise AssertionError("not reached")
+    finished = asyncio.Event()
 
-    monkeypatch.setattr(tools, "_list_alerts", hang)
+    async def slow(args: tools.ListAlertsArgs, ctx: tools.ToolContext) -> list[AlertOut]:
+        await asyncio.sleep(0.05)  # past the deadline below
+        finished.set()
+        return []
+
+    monkeypatch.setattr(tools, "_list_alerts", slow)
     monkeypatch.setattr(tools, "TIMEOUT_S", 0.01)
     llm = ScriptedLLM([call("list_alerts")])
     items = await run(llm)
     assert ToolEvent("list_alerts", False, "timed out") in items
     assert tool_messages(llm)[0].startswith("The tool timed out.")
+    # Not cancelled: a database call cancelled mid-query can hang for good
+    # and leak its connection (app/db.py). It ends on its own.
+    await asyncio.wait_for(finished.wait(), timeout=1)

@@ -338,7 +338,7 @@ services:
     # Valkey: the Linux Foundation fork of Redis 7.2, BSD-licensed (Redis
     # 7.4+ is RSALv2/SSPLv1; 8.x adds AGPLv3). Same protocol, same clients,
     # so the service keeps the protocol's name. See docs/adr/0002.
-    image: valkey/valkey:8.1-alpine
+    image: valkey/valkey:8.1.10-alpine
     # Rate-limit counters are disposable: no persistence, bounded memory, and
     # evict old keys instead of refusing writes when full.
     command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]

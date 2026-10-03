@@ -301,8 +301,12 @@ class Retrieval:
 # OR: websearch_to_tsquery would AND them, and a question rarely uses every
 # word of the section that answers it. ts_rank_cd then favours sections
 # covering more of them. Quoted lexemes cannot break the query syntax.
+# They are already stemmed, so the query reads them with 'simple', which
+# takes them as they are: 'english' would stem them again, and a word whose
+# stem stems further would never match its own section ("database" is
+# stored as databas and was searched as databa).
 _QUERY_TERMS = """
-    to_tsquery('english', coalesce(array_to_string(array(
+    to_tsquery('simple', coalesce(array_to_string(array(
         SELECT quote_literal(lexeme)
         FROM unnest(tsvector_to_array(to_tsvector('english', :query))) AS lexeme
     ), ' | '), ''))
