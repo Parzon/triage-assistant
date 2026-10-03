@@ -9,15 +9,26 @@ services, what would be split off first, and the signal that says when.
 apps/web  (React, built to static files, served by nginx)
     │  /api/*  (nginx strips /api)
     ▼
-apps/api  (one FastAPI app, 2,936 lines of Python)
+apps/api  (one FastAPI app)
     routes/auth.py      GET /auth/login, GET /auth/callback, POST /auth/logout, GET /me,
                         GET /teams/{slug}/members
     routes/alerts.py    POST /alerts, GET /alerts (keyset pages), GET /alerts/{id},
                         DELETE /alerts/{id}, POST /alerts/alertmanager (webhook, token)
-    routes/chat.py      POST /chat/stream (SSE)
+    routes/chat.py      POST /chat/stream (SSE): the pipeline, or the agent (CHAT_MODE)
+    routes/runbooks.py  POST/GET/DELETE /runbooks, POST /runbooks/search
+    routes/audit.py     GET /audit (org admins)
+    routes/assistant.py GET/PUT /assistant: the off switch (ADR-0024)
     routes/health.py    /health, /ready, /metrics
     triage.py           the prompt and the streaming loop (heartbeats, caps, cancellation)
     llm.py              the provider seam: any OpenAI-compatible API (ADR-0006)
+    runbooks.py         sections, embeddings, hybrid search in Postgres (ADR-0017)
+    redact.py           credentials out of everything a model is sent
+    agent.py, tools.py  the agent's bounded loop and its read-only tools (ADR-0020)
+    mcp_server.py       the same tools over MCP, for another assistant
+    audit.py            the append-only record of what the assistant read (ADR-0019)
+    switch.py           the off switch, one row in Postgres (ADR-0024)
+    privacy.py          retention, export and erasure (ADR-0025)
+    tracing.py          OpenTelemetry spans, no content by default (ADR-0018)
     oidc.py             the identity-provider seam: OIDC code flow, ID-token checks (ADR-0013)
     sessions.py         sessions in Postgres, the request's principal, the CSRF check
     access.py           roles and who may do what: no I/O, unit-tested alone
@@ -25,27 +36,34 @@ apps/api  (one FastAPI app, 2,936 lines of Python)
     ratelimit.py        per-user fixed windows in Valkey, fail-open (ADR-0004)
     db.py, models.py    SQLAlchemy async, PgBouncer in front (ADR-0005); the tenant
                         context in every transaction
-    cli.py              operator commands: a session for scripts, revoke a user
-    middleware.py, errors.py, logs.py, metrics.py   the cross-cutting parts
+    cli.py              operator commands: sessions for scripts, revoke, the off
+                        switch, retention, export, erasure, re-embedding
+    middleware.py, errors.py, logs.py, metrics.py, sse.py   the cross-cutting parts
 ```
 
 The data:
 ```
 teams ─┬─< memberships >── users ──< sessions         login_requests (a sign-in in progress)
-       └─< alerts
+       ├─< alerts
+       └─< runbooks ──< runbook_chunks (sections, with their vectors)
+audit_events (append-only)    assistant_switch (one row)
 ```
 - **teams:** created the first time a sign-in names them.
 - **memberships:** the user's role per team, replaced at every sign-in.
 - **users:** identified by `(issuer, subject)`.
 - **sessions:** the SHA-256 of each cookie's token.
-- **alerts:** each owned by one team, with row-level security: Postgres
+- **alerts, runbooks, runbook_chunks:** each owned by one team. Postgres
   shows the app role only the rows of the teams the transaction names
-  (ADR-0014).
+  (row-level security, ADR-0014); runbook search filters by team
+  explicitly as well ([RAG](rag.md)).
+- **audit_events:** insert-only for the app role; org admins read them.
 
 It's a **modular monolith**:
 - One process type, one deploy, one database.
 - The internal boundaries are visible:
-  - the AI-specific logic is two files (`triage.py`, `llm.py`);
+  - the AI-specific logic sits behind one seam (`llm.py`): the prompt and
+    stream in `triage.py`, retrieval in `runbooks.py`, the agent in
+    `agent.py` and `tools.py`;
   - identity is three: `oidc.py` speaks the protocol, `sessions.py`
     turns a cookie into a principal, `access.py` decides;
   - everything else is the standard scaffold every service here should
@@ -131,3 +149,16 @@ The ADRs in `docs/adr/`, one line each:
   server-side sessions); teams own alerts, with ranked roles.
 - **0014:** Postgres enforces team isolation (row-level security).
 - **0015:** rollbacks roll back the code, never the schema.
+- **0016:** evals gate prompt and model changes.
+- **0017:** runbook retrieval in Postgres, hybrid, under row-level
+  security.
+- **0018:** traces with OpenTelemetry; no content by default.
+- **0019:** an append-only audit trail of what the assistant reads.
+- **0020:** an agent mode beside the pipeline, and its tools over MCP.
+- **0021:** trim the template to what a project uses.
+- **0022:** scan images and commits; pin base images and scanners by
+  digest.
+- **0023:** production is safe by default and refuses unsafe settings.
+- **0024:** an off switch for the assistant.
+- **0025:** personal data: retention, export and erasure.
+- **0026:** report third-party image findings; bump base images weekly.

@@ -44,8 +44,8 @@ Before pytest runs:
 The test database runs with `fsync=off` and `synchronous_commit=off`.
 Durability is useless for throwaway data, and every commit skips the
 disk flush. Keycloak starts first and boots (~20 s) while the images
-build and the migrations run. The 199 tests take ~24 s; with the stack
-created and destroyed around them, `make test-api` takes ~40 s. `make
+build and the migrations run. The suite takes ~50 s; with the stack
+created and destroyed around it, `make test-api` takes ~70 s. `make
 test-fast` (unit tests only, no services) takes ~4 s.
 
 The api's settings are tuned for tests there: small rate limits (5 alert

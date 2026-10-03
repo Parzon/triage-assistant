@@ -312,10 +312,12 @@ The lessons, in general form:
   matters, move it out of the prompt.
 - **The prompt is not a security boundary.** It is public (this repo is),
   holds no secrets, and a leak shows only what the asker could already
-  read. The boundaries are architectural: the model has **no tools**,
-  and it sees **only the asker's alerts** (row-level security). An
-  injection can only change the text of one answer to someone who could
-  read the alerts anyway ([security](security.md)).
+  read. The boundaries are architectural: in the default pipeline the
+  model has **no tools** (agent mode gives it two read-only ones that act
+  as the asker: [agents](agents.md)), and it sees **only the asker's
+  alerts** (row-level security). An injection can only change the text of
+  one answer to someone who could read the alerts anyway
+  ([security](security.md)).
 - **What leaks is more than your prompt.** The leaked v6 answer began
   with gpt-oss's own system text ("You are ChatGPT, a large language model
   trained by OpenAI", a knowledge cutoff, the date, "Reasoning: low"),
@@ -349,7 +351,11 @@ nobody sees:
   counted as outcome `truncated`, and the UI says so.
 - **Only send what the model supports.** `LLM_REASONING_EFFORT` is sent
   only when set: models without reasoning reject the parameter with
-  HTTP 400. OpenAI's reasoning models reject any temperature but 1.
+  HTTP 400. OpenAI's reasoning models reject any temperature but 1, and
+  `max_tokens`: they take `max_completion_tokens` (the SDK documents
+  `max_tokens` as "not compatible with o-series models"). The client
+  sends `max_tokens`, which every other compatible server accepts
+  (ADR-0006): pointing it at an o-series model needs that one change.
 
 ## A real model on your machine ✅
 
@@ -433,10 +439,10 @@ non-engineers need to curate cases.
 
 | Risk | Here |
 |---|---|
-| LLM01 Prompt injection | Injection cases (safety, gated). **No tools**, so injection can only change text. |
+| LLM01 Prompt injection | Injection cases (safety, gated). **No tools** in the pipeline; agent mode's two are read-only and act as the asker. Either way, injection can only change text. |
 | LLM02 Sensitive information disclosure | Never repeat credentials (`injection-fake-conversation`). The context holds only the asker's alerts (isolation cases, row-level security). |
 | LLM05 Improper output handling | Answers rendered as text, never HTML. |
-| LLM06 Excessive agency | No tools. If actions are added, a human confirms each one. |
+| LLM06 Excessive agency | No tools in the pipeline; in agent mode, two read-only tools, a step limit and an audit event per call ([agents](agents.md)). If actions are added, a human confirms each one. |
 | LLM07 System prompt leakage | The prompt holds no secrets. Leaks are measured (5 in 200 → 0 in 200). |
 | LLM09 Misinformation | Grounding and refusal cases; the judge. |
 | LLM10 Unbounded consumption | Rate limits, `LLM_MAX_OUTPUT_TOKENS`, the stream time cap, the cost panel. |
@@ -448,8 +454,9 @@ non-engineers need to curate cases.
   allows.
 - **Red teaming at scale:** generated attacks (garak, PyRIT, promptfoo's
   red team) beyond the hand-written injection cases.
-- **Tracing each model call** with the OpenTelemetry GenAI conventions,
-  or Langfuse or Phoenix. Today it is metrics, plus a log line per answer.
+- **An LLM-observability product** (Langfuse, Phoenix) over the traces:
+  today each model call is an OpenTelemetry span, viewed in Jaeger
+  ([AI observability](ai-observability.md)).
 - **Quality evals in CI:** they need a model, which means a GPU runner or
   a provider key and a budget. Run them on demand, or nightly against a
   staging model.

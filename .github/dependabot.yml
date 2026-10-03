@@ -21,6 +21,15 @@ updates:
     groups:
       api-minor-and-patch: {update-types: [minor, patch]}
 
+  # The other Python projects: the CDK app and the mock model server.
+  - package-ecosystem: uv
+    directories:
+      - /infra/aws
+      - /tools/mock-llm
+    schedule: {interval: monthly}
+    groups:
+      tools-minor-and-patch: {update-types: [minor, patch]}
+
   - package-ecosystem: npm
     directory: /apps/web
     schedule: {interval: monthly}

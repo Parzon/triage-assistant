@@ -4,9 +4,11 @@ name: Release
 # TLS edge) to GitHub's container registry, for linux/amd64 and linux/arm64
 # (Apple Silicon, AWS Graviton) under one tag:
 #   git tag -a v1.4.0 -m "v1.4.0" && git push origin v1.4.0
-#   -> ghcr.io/<owner>/triage-assistant-api:1.4.0, :1.4, :sha-<commit>
+#   -> ghcr.io/<owner>/triage-assistant-api:1.4.0, :1.4, :sha-<commit>, :latest
 #      ghcr.io/<owner>/triage-assistant-web:  the same tags
 #      ghcr.io/<owner>/triage-assistant-edge: the same tags
+# :latest (docker/metadata-action's default) moves with every release, before
+# the smoke test below: deploy by version, never by latest.
 # Then it pulls what it published, on both architectures, and runs the
 # stack from those images before writing the release notes. A host deploys
 # it with `make deploy tag=1.4.0` (docs/runbooks/demo-vm.md).

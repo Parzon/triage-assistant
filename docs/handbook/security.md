@@ -405,7 +405,7 @@ this checklist is now refused by code (ADR-0023, ADR-0022):
 | plain HTTP, or cookies without `Secure` | `insecure_cookies` |
 | the mock model, or its embeddings | `mock_model` |
 | the bundled Keycloak and its demo users | `demo_identity_provider` |
-| a secret left at `.env.example`'s value | `example_secret`; `make setup` and `make .env` generate every one |
+| a secret left at `.env.example`'s value | `example_secret` for the api's own; `make prod-up` and `make deploy` refuse the rest (the database owner's, Grafana's, Keycloak's), which the api never sees; `make .env` generates every one |
 | questions and answers on traces | `trace_content` |
 | the API docs advertised | off by default in production |
 | an unlimited chat when Valkey is down | the chat's limiter fails closed in production |
@@ -429,5 +429,8 @@ What code cannot check stays a checklist 📘:
       ([privacy](../privacy.md))
 - [ ] Backups encrypted, stored off the host, and one restore rehearsed
 - [ ] Someone paged when an alert fires: Alertmanager routes to the app only
+- [ ] Shell access to the host limited like org-admin rights: `make session`
+      signs anyone in, `org:admin` included, without the identity provider
+      and without an audit event
 - [ ] A penetration test before the service is reachable from the internet
 - [ ] A security contact and a way to report issues (`SECURITY.md`)

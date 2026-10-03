@@ -42,6 +42,9 @@ jobs:
       - name: Shell scripts (deploy, restore, drills)
         working-directory: .
         run: make shellcheck
+      - name: Every setting reaches the api from .env (scripts/check_settings.py)
+        working-directory: .
+        run: python3 scripts/check_settings.py
 
   test-api:
     runs-on: ubuntu-24.04
@@ -121,7 +124,7 @@ jobs:
       # (nginx, gunicorn, read-only containers), with the mock LLM.
       - run: make .env
       - run: make prod-up
-      - name: Browser tests through nginx
+      - name: Browser tests through the TLS edge and nginx
         run: make e2e
       - name: Stack logs
         if: failure()
