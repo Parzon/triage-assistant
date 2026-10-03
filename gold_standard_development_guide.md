@@ -112,7 +112,7 @@ Makefile         every command; `make` lists the first weeks', `make help-all` a
    http://localhost:5173, sign in as `alice` (password: `DEMO_USER_PASSWORD`
    in `.env`), and ask the assistant about an alert. `bob`, `carol` (org
    admin) and `dave` (in no team) show the other roles.
-5. `make check`: lint, types, all tests, as CI runs them (~40 s).
+5. `make check`: lint, types, all tests, as CI runs them (the api suite alone ~70 s).
 6. Pick an issue. `git switch -c fix/<issue>-<what>`. Change code with hot
    reload running. Add tests for the success and the failure paths.
 7. `make prod-up && make e2e` if you touched anything a browser or nginx
@@ -322,12 +322,17 @@ something bites.
   no `/auth` route. Ask compose (`config --images`), and fail when the
   answer is empty.
 - **A value compose does not list never reaches the container.** 22 of
-  the api's settings could not be changed from `.env`: `make lint` now
-  checks every setting is listed.
+  the api's settings could not be changed from `.env`: `make lint` and CI
+  now check every setting is listed.
 - **A rollback ran the old image's migrations**, and old Alembic has never
   heard of the new revision: "Can't locate revision". The deploy failed
   safely, but rolling back was impossible across any migration. Now a
-  database ahead of the image means a code-only rollback (ADR-0015).
+  database ahead of the image means a code-only rollback (ADR-0015). Only
+  that message means "ahead": `deploy.sh` once read any failure (Docker
+  down) as a rollback, and skipped the migration.
+- **A missing image with a build section gets built, not pulled**:
+  `compose run` built the checkout and named it as the release.
+  `make deploy` and `make prod-up` now refuse.
 - **`COPY` records file times, and every CI checkout gets new ones**: a
   rebuilt edge never had the same layers, so every release replaced it
   (~2 s refused). CI stamps the image with a hash of its inputs, and the
@@ -384,9 +389,13 @@ something bites.
   was global. nginx overwrites `X-Forwarded-For`; gunicorn trusts it only
   from nginx.
 - **Appending to `X-Forwarded-For` lets clients forge their IP**:
-  overwrite it at the edge.
+  overwrite it at the edge. A cloud load balancer appends: behind one,
+  trust only its addresses. With `FORWARDED_ALLOW_IPS=*` the client's own
+  left-most entry became its address, and its sign-in rate limit's key
+  (the AWS stack, fixed: 36 forged addresses, 6 refused).
 - **The side that closes idle keep-alive connections must be the
-  proxy**: nginx 60 s < gunicorn 75 s.
+  proxy**: nginx 60 s < gunicorn 75 s, and one hop out, Caddy 120 s and
+  an ALB 130 s < nginx and the api 140 s (they were 65 s and 75 s).
 - **nginx doesn't retry a POST on a reset keep-alive connection**: that's
   a 502. Worker recycling caused bursts of them.
 - **A request on an existing keep-alive connection to a vanished
@@ -470,8 +479,10 @@ something bites.
   (`statement_timeout`).
 - **asyncpg's `command_timeout`, or cancelling its task, sends a cancel
   and then waits for the acknowledgement forever** if the connection dies
-  first: 13 of 40 pool connections leaked. No client-side query timeout.
-  (ADR-0010)
+  first: 13 of 40 pool connections leaked. No client-side query timeout,
+  and no `asyncio.timeout` around a database call: the agent's tools had
+  one, and a call past it hung over 90 s. Stop waiting instead; let the
+  call finish on its own. (ADR-0010)
 - **SQLAlchemy's checkout event fires only after the pre-ping
   succeeds**: a gauge built on it missed stuck requests. Sample
   `pool.checkedout()`.
@@ -505,6 +516,12 @@ something bites.
   req/s.
 - **A DDL statement waiting on a lock makes every later query on the
   table wait behind it**: `lock_timeout` on migrations.
+- **Two migration runs at once: one fails** (ECS starts tasks together,
+  each migrating). An advisory lock fixes it, but not a transaction one
+  (a `CONCURRENTLY` migration commits midway and releases it) and not a
+  blocking session one (`CREATE INDEX CONCURRENTLY` waits for the
+  waiter's snapshot: deadlock). A session lock on its own connection,
+  polled.
 - **`CREATE INDEX` blocks writes for the whole build**: use
   `CONCURRENTLY`, outside a transaction.
 - **Alembic's autogenerate writes a rename as drop plus add** (data
@@ -528,6 +545,9 @@ something bites.
 - **Keycloak publishes an encryption key in the same key set**
   (`use: enc`, RSA-OAEP), which PyJWT cannot load. Keep `use: sig` keys
   only.
+- **The first sign-in after boot failed with "unknown key"**: "never
+  fetched" was time 0, and `time.monotonic()` counts from boot, so a new
+  container read it as "fetched just now". Never is `-inf`.
 - **A cached provider hides its own outage**: sign-in redirects came from
   cached metadata, so no request failed while the provider was down. A
   30 s check, `/ready` and an alert (`IdentityProviderDown`).
@@ -607,8 +627,8 @@ something bites.
 - **Model output is untrusted**: render it as text, never HTML.
   ([security](docs/handbook/security.md))
 - **Alert text reaches the prompt, so anyone who can send an alert can
-  attempt prompt injection.** There are no tools, so the worst case is a
-  wrong answer.
+  attempt prompt injection.** The pipeline has no tools, and agent mode's
+  two read as the asker, so the worst case is a wrong answer.
 
 ### The model, the prompt and evals
 All measured with gpt-oss:20b and gemma3:27b; the evidence is in
@@ -658,6 +678,8 @@ The evidence is in [AI security](docs/handbook/ai-security.md).
 - **`\bpassword` never matches `DB_PASSWORD`**: `_` is a word character.
   The first redactor caught 17 of 54 secrets in real log shapes. Match
   names that *end* with the word, and leave `max_tokens` alone.
+- **Redact, then cut to length**: a token cut at the 300-character limit
+  matched no pattern, and 19 of its characters reached the model.
 - **Score patterns on a held-out set.** Written against a set, they score
   well on it by construction: 54 of 54 on the tuning set, 21 of 24 on
   shapes written first and not used to tune.
@@ -717,6 +739,10 @@ Measured with nomic-embed-text and gpt-oss:20b; the evidence is in
 - **`websearch_to_tsquery` requires every word.** A question rarely uses
   every word of its answer: OR the question's own lexemes, and let the
   ranking sort them.
+- **Stem once.** The question's lexemes are already stems; read back
+  through `to_tsquery('english')` they were stemmed again ("database":
+  `databas` -> `databa`) and 8 of 60 on-call words never matched. Use
+  `'simple'`: keyword recall@1 0.63 -> 0.68.
 - **Postgres full-text ranking is not BM25.** `ts_rank` and `ts_rank_cd`
   ignore how rare a word is: a word in 1 of 101 documents scored the same
   as one in 100 of them.
@@ -849,6 +875,14 @@ Measured building the traces; the evidence is in
   ([VM runbook](docs/runbooks/demo-vm.md))
 - **Replacing the only nginx refuses connections for ~0.3 s**; only a
   load balancer removes that.
+- **Behind a load balancer the drain starts there**: ECS deregisters the
+  task, the ALB waits the deregistration delay and then drops what is in
+  flight, and only then sends SIGTERM. At 30 s, 3 of 4 ninety-second
+  answers were cut; at 130 s (the longest stream), none.
+- **A comment or a doc that states a rule is a claim**: a review found
+  the template breaking its own (keep-alive order, one worker per CPU,
+  "only nginx is published", "the security job blocks the merge"). Test
+  them like code.
 - **A backup on the same disk dies with it, and an untested restore is a
   hope**: copy dumps off the host, and rehearse a restore on a clean
   host.
