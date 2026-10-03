@@ -465,8 +465,9 @@ class AppStack(Stack):
                 vpc_subnets=public,
                 security_groups=[sg],
                 min_healthy_percent=100,  # start a new task before stopping an old one
-                # 150% of 2 = one extra task at a time: new api tasks start one after another,
-                # so their migrate init containers never race each other.
+                # 150% of 2 = one extra task at a time during a deploy. Tasks still start together
+                # (the first deploy, a scale-out): their migrate init containers then take turns on
+                # an advisory lock (apps/api/migrations/env.py).
                 max_healthy_percent=150,
                 circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
                 health_check_grace_period=Duration.seconds(120),
