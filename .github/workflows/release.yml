@@ -42,7 +42,15 @@ jobs:
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
+    outputs:
+      ecr: ${{ steps.ecr.outputs.ecr }}
     steps:
+      # Whether to copy the release into ECR (the `ecr` job): a job's `if` cannot read
+      # secrets, so this step does.
+      - id: ecr
+        env:
+          CONFIGURED: ${{ secrets.AWS_ECR_ROLE_ARN != '' }}
+        run: echo "ecr=$CONFIGURED" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -180,10 +188,11 @@ jobs:
 
   # Copies the published release into ECR, for the AWS deployment. AWS trusts
   # this workflow's OIDC token (role triage-gha-ecr-push, tags v* only), so no
-  # AWS key is stored in GitHub. Off until the repository variable is set.
+  # AWS key is stored in GitHub. Off until the repository secret AWS_ECR_ROLE_ARN is set: a
+  # secret, because the ARN names the AWS account and only secrets are masked in public logs.
   ecr:
-    needs: merge
-    if: github.event_name == 'push' && vars.AWS_ECR_ROLE_ARN != ''
+    needs: [verify, merge]
+    if: github.event_name == 'push' && needs.verify.outputs.ecr == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -194,8 +203,10 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ECR_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
           aws-region: ap-south-1
+          # The registry's address is the account id: masked in the lines that print it.
+          mask-aws-account-id: true
       - id: ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

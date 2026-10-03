@@ -12,8 +12,8 @@
 # - a `deploy` user that runs the stack. Membership of the docker group is
 #   root-equivalent: treat that SSH key like root's.
 # - firewall: only 22, 80, 443 in. Docker's published ports bypass ufw
-#   (DNAT happens before ufw's rules): compose.prod.yaml publishes only
-#   nginx, and the dashboards on 127.0.0.1.
+#   (DNAT happens before ufw's rules): compose.prod.yaml publishes only the
+#   TLS edge, and nginx and the dashboards on 127.0.0.1.
 # - Docker daemon defaults: log rotation for any container, live-restore
 #   (containers keep running while dockerd itself restarts or upgrades)
 # - automatic security updates
@@ -95,14 +95,11 @@ runcmd:
   - ufw --force enable
   - install -d -o deploy -g deploy /srv/triage-assistant
   - sudo -u deploy git clone https://github.com/Parzon/triage-assistant.git /srv/triage-assistant
-  # Real secrets instead of the template's placeholders; the LLM key stays
-  # for the operator to set (or keep COMPOSE_PROFILES=mock for a demo
-  # without a provider). The demo users' password is generated too: read it
-  # from .env to sign in.
-  - >-
-    sudo -u deploy sh -c 'cd /srv/triage-assistant && cp .env.example .env && chmod 600 .env &&
-    for v in POSTGRES_PASSWORD APP_DB_PASSWORD MONITOR_DB_PASSWORD GRAFANA_ADMIN_PASSWORD ALERTMANAGER_WEBHOOK_TOKEN
-    OIDC_CLIENT_SECRET KEYCLOAK_ADMIN_PASSWORD DEMO_USER_PASSWORD;
-    do sed -i "s|^$v=.*|$v=$(openssl rand -hex 24)|" .env; done'
+  # Real secrets instead of the template's placeholders: make .env generates
+  # every change-me value, including any the template adds later (a list
+  # kept here would miss them). The LLM key stays for the operator to set
+  # (or keep COMPOSE_PROFILES=mock for a demo without a provider). The demo
+  # users' password is generated too: read it from .env to sign in.
+  - sudo -u deploy make -C /srv/triage-assistant .env
 
 final_message: "triage-assistant host ready after $UPTIME s. Next: docs/runbooks/demo-vm.md, step 3."
