@@ -17,7 +17,7 @@ is a thin wrapper, so read the recipe in the Makefile to see the real
 | query the database | `make psql` |
 | lint, format, types | `make lint`, `make fmt`, `make typecheck` |
 | all tests as CI runs them | `make test`; unit only: `make test-fast` |
-| everything CI checks, before a push | `make check` |
+| lint, types and tests, before a push | `make check` |
 | the production-shaped stack | `make prod-up` (HTTPS on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`) |
 | start from an empty database | `make nuke && make up` (deletes the dev volume) |
 | sample data | `make seed n=10000` |
@@ -321,7 +321,9 @@ until it did, 22 of them could not be set from `.env`.
 | `TRACE_CONTENT` | false | questions, prompts and answers on spans, redacted: development only (production refuses it) |
 | `TRACE_EXPORT_TIMEOUT_S` | 2 | one export's budget; bounds a worker's shutdown when the trace backend is down. Seconds, unlike the spec's `OTEL_EXPORTER_OTLP_TIMEOUT` |
 
-**gunicorn** (`apps/api/gunicorn.conf.py`, production image only):
+**gunicorn** (`apps/api/gunicorn.conf.py`, production image only). Not
+from `.env`: compose passes none of these to the api, so they are set where
+the container is defined (`compose.prod.yaml`, a task definition):
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -330,7 +332,7 @@ until it did, 22 of them could not be set from `.env`.
 | `GUNICORN_GRACEFUL_TIMEOUT` | 120 | time to finish in-flight requests on stop; `stop_grace_period` must be above it |
 | `GUNICORN_KEEPALIVE` | 75 | above nginx's upstream keep-alive (60 s): the proxy must close idle connections first |
 | `GUNICORN_MAX_REQUESTS` (`_JITTER`) | 0 | worker recycling: off, it caused 502 bursts (ADR-0009) |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | whose `X-Forwarded-For` to trust; prod sets `*` because only nginx can reach the api |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | whose `X-Forwarded-For` to trust. `compose.prod.yaml` sets `*`: requests from outside reach the api only through nginx, which overwrites the header. Behind a proxy that appends to it (a cloud load balancer), list the proxy's addresses: with `*`, the client's own entry becomes its address |
 | `GUNICORN_CONTROL_SOCKET` | `/tmp/gunicorn.ctl` | for `make gunicorn` |
 | `PROMETHEUS_MULTIPROC_DIR` | `/tmp/prometheus` (image) | must exist before start; never set to `""` |
 

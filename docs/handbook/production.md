@@ -382,17 +382,17 @@ Azure and GCP have the same shapes.
 
 | Here | AWS | Azure | GCP | What changes in this repo |
 |---|---|---|---|---|
-| api container (gunicorn) | ECS on Fargate (or EKS) | Container Apps / AKS | Cloud Run / GKE | `IMAGE_PREFIX` → the cloud registry. One task per 1–2 vCPU with `WEB_CONCURRENCY` = the task's vCPUs. The read-only root filesystem needs a writable `/tmp` volume (metrics files, the control socket) |
+| api container (gunicorn) | ECS on Fargate (or EKS) | Container Apps / AKS | Cloud Run / GKE | `IMAGE_PREFIX` → the cloud registry. One worker per vCPU, rounded up (`WEB_CONCURRENCY`; a 0.5-vCPU task runs one), and scale with tasks. The read-only root filesystem needs a writable `/tmp` volume (metrics files, the control socket) |
 | the TLS edge (Caddy) + nginx (web) | ALB for TLS and routing (edge profile off); static files on S3 + CloudFront, or keep the nginx container | Application Gateway / Front Door | HTTPS LB + Cloud CDN | drop `edge` from `COMPOSE_PROFILES` and publish nginx; the SSE rules (no buffering, idle timeout > 15 s) move to the load balancer and CDN config |
 | Postgres | RDS or Aurora PostgreSQL, Multi-AZ | Azure Database for PostgreSQL (flexible) | Cloud SQL | `DATABASE_URL`, `MIGRATIONS_DATABASE_URL`; the roles script (`infra/postgres/initdb`) run once as a migration or by hand; backups become the service's snapshots plus point-in-time recovery |
 | PgBouncer | RDS Proxy, or keep PgBouncer as a sidecar | PgBouncer built into the flexible server | a sidecar | RDS Proxy "pins" sessions that use session state (the app uses none: transaction-scoped only). Re-run the database drills against whichever you choose |
 | Valkey | ElastiCache for Valkey | Azure Cache for Redis | Memorystore for Valkey | `REDIS_URL` (TLS: `rediss://`) |
 | mock LLM | the real provider (or Bedrock / Azure OpenAI / Vertex, all OpenAI-compatible or behind a gateway) | | | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
 | the bundled Keycloak | the organisation's identity provider (IAM Identity Center, Cognito, or the corporate Entra ID / Okta) | Entra ID | Cloud Identity / an IdP federated in | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_GROUPS_CLAIM`; `idp` out of `COMPOSE_PROFILES` ([security](security.md), "Connecting your organisation's provider") |
-| `migrate` service | a one-off task run before the service update (in the deploy pipeline) | a Container Apps job | a Cloud Run job | nothing: it's already a separate command |
+| `migrate` service | a one-off task run before the service update (in the deploy pipeline) | a Container Apps job | a Cloud Run job | nothing: it's already a separate command. `infra/aws` runs it as an init container in every api task instead; an advisory lock makes tasks that start together take turns (`migrations/env.py`) |
 | Prometheus / Grafana / Alertmanager | Amazon Managed Prometheus + Managed Grafana, or CloudWatch | Azure Monitor managed Prometheus + Grafana | Managed Service for Prometheus | scrape via service discovery; cAdvisor and node-exporter give way to the platform's container metrics |
 | `.env` | Secrets Manager / SSM Parameter Store | Key Vault | Secret Manager | nothing in the code: they arrive as environment variables |
-| `make deploy` | ECS rolling deployment with the deployment circuit breaker; health check on `/ready` | revisions | revisions | `/ready` is the target-group health check; `/health` is the liveness check |
+| `make deploy` | ECS rolling deployment with the deployment circuit breaker; target-group health check on `/health` | revisions | revisions | ECS replaces every task its load balancer calls unhealthy, so the target group checks `/health`: on `/ready`, a database outage turned into task churn (measured, `infra/aws/README.md`). Kubernetes has both probes: readiness `/ready`, liveness `/health` |
 | the retention job and backups (cron) | a scheduled task (EventBridge Scheduler → ECS task) | a Container Apps job on a schedule | Cloud Scheduler → a Cloud Run job | nothing: they are commands already (`python -m app.cli retention --apply`) |
 
 What stays true on any platform: the health endpoints' split (liveness

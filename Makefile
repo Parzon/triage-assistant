@@ -107,8 +107,8 @@ obs-down: ## Stop the observability containers (dev stack keeps running; traces 
 
 OBS := $(CURDIR)/infra/observability
 obs-check: ## Validate Prometheus config, unit-test alert rules, validate Alertmanager and Jaeger configs
-	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/etc/prometheus:ro" prom/prometheus:v3.14.0 check config /etc/prometheus/prometheus.yml
-	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/p:ro" -w /p prom/prometheus:v3.14.0 test rules alerts.test.yml
+	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/etc/prometheus:ro" prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
+	docker run --rm --entrypoint promtool -v "$(OBS)/prometheus:/p:ro" -w /p prom/prometheus:v3.15.0 test rules alerts.test.yml
 	docker run --rm --entrypoint amtool -v "$(OBS)/alertmanager:/c:ro" prom/alertmanager:v0.34.1 check-config /c/alertmanager.yml
 	docker run --rm -v "$(OBS)/jaeger:/etc/jaeger:ro" jaegertracing/jaeger:2.21.0 validate --config /etc/jaeger/config.yaml
 	@python3 -c 'import json, glob; [json.load(open(f)) for f in glob.glob("$(OBS)/grafana/dashboards/*.json")]; print("dashboards: valid JSON")'
@@ -248,7 +248,7 @@ e2e: ## Browser tests (Playwright) through the TLS edge of the running productio
 	  -v "$(CURDIR)/tests/e2e:/e2e" -w /e2e mcr.microsoft.com/playwright:v1.63.0-noble \
 	  sh -c 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test'
 
-check: lint typecheck test ## Everything CI checks, before you push
+check: lint typecheck test ## Lint, types and tests before you push (CI also runs obs-check, image-check, the scans and e2e)
 
 # The production api image, checked the way CI checks it (CI calls this target).
 IMG := triage-assistant-api:check

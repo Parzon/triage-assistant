@@ -79,7 +79,7 @@ It leaves alone:
 - `app/triage.py`, which you rewrite anyway.
 
 Tested on a fresh clone, with the longest name the script accepts (40
-characters): `make setup`, `make check` (229 api and 49 web tests) and
+characters): `make setup`, `make check` (every api and web test) and
 `make obs-check` all pass. The first run failed lint: even a
 13-character name pushed the cookie-name line in `app/sessions.py`
 past 100 characters. The names now come from one constant, and the

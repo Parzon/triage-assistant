@@ -11,7 +11,7 @@ Closes #
 
 ## Checklist
 
-- [ ] `make check` passes locally (the same checks CI runs)
+- [ ] `make check` passes locally (lint, types, tests; CI adds the scans, image checks and e2e)
 - [ ] Tests cover the failure paths, not only the happy path (dependency down / hung, invalid input, forbidden)
 - [ ] Browser- or nginx-visible change: `make prod-up && make e2e`
 - [ ] Database path, pools or timeouts touched: the database drills (`make drills d="db-freeze db-hang pgbouncer-freeze"`)
