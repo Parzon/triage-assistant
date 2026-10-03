@@ -229,8 +229,6 @@ test-web: ## web unit/component tests + coverage gate (vitest)
 test-fast: ## api unit tests only: no database, seconds
 	$(DEV) run --rm --no-deps $(AS_ME) api pytest tests/unit -q
 
-# The browser joins the production stack's network: it reaches the site as
-# http://web:8080 and can drive the mock LLM's admin API.
 # The browser runs on the host network and opens https://localhost:<edge
 # port>, like a user: through the TLS edge, nginx, the api. The edge's local
 # CA is not in the browser's trust store, so certificate errors are ignored
@@ -425,6 +423,10 @@ prod-up: ## Build and start the production stack; returns when it is healthy (HT
 	  echo "this host runs released images ($$prefix): deploy with make deploy tag=X.Y.Z"; \
 	  echo "to run this checkout instead: IMAGE_PREFIX=triage-assistant IMAGE_TAG=local make prod-up"; \
 	  exit 2;; esac
+	@# The api refuses the template's secrets (ADR-0023), but only those it
+	@# receives; the database owner's, Grafana's and Keycloak's are checked here.
+	@if grep -qE '^[A-Z0-9_]+=change-me' .env 2>/dev/null; then \
+	  echo ".env still holds the template's secrets (change-me...): make .env generates them"; exit 2; fi
 	$(PROD) up -d --build --wait --wait-timeout 300
 
 deploy: ## Roll a release onto this host without refusing requests: make deploy tag=1.4.0 (PULL=0: local images)

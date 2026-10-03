@@ -50,7 +50,10 @@ class Vector(UserDefinedType[list[float]]):
 
 
 def to_text(values: Sequence[float]) -> str:
-    """pgvector stores float32: 7 significant digits lose nothing."""
+    """pgvector stores float32. 7 significant digits are close, not exact:
+    measured on embedding-sized values, two in three land up to 7 float32
+    steps away (a relative change under 1e-6), far below what cosine ranking
+    can see. An exact form would double the text sent per vector."""
     return "[" + ",".join(f"{v:.7g}" for v in values) + "]"
 
 

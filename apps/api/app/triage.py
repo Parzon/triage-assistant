@@ -113,10 +113,12 @@ Source = Callable[[Emit], Awaitable[None]]
 
 
 def alert_line(alert: AlertOut, clean: Callable[[str], str]) -> str:
-    """One alert as the model reads it: as the API shows it, cut short."""
+    """One alert as the model reads it: as the API shows it, cut short.
+    Redacted first, then cut: a cut through a credential would leave a part
+    no pattern recognises, and that part would reach the model."""
     return (
         f"- [{alert.severity}] {alert.created_at:%Y-%m-%d %H:%M}Z team={alert.team} "
-        f"{alert.source}: {clean(alert.message[:MAX_ALERT_CHARS])}"
+        f"{alert.source}: {clean(alert.message)[:MAX_ALERT_CHARS]}"
     )
 
 

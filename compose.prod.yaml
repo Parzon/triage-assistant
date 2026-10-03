@@ -1,5 +1,6 @@
 # Production shape: images from the `production` Dockerfile targets, no
-# source mounts, only nginx published, least privilege everywhere.
+# source mounts, only the TLS edge published (nginx on loopback), least
+# privilege everywhere.
 #   docker compose -f compose.yaml -f compose.prod.yaml up -d
 # (`make prod-up` runs this under the project name triage-assistant-prod so
 # it can sit next to a dev stack with separate volumes.)
@@ -13,8 +14,11 @@ services:
       # Worker count follows the CPU limit below (gunicorn.conf.py). To pin
       # it, add WEB_CONCURRENCY: "<n>" - never an empty value: gunicorn
       # parses WEB_CONCURRENCY at import time and crashes on "".
-      # Only nginx can reach the api (it publishes no ports), and nginx
-      # overwrites X-Forwarded-For, so trusting any peer here is safe.
+      # The api publishes no ports: requests from outside reach it only
+      # through nginx, which overwrites X-Forwarded-For, so trusting any peer
+      # here is safe. Not behind a proxy that appends to the header (a cloud
+      # load balancer): with "*" the left-most entry, which the client wrote,
+      # becomes its address. List the proxies' addresses there (infra/aws).
       FORWARDED_ALLOW_IPS: "*"
     read_only: true
     tmpfs:

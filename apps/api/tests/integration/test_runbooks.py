@@ -127,6 +127,16 @@ async def test_search_finds_the_right_section_among_the_askers_teams_only(
     assert other.status_code == 404
 
 
+async def test_keyword_search_finds_a_word_whose_stem_stems_again(sign_in_as: SignIn) -> None:
+    # Indexed, "database" is databas; stemmed a second time in the query it
+    # was databa, and matched nothing. So were release, response, license.
+    admin = await sign_in_as("team:payments:admin")
+    await save(admin, "payments", "Disk full")  # "Steps for a database host..."
+    for query in ("database", "databases"):
+        found = await admin.post("/runbooks/search", json={"query": query, "mode": "keyword"})
+        assert [hit["heading"] for hit in found.json()["hits"]] == ["Disk full"], query
+
+
 async def test_an_org_admin_searches_every_team(sign_in_as: SignIn) -> None:
     admin = await sign_in_as("team:payments:admin", "team:platform:admin")
     await save(admin, "payments", "Disk full")
