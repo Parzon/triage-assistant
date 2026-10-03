@@ -61,6 +61,7 @@ from aws_cdk import (
     aws_secretsmanager as sm,
 )
 from constructs import Construct
+from network import VPC_CIDR
 
 HERE = Path(__file__).parent
 REPO = HERE.parents[1]  # the repository root: the mock LLM is built from it, it is not released
@@ -92,6 +93,8 @@ def generated_secret(scope: Construct, cid: str, username: str | None = None) ->
             exclude_punctuation=True,
             password_length=32,
         ),
+        # Throwaway account: deleted with the stack. production: RETAIN (a destroyed secret
+        # cannot be read back, and the database it opens may outlive the stack).
         removal_policy=RemovalPolicy.DESTROY,
     )
 
@@ -160,8 +163,8 @@ class AppStack(Stack):
             storage_type=rds.StorageType.GP2,
             storage_encrypted=True,
             multi_az=False,  # production: True (a standby in the other AZ, ~2x the price)
-            backup_retention=Duration.days(1),
-            delete_automated_backups=True,
+            backup_retention=Duration.days(1),  # production: 7-35 days, and a restore rehearsed
+            delete_automated_backups=True,  # production: False
             deletion_protection=False,  # production: True
             removal_policy=RemovalPolicy.DESTROY,  # production: SNAPSHOT
         )
@@ -187,6 +190,7 @@ class AppStack(Stack):
             security_group=alb_sg,
             idle_timeout=Duration.seconds(130),  # > the api's 120 s chat stream
         )
+        # production: no WAF here; attach AWS WAF (rate-based and managed rules) to the ALB.
         public_url = f"http://{alb.load_balancer_dns_name}"
 
         def log_group(name: str) -> logs.LogGroup:
@@ -194,8 +198,8 @@ class AppStack(Stack):
                 self,
                 f"{name.title()}Logs",
                 log_group_name=f"/triage/{name}",
-                retention=logs.RetentionDays.THREE_DAYS,
-                removal_policy=RemovalPolicy.DESTROY,
+                retention=logs.RetentionDays.THREE_DAYS,  # production: what incidents need
+                removal_policy=RemovalPolicy.DESTROY,  # production: RETAIN
             )
 
         api_logs, web_logs = log_group("api"), log_group("web")
@@ -260,7 +264,9 @@ class AppStack(Stack):
             redis_url = "redis://localhost:6379/0"
             valkey = api_def.add_container(
                 "valkey",
-                image=ecs.ContainerImage.from_registry("public.ecr.aws/valkey/valkey:8.1-alpine"),
+                image=ecs.ContainerImage.from_registry(
+                    "public.ecr.aws/valkey/valkey:8.1.10-alpine"
+                ),
                 command=[
                     "valkey-server",
                     "--save",
@@ -281,7 +287,8 @@ class AppStack(Stack):
                 logging=to(api_logs, "valkey"),
             )
         else:
-            # One Valkey for every task: rate limits and sessions are counted once, globally.
+            # One Valkey for every task: rate limits are counted once, globally (sessions live in
+            # Postgres).
             # TLS in transit (rediss://), encrypted at rest, reachable only from the api's SG.
             # Production: a replica in the other AZ with automatic failover, and an AUTH user.
             subnets = elasticache.CfnSubnetGroup(
@@ -295,7 +302,7 @@ class AppStack(Stack):
                 "Cache",
                 replication_group_description="triage rate limits and cache",
                 engine="valkey",
-                engine_version="8.1",  # the version compose runs (valkey:8.1-alpine)
+                engine_version="8.1",  # the version compose runs (Valkey 8.1)
                 cache_node_type="cache.t4g.micro",
                 num_cache_clusters=1,
                 automatic_failover_enabled=False,
@@ -343,9 +350,19 @@ class AppStack(Stack):
                 "APP_ENV": "prod",
                 "APP_VERSION": tag,
                 "ROOT_PATH": "/api",  # the ALB strips /api, as nginx does in compose
-                "FORWARDED_ALLOW_IPS": "*",  # only the ALB can reach the task (security group)
-                "WEB_CONCURRENCY": "2",
-                "DB_POOL_SIZE": "5",  # x 2 workers: well inside a db.t4g.micro's ~80 connections
+                # Whose X-Forwarded-For to believe: the ALB's addresses, i.e. the VPC. Not "*":
+                # an ALB appends the client to what the client sent, so with "*" the left-most
+                # entry, which the client wrote, became its address (the sign-in rate limit's key).
+                "FORWARDED_ALLOW_IPS": VPC_CIDR,
+                # One worker per usable CPU, rounded up (gunicorn.conf.py): a 0.5 vCPU task runs
+                # one, and capacity comes from tasks. The pool keeps the connection budget.
+                "WEB_CONCURRENCY": "1",
+                "DB_POOL_SIZE": "10",  # x 1 worker x 4 tasks: inside a db.t4g.micro's ~80
+                # Idle connections: the ALB keeps them 130 s (idle_timeout), so the api must keep
+                # them longer, or the ALB reuses one the api has just closed and answers 502.
+                "GUNICORN_KEEPALIVE": "140",
+                # In-flight requests get 110 s after SIGTERM, inside the 120 s stop timeout.
+                "GUNICORN_GRACEFUL_TIMEOUT": "110",
                 "REDIS_URL": redis_url,
                 "LLM_BASE_URL": "http://localhost:8020/v1",
                 "LLM_MODEL": "mock-1",
@@ -376,7 +393,9 @@ class AppStack(Stack):
                 start_period=Duration.seconds(20),
             ),
             linux_parameters=no_caps,
-            stop_timeout=Duration.seconds(120),  # let chat streams finish (Fargate's maximum)
+            # production: a read-only root filesystem, as compose.prod.yaml runs it, with
+            # writable volumes for /tmp (the metrics files, gunicorn's control socket).
+            stop_timeout=Duration.seconds(120),  # Fargate's maximum; SIGKILL after it
             logging=to(api_logs, "api"),
         )
         # Every init container is a direct dependency of the essential api: when one fails, the
@@ -441,6 +460,7 @@ class AppStack(Stack):
                 task_definition=task,
                 desired_count=2,
                 # A public IP to pull images without a NAT gateway; the SG admits only the ALB.
+                # production: private subnets, a NAT gateway or VPC endpoints for ECR and logs.
                 assign_public_ip=True,
                 vpc_subnets=public,
                 security_groups=[sg],
@@ -450,13 +470,16 @@ class AppStack(Stack):
                 max_healthy_percent=150,
                 circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
                 health_check_grace_period=Duration.seconds(120),
-                enable_execute_command=True,  # `aws ecs execute-command`: a shell without SSH
+                # `aws ecs execute-command`: a shell without SSH. production: off, or limited by
+                # IAM to the on-call role, with session logging.
+                enable_execute_command=True,
             )
 
         api_svc = service("api", api_def, api_sg)
         web_svc = service("web", web_def, web_sg)
 
         # --- the ALB: the edge's job (routing) moves here ---------------------------------------
+        # production: an HTTPS listener with an ACM certificate, and port 80 redirecting to it.
         listener = alb.add_listener("Http", port=80, open=False)
         listener.add_targets(
             "Web",
@@ -485,7 +508,12 @@ class AppStack(Stack):
             health_check=elbv2.HealthCheck(
                 path="/health", interval=Duration.seconds(10), healthy_threshold_count=2
             ),
-            deregistration_delay=Duration.seconds(30),
+            # ECS takes a task out of the ALB first, waits this long, and only then sends it
+            # SIGTERM; at the end of the wait the ALB drops whatever is still in flight. So the
+            # wait must cover the longest chat stream (LLM_STREAM_TIMEOUT_S, 120 s): at 30 s,
+            # any answer longer than that was cut during a deploy. Deploys wait up to this long
+            # per task only while requests are in flight.
+            deregistration_delay=Duration.seconds(130),
         )
         elbv2.ApplicationListenerRule(
             self,
@@ -520,7 +548,7 @@ class AppStack(Stack):
         )
 
         # --- autoscaling: more api tasks while each serves over 1,000 requests a minute --------
-        # Bounded by the database: 4 tasks x 2 workers x DB_POOL_SIZE 5 = 40 connections, inside
+        # Bounded by the database: 4 tasks x 1 worker x DB_POOL_SIZE 10 = 40 connections, inside
         # a db.t4g.micro's ~80. Scale-in waits longer than scale-out, so it does not flap.
         scaling = api_svc.auto_scale_task_count(min_capacity=2, max_capacity=4)
         scaling.scale_on_request_count(

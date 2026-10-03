@@ -49,17 +49,29 @@ npx aws-cdk@2.1143.0 destroy triage-app --exclusively --force
 ./ops.sh leftovers                                  # anything still costing money
 ```
 
-Before destroying `triage-app`, unset `AWS_DEPLOY_ROLE_ARN`: otherwise the next release tag
-re-creates the whole stack. If a delete ends in `DELETE_FAILED` on resources that are already
+Before destroying `triage-app`, delete the secret `AWS_DEPLOY_ROLE_ARN`: otherwise the next
+release tag re-creates the whole stack. If a delete ends in `DELETE_FAILED` on resources that are already
 gone, finish it with `aws cloudformation delete-stack --stack-name triage-app --retain-resources
 <their logical IDs>`.
 
 Deploys after setup go through `.github/workflows/deploy.yml`: automatically after a release,
-or by hand with any released version (that is the rollback). It needs the repository variable
+or by hand with any released version (that is the rollback). It needs the repository secret
 `AWS_DEPLOY_ROLE_ARN` (the `triage-cicd.DeployRoleArn` output) and a GitHub environment named
-`aws-demo`.
+`aws-demo` with a required reviewer. The Release workflow's copy to ECR needs the secret
+`AWS_ECR_ROLE_ARN` (`triage-cicd.RoleArn`). Secrets, not variables: an ARN names the account, and
+GitHub masks only secrets in public logs; `mask-aws-account-id` covers the lines that print the
+registry or CDK's output.
+
+Timeouts, from the outside in (each must outlast the one before it, or a reused or drained
+connection fails): the ALB keeps idle connections 130 s, the api 140 s (`GUNICORN_KEEPALIVE`) and
+nginx 140 s. On a deploy, ECS takes a task out of the ALB and waits up to 130 s
+(deregistration delay, the longest chat stream) before SIGTERM; gunicorn then has 110 s, inside
+the 120 s stop timeout. `FORWARDED_ALLOW_IPS` is the VPC's range, the ALB's addresses: the ALB
+appends the client to `X-Forwarded-For`, so `*` would let a client choose its own address.
 
 Without a domain there is no TLS and no identity provider: the api runs with
 `PROD_CHECKS_WAIVED=insecure_cookies,mock_model` and reports `identity_provider: degraded`.
 For real use: an ACM certificate on an HTTPS listener, the organisation's OIDC provider, a model
-provider, Multi-AZ RDS with deletion protection.
+provider, and every `production:` comment in `service.py` (Multi-AZ RDS with deletion protection
+and longer backups, private subnets, a WAF, a read-only root filesystem, ECS Exec limited, log
+retention, secrets retained).

@@ -8,7 +8,11 @@
 #   cost                  month-to-date cost by service (Cost Explorer: $0.01 per request)
 #   leftovers             anything still running that costs money
 set -euo pipefail
-export AWS_PROFILE=${AWS_PROFILE:-wk-prep} AWS_REGION=${AWS_REGION:-ap-south-1} AWS_PAGER=""
+# Credentials come from the environment: AWS_PROFILE, or `aws login` / `aws sso login`.
+export AWS_REGION=${AWS_REGION:-ap-south-1} AWS_PAGER=""
+# The same CDK CLI as the README and the Deploy workflow: a deploy must not change with npm's
+# newest release.
+CDK=aws-cdk@2.1143.0
 export CDK_DEFAULT_ACCOUNT=${CDK_DEFAULT_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}
 cd "$(dirname "$0")"
 out() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text; }
@@ -25,7 +29,7 @@ vm-run)
     --query '[StandardOutputContent,StandardErrorContent]' --output text
   echo "[ssm] $s"; [[ $s == Success ]] ;;
 deploy)
-  npx --yes aws-cdk@latest deploy triage-app --exclusively --require-approval never --output cdk.out.app \
+  npx --yes "$CDK" deploy triage-app --exclusively --require-approval never --output cdk.out.app \
     -c tag="$2" ${3:+-c drill=$3} ;;
 status)
   aws ecs describe-services --cluster triage --services api web --query \
