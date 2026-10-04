@@ -32,3 +32,6 @@ test-results/
 backups/
 # Images saved for the vulnerability scan (make scan), removed after it
 .scan/
+
+# Container logs kept by make drills
+.drills/

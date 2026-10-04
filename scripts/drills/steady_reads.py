@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 URL = "http://web:8080/api/alerts?limit=5"
 # A signed-in user's session ("name=value"), minted by failure-drills.sh.
 HEADERS = {"Cookie": os.environ["SESSION_COOKIE"]}
-THREADS = 20
+THREADS = int(os.environ.get("THREADS", "20"))
 duration = float(sys.argv[1])
 t0 = time.monotonic()
 results: list[tuple[float, float, str]] = []
