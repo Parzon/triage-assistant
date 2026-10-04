@@ -5,6 +5,7 @@
 #   status                ECS services: running task definition, desired/running, rollout state
 #   probe [seconds]       hit the ALB every 0.5 s and count non-200 answers (zero-downtime check)
 #   logs <container>      last 30 api-task log lines of one container (api, migrate, dbinit...)
+#   cli <command> [args]  the operator CLI (app.cli) in a running api task: assistant, revoke...
 #   cost                  month-to-date cost by service (Cost Explorer: $0.01 per request)
 #   leftovers             anything still running that costs money
 set -euo pipefail
@@ -43,6 +44,16 @@ probe)
     sleep 0.5
   done
   echo "probe: $ok ok, $bad failed" ;;
+cli)
+  shift; (($#)) || { echo "usage: ops.sh cli <command> [args], e.g. cli assistant --off --reason '...'" >&2; exit 2; }
+  task=$(aws ecs list-tasks --cluster triage --service-name api --desired-status RUNNING --query 'taskArns[0]' --output text)
+  [[ $task == arn:* ]] || { echo "no running api task" >&2; exit 1; }
+  # container/api.sh composes DATABASE_URL before it starts gunicorn, so a shell opened with ECS
+  # Exec has the parts but not the URL: compose it the same way. The arguments travel base64,
+  # NUL-separated, so spaces and quotes in them (a reason) arrive as typed.
+  args=$(printf '%s\0' "$@" | base64 -w0)
+  aws ecs execute-command --cluster triage --task "$task" --container api --interactive --command \
+    "sh -c 'export DATABASE_URL=postgresql://\${DB_USER}:\${DB_PASSWORD}@\${DB_HOST}:\${DB_PORT}/\${DB_NAME}; echo $args | base64 -d | xargs -0 python -m app.cli'" ;;
 logs)
   aws logs tail /triage/api --since 30m --log-stream-name-prefix "${2:-api}" --format short | tail -30 ;;
 cost)
