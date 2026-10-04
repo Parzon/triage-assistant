@@ -446,6 +446,8 @@ class AppStack(Stack):
             "web",
             image=ecs.ContainerImage.from_ecr_repository(repos["web"], tag),
             port_mappings=[ecs.PortMapping(container_port=8080)],
+            # The load balancer's addresses, so nginx logs the client, not the ALB.
+            environment={"REAL_IP_FROM": VPC_CIDR},
             health_check=ecs.HealthCheck(
                 command=[
                     "CMD-SHELL",

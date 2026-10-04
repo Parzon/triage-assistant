@@ -74,7 +74,7 @@ Where the client IP comes from:
 
 | Setting | Why |
 |---|---|
-| `resolver 127.0.0.11 valid=10s` + `server api:8010 resolve` | re-resolves `api` at runtime. Without it nginx resolves once at start and keeps connecting to a dead IP forever after the api is recreated (measured: `connect() failed (111)` to the old address). It's also what lets `make deploy` add the new api before removing the old one |
+| `resolver` (written at start from the container's `/etc/resolv.conf`: Docker's `127.0.0.11` here) + `server api:8010 resolve` | re-resolves `api` at runtime. Without it nginx resolves once at start and keeps connecting to a dead IP forever after the api is recreated (measured: `connect() failed (111)` to the old address). It's also what lets `make deploy` add the new api before removing the old one |
 | `proxy_buffering off` on `/api/chat/stream` | nginx buffers responses by default. Measured: every token of a streamed answer arrived at once at the end. The api also sends `X-Accel-Buffering: no` for any other nginx in the path |
 | `proxy_read_timeout` 30 s (`/api/`), 120 s (the stream) | the longest silence nginx waits for; the stream sends a heartbeat every 15 s |
 | `proxy_connect_timeout 2s` | how long a dead upstream costs a request. When the api's address vanished (network cut, container gone), requests failed in 2.0 s |
@@ -108,8 +108,8 @@ Caddy (`tools/edge`, ADR-0012) terminates HTTPS in front of nginx.
     spread over 1.3 s, first token at 0.34 s.
 - **Client addresses through two proxies.** Caddy replaces whatever
   `X-Forwarded-For` a client sends. nginx takes the client from Caddy's
-  header (`set_real_ip_from` the private ranges, `real_ip_recursive
-  on`). Measured: a request sent with `X-Forwarded-For: 6.6.6.6` reached
+  header (`set_real_ip_from` the trusted proxies: `REAL_IP_FROM`, by
+  default this Docker network; `real_ip_recursive on`). Measured: a request sent with `X-Forwarded-For: 6.6.6.6` reached
   nginx and the api as the real client. Before this, the api would have
   seen Caddy's address for every user, and so one rate limit for
   everyone.
@@ -172,8 +172,8 @@ The same images; the edge is simply not started. Remove `edge` from
 `COMPOSE_PROFILES`, and publish nginx with `HTTP_BIND=0.0.0.0`,
 `HTTP_PORT=80`, reachable only from the load balancer's security group.
 
-- **The client IP.** nginx trusts `X-Forwarded-For` from private ranges
-  (✅ the same realip settings as behind the edge). Load balancers
+- **The client IP.** nginx trusts `X-Forwarded-For` only from
+  `REAL_IP_FROM`: set it to the load balancer's subnets. Load balancers
   *append* the client address; `real_ip_recursive on` takes the
   rightmost untrusted address, which is the load balancer's view of the
   client, not anything the client wrote.

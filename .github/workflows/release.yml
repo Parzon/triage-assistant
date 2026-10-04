@@ -186,13 +186,40 @@ jobs:
       - name: Show what the tag now points at
         run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
 
+  # What was published, per platform. The verify job scans an amd64 build made for it; the arm64
+  # images are built on their own runners, from the same commit, and were never scanned before.
+  scan-published:
+    needs: merge
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, web, edge]
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Scan the published image for this platform
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ matrix.image }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-$IMAGE_NAME:${GITHUB_REF_NAME#v}"
+          make scan-ref ref="$ref" platform="$PLATFORM"
+
   # Copies the published release into ECR, for the AWS deployment. AWS trusts
   # this workflow's OIDC token (role triage-gha-ecr-push, tags v* only), so no
   # AWS key is stored in GitHub. Off until the repository secret AWS_ECR_ROLE_ARN is set: a
   # secret, because the ARN names the AWS account and only secrets are masked in public logs.
   ecr:
-    # After the smoke test: ECR tags are immutable, so an image that failed it must never land there.
-    needs: [verify, merge, smoke]
+    # After the smoke test and the scan of what was published: ECR tags are immutable, so an image
+    # that failed either must never land there.
+    needs: [verify, merge, smoke, scan-published]
     if: github.event_name == 'push' && needs.verify.outputs.ecr == 'true'
     runs-on: ubuntu-24.04
     permissions:

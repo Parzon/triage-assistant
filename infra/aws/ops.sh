@@ -21,8 +21,11 @@ out() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].
 case ${1:-} in
 vm-run)
   id=$(out triage-vm InstanceId)
+  # The output is also kept in /triage/vm-operations (vm.py): CloudTrail records only that
+  # the command was sent.
   cmd=$(aws ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
         --parameters "$(jq -n --arg c "$2" '{commands: [$c], executionTimeout: ["1800"]}')" \
+        --cloud-watch-output-config CloudWatchOutputEnabled=true,CloudWatchLogGroupName=/triage/vm-operations \
         --query Command.CommandId --output text)
   until s=$(aws ssm get-command-invocation --command-id "$cmd" --instance-id "$id" --query Status --output text 2>/dev/null) \
         && [[ $s != Pending && $s != InProgress && $s != Delayed ]]; do sleep 3; done

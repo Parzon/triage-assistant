@@ -24,8 +24,8 @@ Valkey: one ElastiCache node shared by every api task (rate limits must be count
 2 tasks per service, one per AZ; the api scales to 4 on requests per target.
 ```
 
-Why the ALB routes `/api`: the web image's nginx resolves `api:8010` through Docker's DNS
-(`127.0.0.11`), which Fargate does not have. On ECS, nginx only serves files.
+Why the ALB routes `/api`: the web image's nginx finds the api by name, and on ECS there is
+no name for it (no service discovery here). On ECS, nginx only serves files.
 
 Why the ALB checks `/health`, not `/ready`: ECS replaces every task its load balancer calls
 unhealthy. With `/ready` (which needs the database), stopping RDS made ECS replace api tasks
