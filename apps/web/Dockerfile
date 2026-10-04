@@ -31,6 +31,7 @@ FROM nginxinc/nginx-unprivileged:1.31-alpine-slim@sha256:c81a27f28bc2d9c2da89984
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/snippets/ /etc/nginx/snippets/
+COPY --chmod=755 nginx/entrypoint/25-runtime-conf.sh /docker-entrypoint.d/
 EXPOSE 8080
 # 127.0.0.1, not localhost: busybox wget may try ::1 first, and nginx
 # listens on IPv4 only, which would mark a healthy container unhealthy.

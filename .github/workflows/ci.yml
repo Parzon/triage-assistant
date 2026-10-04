@@ -116,7 +116,8 @@ jobs:
       - name: Build production web image and validate its nginx config
         run: |
           docker build --target production -t triage-assistant-web:ci .
-          docker run --rm --entrypoint nginx triage-assistant-web:ci -t
+          # The start-up script writes the includes default.conf reads (resolver, trusted proxies, upstream).
+          docker run --rm --entrypoint sh triage-assistant-web:ci -c '/docker-entrypoint.d/25-runtime-conf.sh && nginx -t'
 
   e2e:
     runs-on: ubuntu-24.04

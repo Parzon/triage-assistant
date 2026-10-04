@@ -3,7 +3,8 @@
 Compared with a hand-built VM:
 - no SSH key and no port 22: operators use SSM Session Manager / Run Command, which the
   instance role allows; CloudTrail records who started a session or sent a command, and
-  when (what ran inside a session needs session logging, not set up here);
+  when, and the log group /triage/vm-operations keeps what ran: every session's input and
+  output, and Run Command output (ops.sh vm-run);
 - images come from ECR, authenticated by the instance role through the ECR credential helper,
   so no registry password exists anywhere;
 - IMDSv2 only, encrypted disk, a security group that admits HTTP and nothing else;
@@ -15,9 +16,11 @@ may only launch Free Tier-eligible types (t3.medium was refused), and c7i-flex.l
 4 GB, x86) is one: `aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true`.
 """
 
-from aws_cdk import CfnOutput, Stack
+from aws_cdk import CfnOutput, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_logs as logs
+from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 UBUNTU = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
@@ -86,6 +89,48 @@ class VmStack(Stack):
         )
         for repo in repos.values():
             repo.grant_pull(role)
+
+        # What operators do on the host, not only that they connected. Session Manager reads
+        # its preferences from one document per account and region, SSM-SessionManagerRunShell:
+        # this stack creates it (it must not exist already) and deletes it with the stack.
+        operations = logs.LogGroup(
+            self,
+            "Operations",
+            log_group_name="/triage/vm-operations",
+            retention=logs.RetentionDays.ONE_MONTH,  # production: what audits require
+            removal_policy=RemovalPolicy.DESTROY,  # production: RETAIN
+        )
+        ssm.CfnDocument(
+            self,
+            "SessionPreferences",
+            name="SSM-SessionManagerRunShell",
+            document_type="Session",
+            content={
+                "schemaVersion": "1.0",
+                "description": "Session Manager preferences: stream every session to CloudWatch",
+                "sessionType": "Standard_Stream",
+                "inputs": {
+                    "cloudWatchLogGroupName": operations.log_group_name,
+                    "cloudWatchStreamingEnabled": True,
+                    "cloudWatchEncryptionEnabled": False,  # production: a KMS-encrypted group
+                    "s3BucketName": "",
+                    "s3EncryptionEnabled": False,
+                    "idleSessionTimeout": "20",
+                    "runAsEnabled": False,
+                    "runAsDefaultUser": "",
+                    "shellProfile": {"linux": "", "windows": ""},
+                },
+            },
+        )
+        # The SSM agent on the host writes the stream, with the instance role.
+        operations.grant_write(role)
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["logs:DescribeLogStreams"], resources=[operations.log_group_arn]
+            )
+        )
+        # The agent checks the group exists; DescribeLogGroups cannot be scoped to one group.
+        role.add_to_policy(iam.PolicyStatement(actions=["logs:DescribeLogGroups"], resources=["*"]))
 
         sg = ec2.SecurityGroup(self, "Sg", vpc=vpc, description="HTTP in; no SSH")
         sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80), "the app")

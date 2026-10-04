@@ -367,7 +367,9 @@ something bites.
   ([networking](docs/handbook/networking.md))
 - **Behind two proxies, every user had the edge's address**: one rate
   limit for all. The edge overwrites the client's `X-Forwarded-For`;
-  nginx trusts it only from private ranges (`realip`).
+  nginx trusts it only from the proxies in front (`REAL_IP_FROM`; by
+  default this Docker network). Not every private range: a client on a
+  private address could then name its own address (ADR-0028).
 - **HSTS on `localhost` forces HTTPS on every local port**, the Vite dev
   server included: `HSTS_MAX_AGE=0` locally, a year only for a real
   domain.
@@ -383,8 +385,9 @@ something bites.
   `proxy_buffering off` on the stream location, and send
   `X-Accel-Buffering: no`. ([networking](docs/handbook/networking.md))
 - **nginx resolves an upstream name once at start**, then connects to a
-  dead IP forever. Use `resolver 127.0.0.11` plus `server api:8010
-  resolve`.
+  dead IP forever. Use a `resolver` plus `server api:8010 resolve`; the
+  web image writes the resolver at start from `/etc/resolv.conf`, so the
+  same image works on Docker, Kubernetes and ECS.
 - **Behind a proxy, every client has the proxy's IP**, so the rate limit
   was global. nginx overwrites `X-Forwarded-For`; gunicorn trusts it only
   from nginx.
