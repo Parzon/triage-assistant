@@ -105,7 +105,8 @@ From the identity provider, at every sign-in: the claim named by
 A team is created the first time a sign-in names it. Memberships are
 replaced every time: someone removed from a group loses the role at their
 next sign-in. **For immediate effect** (a leaver, a compromised account):
-`make revoke email=<address> ENV=prod` ends all their sessions now.
+`make revoke email=<address> ENV=prod` ends all their sessions now (on the
+ECS stack: `./ops.sh cli revoke --email <address>` in `infra/aws`).
 
 ### Connecting your organisation's provider
 

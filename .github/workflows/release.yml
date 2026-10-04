@@ -248,7 +248,31 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: GitHub release with notes generated from the merged PRs
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: GitHub release with notes generated from the merged PRs, and upgrade notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+        run: |
+          # What an upgrade needs, which PR titles do not say: the settings added to or
+          # removed from .env.example since the previous release. A new one can be a setting
+          # the api refuses to start without (the production checks, ADR-0023).
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)
+          keys() { git show "$1:.env.example" 2>/dev/null | sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u; }
+          list() { local k out=""; while read -r k; do out+="${out:+, }\`$k\`"; done; printf '%s' "$out"; }
+          added=$(comm -13 <(keys "$prev") <(keys "$GITHUB_SHA") | list)
+          removed=$(comm -23 <(keys "$prev") <(keys "$GITHUB_SHA") | list)
+          notes="## Upgrade notes"$'\n\n'
+          if [ -z "$prev" ]; then
+            notes+="The first release."
+          elif [ -z "$added$removed" ]; then
+            notes+="No settings added to or removed from \`.env.example\` since $prev."
+          else
+            notes+="Settings in \`.env.example\` since $prev: compare your \`.env\` before you deploy."
+            if [ -n "$added" ]; then notes+=$'\n'"- added: $added"; fi
+            if [ -n "$removed" ]; then notes+=$'\n'"- removed: $removed"; fi
+          fi
+          # --notes is prepended to the generated notes.
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag \
+            --notes "$notes"

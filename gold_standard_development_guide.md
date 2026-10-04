@@ -883,6 +883,19 @@ Measured building the traces; the evidence is in
   the template breaking its own (keep-alive order, one worker per CPU,
   "only nginx is published", "the security job blocks the merge"). Test
   them like code.
+- **A value a start script builds exists only in the process it starts**:
+  `api.sh` composes `DATABASE_URL` and execs gunicorn, so a shell opened
+  with ECS Exec has the parts but not the URL, and the runbooks' CLI
+  (assistant off, revoke) failed on AWS. `./ops.sh cli` composes it the
+  same way.
+- **A tag runs the workflow of the commit it points at**: a `v*` tag on a
+  branch runs that branch's `release.yml`, which can drop the "tag is on
+  main" check, and the ECR role trusts every `v*` tag. A tag ruleset lets
+  only admins create release tags.
+- **Release notes made of PR titles hide what an upgrade needs**: 0.8.1
+  added production checks, and a 0.8.0 host's api refused to start until
+  `.env` waived them. The notes now list the settings `.env.example`
+  gained or lost since the previous release.
 - **A backup on the same disk dies with it, and an untested restore is a
   hope**: copy dumps off the host, and rehearse a restore on a clean
   host.

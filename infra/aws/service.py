@@ -28,10 +28,12 @@ import json
 from pathlib import Path
 
 from aws_cdk import (
+    Acknowledgment,
     CfnOutput,
     Duration,
     RemovalPolicy,
     Stack,
+    Validations,
 )
 from aws_cdk import (
     aws_cloudwatch as cw,
@@ -215,6 +217,15 @@ class AppStack(Stack):
             cpu=512,
             memory_limit_mib=1024,
             runtime_platform=X86,
+        )
+        # The init containers' commands are shell scripts (container/*.sh): `${DB_HOST}` is for
+        # sh to expand at task start, not a CloudFormation parameter. Acknowledged, so that a
+        # real warning stands out in every deploy's output.
+        Validations.of(api_def).acknowledge(
+            Acknowledgment(
+                id="CloudFormation-Validate::E1029",
+                reason="shell variables in the container commands, expanded by sh",
+            )
         )
         api_image = ecs.ContainerImage.from_ecr_repository(repos["api"], tag)
 

@@ -94,14 +94,15 @@ What this repository uses (read from GitHub's API), and why:
 | Visibility | public here; **private** for company code | Branch protection on a *private* repository needs a paid plan (Pro, Team or Enterprise) |
 | Merge buttons | squash only; delete the branch on merge | one commit per PR on `main`, titled by the PR |
 | Branch protection on `main` | see the next list | nothing reaches `main` without CI and a review |
+| Tag ruleset "Release tags" on `refs/tags/v*` | creating, moving and deleting need an admin | a tag runs the `release.yml` of the commit it points at, so a tag on another branch could skip the "tag is on main" check and publish images (to ECR too, whose role trusts `v*` tags) |
 | Secret scanning, with push protection | on | refuses a push containing a recognised credential |
 | Dependabot security updates | on | PRs for vulnerable dependencies; `.github/dependabot.yml` adds grouped version updates, monthly (base images weekly) |
 | Private vulnerability reporting | linked from `.github/ISSUE_TEMPLATE/config.yml` | security reports never land in a public issue |
 | Template repository | on here only | leave it off on your copy |
 
 Branch protection on `main`:
-- **Required checks:** `lint`, `test-api`, `build`, `web-build` and
-  `e2e`, with the branch up to date with `main`.
+- **Required checks:** `lint`, `test-api`, `build`, `security`,
+  `web-build` and `e2e`, with the branch up to date with `main`.
 - **Reviews:** one approval, from a code owner (`.github/CODEOWNERS`:
   replace the handles with teams, since a person is a bottleneck).
 - **Conversations** resolved before merging.

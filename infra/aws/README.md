@@ -42,9 +42,10 @@ uv sync
 export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 npx aws-cdk@2.1143.0 bootstrap                      # once per account and region
 npx aws-cdk@2.1143.0 deploy triage-registry triage-cicd triage-network
-./ops.sh deploy 0.8.1                               # triage-app at a released version
+./ops.sh deploy 0.9.1                               # triage-app at a released version
 ./ops.sh status                                     # what runs, rollout state
 ./ops.sh logs migrate                               # one container's log (CloudWatch)
+./ops.sh cli assistant --off --reason "..."         # the operator CLI (app.cli) in an api task
 npx aws-cdk@2.1143.0 destroy triage-app --exclusively --force
 ./ops.sh leftovers                                  # anything still costing money
 ```

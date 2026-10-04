@@ -36,7 +36,10 @@ class CicdStack(Stack):
                 provider.open_id_connect_provider_arn,
                 conditions={
                     "StringEquals": {f"{ISSUER}:aud": "sts.amazonaws.com"},
-                    # Only a release tag of this repo: not a PR, not a branch, not a fork.
+                    # Only a release tag of this repo: not a PR, not a branch, not a fork. A tag
+                    # pushed on any branch runs that branch's release.yml, which could drop its
+                    # "tag is on main" check: the repository's tag ruleset, which lets only admins
+                    # create v* tags, is what makes this a release (using-this-template.md).
                     "StringLike": {f"{ISSUER}:sub": f"{SUB_PREFIX}:ref:refs/tags/v*"},
                 },
             ),
