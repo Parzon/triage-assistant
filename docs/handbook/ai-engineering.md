@@ -443,7 +443,7 @@ non-engineers need to curate cases.
 | LLM02 Sensitive information disclosure | Never repeat credentials (`injection-fake-conversation`). The context holds only the asker's alerts (isolation cases, row-level security). |
 | LLM05 Improper output handling | Answers rendered as text, never HTML. |
 | LLM06 Excessive agency | No tools in the pipeline; in agent mode, two read-only tools, a step limit and an audit event per call ([agents](agents.md)). If actions are added, a human confirms each one. |
-| LLM07 System prompt leakage | The prompt holds no secrets. Leaks are measured (5 in 200 → 0 in 200). |
+| LLM07 System prompt leakage | The prompt holds no secrets. Leaks are measured against a 1.5% target: 5 in 200 at v4, 2 in 600 at v6 (95% bound 1.05%). |
 | LLM09 Misinformation | Grounding and refusal cases; the judge. |
 | LLM10 Unbounded consumption | Rate limits, `LLM_MAX_OUTPUT_TOKENS`, the stream time cap, the cost panel. |
 

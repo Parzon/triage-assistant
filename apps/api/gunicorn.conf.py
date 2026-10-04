@@ -16,9 +16,11 @@ def available_cpus(cpu_max: Path = Path("/sys/fs/cgroup/cpu.max")) -> int:
     """CPUs this container may actually use.
 
     os.cpu_count() reports the host's cores even inside a CPU-limited
-    container. A `--cpus` / compose `cpus:` / ECS / Kubernetes CPU limit is
-    the cgroup v2 quota in cpu.max: "<quota> <period>", or "max <period>"
-    when unlimited. sched_getaffinity() covers `--cpuset-cpus`.
+    container. A `--cpus` / compose `cpus:` / Kubernetes CPU limit is the
+    cgroup v2 quota in cpu.max: "<quota> <period>", or "max <period>" when
+    unlimited. sched_getaffinity() covers `--cpuset-cpus`. An ECS
+    container's `cpu` is a relative share, not a quota: set WEB_CONCURRENCY
+    there (infra/aws/service.py does).
     """
     try:
         quota, period = cpu_max.read_text().split()

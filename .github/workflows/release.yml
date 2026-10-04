@@ -191,7 +191,8 @@ jobs:
   # AWS key is stored in GitHub. Off until the repository secret AWS_ECR_ROLE_ARN is set: a
   # secret, because the ARN names the AWS account and only secrets are masked in public logs.
   ecr:
-    needs: [verify, merge]
+    # After the smoke test: ECR tags are immutable, so an image that failed it must never land there.
+    needs: [verify, merge, smoke]
     if: github.event_name == 'push' && needs.verify.outputs.ecr == 'true'
     runs-on: ubuntu-24.04
     permissions:

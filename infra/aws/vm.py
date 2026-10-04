@@ -2,7 +2,8 @@
 
 Compared with a hand-built VM:
 - no SSH key and no port 22: operators use SSM Session Manager / Run Command, which the
-  instance role allows and CloudTrail records (who ran what, when);
+  instance role allows; CloudTrail records who started a session or sent a command, and
+  when (what ran inside a session needs session logging, not set up here);
 - images come from ECR, authenticated by the instance role through the ECR credential helper,
   so no registry password exists anywhere;
 - IMDSv2 only, encrypted disk, a security group that admits HTTP and nothing else;
