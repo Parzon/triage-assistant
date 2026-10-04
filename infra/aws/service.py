@@ -514,7 +514,8 @@ class AppStack(Stack):
             # Liveness, not readiness. ECS replaces any task its load balancer calls unhealthy,
             # so a deep check (/ready: the database) turns a database outage into task churn:
             # measured, every api task marked unhealthy and replacements stuck in dbinit. Kubernetes
-            # separates the two (readinessProbe /ready, livenessProbe /health); ECS has one signal.
+            # separates the two (readinessProbe /ready, livenessProbe /health); ECS has no
+            # readiness-only signal: this check and the container health check both replace tasks.
             # Readiness at start is covered by the init containers: migrate succeeds only if the
             # database answers. A database outage still shows: /api/ready 503 and the 5xx alarm.
             health_check=elbv2.HealthCheck(

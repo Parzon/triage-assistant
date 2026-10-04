@@ -63,11 +63,14 @@ cost)
 leftovers)
   echo "EC2:";  aws ec2 describe-instances --filters Name=instance-state-name,Values=pending,running,stopping,stopped --query 'Reservations[].Instances[].[InstanceId,InstanceType,State.Name]' --output text
   echo "RDS:";  aws rds describe-db-instances --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus]' --output text
+  echo "ElastiCache:"; aws elasticache describe-replication-groups --query 'ReplicationGroups[].[ReplicationGroupId,Status]' --output text
   echo "ECS:";  aws ecs list-clusters --query clusterArns --output text
   echo "ALB:";  aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName' --output text
   echo "NAT:";  aws ec2 describe-nat-gateways --filter Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text
   echo "EIP:";  aws ec2 describe-addresses --query 'Addresses[].PublicIp' --output text
   echo "EBS:";  aws ec2 describe-volumes --query 'Volumes[].[VolumeId,Size,State]' --output text
-  echo "Stacks:"; aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE ROLLBACK_COMPLETE --query 'StackSummaries[].StackName' --output text ;;
+  echo "Secrets:"; aws secretsmanager list-secrets --query 'SecretList[].Name' --output text
+  # Every state but deleted: a stack stuck in DELETE_FAILED still holds what it could not delete.
+  echo "Stacks:"; aws cloudformation list-stacks --query 'StackSummaries[?StackStatus!=`DELETE_COMPLETE`].[StackName,StackStatus]' --output text ;;
 *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

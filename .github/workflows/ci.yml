@@ -32,7 +32,9 @@ jobs:
           working-directory: apps/api
           enable-cache: true
           cache-dependency-glob: apps/api/uv.lock
-      - run: uv sync --frozen
+      # --locked fails when uv.lock is stale against pyproject.toml; --frozen (the
+      # Dockerfiles) installs the lock as given, so this is where staleness is caught.
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy

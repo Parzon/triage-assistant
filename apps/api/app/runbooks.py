@@ -131,8 +131,8 @@ def embedding_key(settings: Settings) -> str:
     document prefix. Stored with every vector; vectors with another key are
     not comparable, so retrieval ignores them until they are re-embedded
     (`python -m app.cli reembed`). A prefix change alone moves every vector:
-    measured, embeddinggemma with and without its prompts gave distances
-    0.06 apart on the same text."""
+    measured, dropping embeddinggemma's prompts shrank the gap between
+    relevant and unanswerable distances from 0.12 to 0.06 (rag.md)."""
     prefix = hashlib.sha256(settings.embedding_document_prefix.encode()).hexdigest()[:8]
     return f"{settings.embedding_model}|{settings.embedding_dimensions or 'native'}|{prefix}"
 
