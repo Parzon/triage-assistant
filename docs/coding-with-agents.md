@@ -21,9 +21,39 @@ it inside the architecture: which tools to use, when, how, and why. Each
   keeps missing becomes a line in `AGENTS.md`.
 - **Three skills, when asked:** `/ponytail` for a scoped fix, `/hate` before
   committing to a plan, `/mandela` before trusting a number.
-- **Nothing installed.** A skill is Markdown copied into the repository.
-  No plugin installers, no hooks from outside, no MCP servers that call
-  out.
+- **Nothing installed, nothing paid.** A skill is Markdown copied into the
+  repository. No plugin installers, no hooks from outside, no MCP servers
+  that call out.
+
+## What to use, at a glance
+
+Everything here is free. The skills are MIT-licensed Markdown in
+`.claude/skills/`. The checks and scanners are open source, and the
+scanners run from Docker images pinned by digest: Semgrep and gitleaks with
+no network, Trivy fetching only its vulnerability database. The slash
+commands come with Claude Code. Details and the evidence for each are
+further down.
+
+| Tool | Where it comes from | Cost | Use it |
+|---|---|---|---|
+| `AGENTS.md` | this repository (`CLAUDE.md` imports it) | free | always: every agent reads it |
+| The area-review prompt | `AGENTS.md`, "Reviewing a change" | free | every PR: one review per area, then the whole diff once |
+| `make check` | ruff, mypy, pytest (MIT); oxlint, Vitest (MIT); tsc (Apache-2.0) | free, open source | before calling a change done |
+| `make semgrep` | Semgrep Community Edition (LGPL-2.1) with this repository's rules, offline | free, open source | runs in `make lint` and CI; add a rule when a bug class gets through |
+| `make secrets-scan`, `make scan` | gitleaks (MIT), Trivy (Apache-2.0) | free, open source | CI runs both; locally before a release |
+| `/ponytail` | `.claude/skills/ponytail/` (MIT) | free | a bug fix or a small change with a clear end |
+| `/hate` | `.claude/skills/hate/` (MIT) | free | before committing to a plan, an RFC, an ADR or a new rule |
+| `/mandela` | `.claude/skills/mandela/` (MIT) | free | before trusting an eval, a benchmark or a "we measured X" |
+| `/simplify` | built into Claude Code | comes with it | after a fix works, before review |
+| `/code-review` | built into Claude Code | comes with it | breadth on risky files: sign-in, redaction, access, migrations |
+| `/security-review` | built into Claude Code | comes with it | access, sign-in, redaction; read it next to `AGENTS.md`'s security rules |
+| This repository's MCP server | `app/mcp_server.py` | free | asking your editor about your team's alerts and runbooks |
+| Playwright | Apache-2.0 | free, open source | a change you need to see in a browser; CI runs the e2e suite |
+| The session-start hook | `.claude/hooks/session-start.sh` | free | runs by itself in Claude Code cloud sessions |
+
+Tried and left out: Semgrep's generic rule packs (103 findings, none
+real), "be careful" rules in `AGENTS.md` (no gain), paperthin's other 26
+skills (untested, and about half run unasked), anything with an installer.
 
 ## What keeps an agent inside the architecture
 
