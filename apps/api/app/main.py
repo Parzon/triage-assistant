@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.telemetry import TelemetryConfig
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from redis.asyncio import Redis
 
@@ -25,6 +26,18 @@ from app.tracing import configure_tracing, shutdown_tracing, tracing_on
 from app.triage import PROMPT
 
 log = logging.getLogger(__name__)
+
+# FastAPI's own OpenTelemetry stays off. It records each request's query
+# string (the sign-in callback's is the authorization code), and would add
+# exporters from OTEL_* variables. RequestContextMiddleware makes the
+# request's span under ADR-0018's rules, and app/tracing.py decides where
+# spans go.
+NO_NATIVE_TELEMETRY: TelemetryConfig = {
+    "tracing": False,
+    "metrics": False,
+    "logs": False,
+    "auto_configure": False,
+}
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -97,6 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="triage-assistant",
         lifespan=lifespan,
+        telemetry=NO_NATIVE_TELEMETRY,
         root_path=settings.root_path,
         # "/alerts/" is a 404, not a 307 to "/alerts": behind a proxy that
         # strips /api, Starlette builds that redirect without the prefix

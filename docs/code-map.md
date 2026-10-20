@@ -96,7 +96,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `unit/test_evals.py` | the eval harness itself: what counts as a pass |
 | `unit/test_gunicorn_conf.py` | the worker count follows the container's CPU limit |
 | `unit/test_logs.py` | one JSON object per line, with the request id |
-| `unit/test_middleware.py` | the request id, the access log and headers, against a tiny app |
+| `unit/test_middleware.py` | the request id, the access log and headers, against a tiny app; the real app makes one request span, with no query string |
 | `unit/test_oidc.py` | every ID token check, failed one at a time, against a fake provider |
 | `unit/test_probe.py` | the readiness probe answers within its deadline |
 | `unit/test_ratelimit.py` | the limiter: limits, windows, failing open, failing closed |

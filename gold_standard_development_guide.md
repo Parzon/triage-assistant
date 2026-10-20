@@ -777,6 +777,11 @@ Measured building the traces; the evidence is in
   provider's stream, open until garbage collection.
 - **The ASGI instrumentation package adds a span per response chunk**
   unless `exclude_spans=["send", "receive"]`: hundreds per streamed answer.
+- **FastAPI 0.142 traces requests itself, on by default:** a second
+  server span per request, with the query string (the sign-in callback's
+  is the authorization code), and exporters added from `OTEL_*` variables.
+  `create_app` turns it off (`NO_NATIVE_TELEMETRY`); a test fails if a
+  request makes two server spans or records its query.
 - **`SQLAlchemyInstrumentor` is a process-wide singleton:** a second
   `instrument()` is ignored. Instrument in startup, uninstrument in
   shutdown.
