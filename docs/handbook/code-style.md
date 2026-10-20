@@ -226,3 +226,52 @@ A claim with no command behind it is a hope.
    is not verification. The commands and numbers in the PR are.
 8. **Destructive commands need a human:** deleting volumes, force
    pushes, dropping data, anything against a shared environment.
+9. **Another agent reviews before merge, one area at a time.** The prompt
+   is in `AGENTS.md` ("Reviewing a change"): a pass for each area the
+   change's promises rest on, a few hundred lines each, then one over the
+   whole diff. Every finding is fixed or answered in the PR.
+
+#### What we measured (October 2026)
+
+Two bugs merged in large PRs and stayed for ten days, until a review pass
+found them (#87):
+- **Redaction:** alerts were cut to 300 characters *before* redaction,
+  so the start of a token across the cut reached the model (the runbooks
+  PR, #49).
+- **Sign-in:** "keys never fetched" was `0.0` on a clock that counts from
+  boot, so sign-in failed for the first minute after a host booted (the
+  sign-in PR, #40).
+
+Agents worked on copies of the repository at the commit in question,
+without git history, and were graded against the fix that shipped. There
+were three runs per cell, all on the same model.
+
+| Task | Result |
+|---|---|
+| Fix the bug from the issue's symptom, with or without a 20-line "how to work" block in `AGENTS.md` (map the callers, test first, try the edges, report what you did not check) | 12 of 12 found the cause, fixed it once where every caller goes through, and wrote a test that fails on the old code, either way. The block only cost tokens (up to 2% more), so it is not in `AGENTS.md`. |
+| Review the part of the PR holding the bug (260-600 lines), not told there is one | 12 of 12 found it and showed it with a probe. 9 of 12 ranked it first or second. The same block made no difference here either: 4 of 6 ranked it in their top two with it, 5 of 6 without. It cost 5% more tokens and took 19% longer. |
+| Review the whole PR (6,500-8,500 lines of diff), same prompt | 6 of 6 mentioned it, but none ranked it first or second, 3 listed it as minor, and only 4 showed it with a probe. They found what crosses areas instead: keyword search stemmed words twice (also fixed in #87), and the deploy never started the new identity provider. |
+
+Costs: an area pass took about 120,000 tokens and 7 minutes; a whole-PR
+pass took 250,000 tokens and 12 minutes.
+
+What it means for us:
+- **Rules that say "be careful" change nothing.** The agent already
+  traces the callers, proves a fix with a test that fails on the old code
+  and reports what it did not run. `AGENTS.md` is for what it cannot
+  know: this repository's commands, rules and traps (rule 1).
+- **The bugs that shipped were findable before merge.** One focused
+  review per area found them every time, and near the top.
+- **A whole-PR pass buries the deep bug** but finds what crosses areas.
+  A large PR gets both kinds of pass (rule 9); small PRs (rule 5) need
+  fewer.
+
+How far this goes:
+- Three runs per cell, on two bugs.
+- Both bugs were already known to be findable, because a later review
+  found them.
+- The block was written from the same history and still made no
+  difference.
+- The agents also had the current `AGENTS.md`, which mentions neither bug.
+- Reviews were graded by hand. Fixes were graded by hand and by tests the
+  agents never saw.
