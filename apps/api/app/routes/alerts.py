@@ -79,6 +79,8 @@ async def list_alerts(
     return AlertPage(items=page, next_cursor=encode_cursor(page[-1]) if more else None)
 
 
+# Public: Alertmanager authenticates with a bearer token, not a session.
+# nosemgrep: route-without-current-user
 @router.post("/alertmanager", include_in_schema=False)
 async def ingest_alertmanager(
     payload: AlertmanagerWebhook,

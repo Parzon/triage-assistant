@@ -24,6 +24,9 @@ configure_tracing(
         llm_api_key="unused",  # type: ignore[arg-type]
         llm_model="unused",
         public_url="https://unused",
+        oidc_issuer="https://unused/realms/tests",
+        oidc_client_id="unused",
+        oidc_client_secret="unused",  # type: ignore[arg-type]
         otel_service_name="triage-assistant-tests",
         app_version="test",
     ),

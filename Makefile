@@ -20,7 +20,7 @@ export DEV_GID := $(shell id -g)
 S    ?=
 
 .PHONY: help help-all setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
+        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck semgrep fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore drills image-check scan scan-images scan-unfixed scan-ref scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
@@ -154,7 +154,7 @@ evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, every setting reachable
+lint: shellcheck semgrep ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, the repo's own rules, every setting reachable
 	@python3 scripts/check_settings.py
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
@@ -162,6 +162,14 @@ lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, 
 
 shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
 	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/lib/*.sh scripts/git-hooks/*
+
+# Offline: no network, no metrics, no rules fetched from a registry.
+SEMGREP := docker run --rm --network none -v "$(CURDIR):/src:ro" -w /src \
+  semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b \
+  semgrep scan --metrics=off --disable-version-check --config tools/semgrep/rules.yml
+semgrep: ## The repo's own rules (tools/semgrep): bugs that merged once, AGENTS.md rules a machine can check
+	$(SEMGREP) --test tools/semgrep/rules.py
+	$(SEMGREP) --error --quiet apps/api
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
