@@ -113,10 +113,15 @@ class OIDCClient:
 
     async def check(self) -> bool:
         """Does the provider answer, with metadata we can trust? Fetches it
-        afresh, which also keeps the cached copy current."""
+        afresh, which also keeps the cached copy current. Never raises: an
+        error escaping here would end the watcher, and the gauge and /ready
+        would keep their last verdict for good."""
         try:
             await self.metadata(refresh=True)
         except ProviderUnavailable:
+            self.reachable = False
+        except Exception as exc:
+            log.error("identity provider check failed", exc_info=exc)
             self.reachable = False
         else:
             self.reachable = True
@@ -227,7 +232,10 @@ class OIDCClient:
             len(audiences) > 1 and "azp" not in claims
         ):
             raise InvalidToken("ID token was issued to another client")
-        if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
+        # As bytes: compare_digest raises TypeError on a str with non-ASCII
+        # characters, and the token carries whatever nonce the sign-in's
+        # authorization request did - the user can edit that URL.
+        if not hmac.compare_digest(str(claims.get("nonce", "")).encode(), nonce.encode()):
             raise InvalidToken("ID token nonce does not match this sign-in")
         groups = claims.get(self._settings.oidc_groups_claim) or []
         return Identity(

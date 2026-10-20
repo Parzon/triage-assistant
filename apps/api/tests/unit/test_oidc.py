@@ -130,6 +130,7 @@ BAD_TOKENS: dict[str, Callable[[], str]] = {
     "expired": lambda: token(exp=int(time.time()) - 3600),
     "no expiry": lambda: token(exp=None),
     "another nonce (replayed token)": lambda: token(nonce="other"),
+    "a non-ASCII nonce (an edited sign-in URL)": lambda: token(nonce="café"),
     "no nonce": lambda: token(nonce=None),
     "signed by another key": lambda: token(key=OTHER_KEY),
     "issued to another client (azp)": lambda: token(azp="someone-else"),
@@ -262,6 +263,17 @@ async def test_check_reports_the_provider_and_refreshes_the_cache(
     assert await client.check() is True
     assert provider.hits["openid-configuration"] == 2  # each check fetches afresh
     provider.metadata["issuer"] = "https://evil.example"  # misconfigured = not usable
+    assert await client.check() is False
+    assert client.reachable is False
+
+
+async def test_check_counts_an_unexpected_error_as_down(
+    client: OIDCClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fails(*, refresh: bool = False) -> None:
+        raise RecursionError  # e.g. metadata JSON nested past the recursion limit
+
+    monkeypatch.setattr(client, "metadata", fails)
     assert await client.check() is False
     assert client.reachable is False
 

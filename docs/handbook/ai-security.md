@@ -45,7 +45,9 @@ anything, read [Rules for tools](#rules-for-tools).
 ## Redaction: measured ✅
 
 Credentials in alerts and runbooks are replaced before any model call: the
-prompt, and the text sent for embedding (`app/redact.py`). The prompt's
+prompt, and the text sent for embedding (`app/redact.py`). In the prompt
+that is every field people write: an alert's source and message, a
+section's heading and content, and the question. The prompt's
 own rule ("never repeat credentials") failed about 1 run in 100; redaction
 does not fail for the formats it knows, and it keeps them from the model
 provider too (OWASP LLM02).

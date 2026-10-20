@@ -114,18 +114,22 @@ Source = Callable[[Emit], Awaitable[None]]
 
 def alert_line(alert: AlertOut, clean: Callable[[str], str]) -> str:
     """One alert as the model reads it: as the API shows it, cut short.
-    Redacted first, then cut: a cut through a credential would leave a part
-    no pattern recognises, and that part would reach the model."""
+    Both fields the sender writes are redacted, the message before it is
+    cut: a cut through a credential would leave a part no pattern
+    recognises, and that part would reach the model."""
     return (
         f"- [{alert.severity}] {alert.created_at:%Y-%m-%d %H:%M}Z team={alert.team} "
-        f"{alert.source}: {clean(alert.message)[:MAX_ALERT_CHARS]}"
+        f"{clean(alert.source)}: {clean(alert.message)[:MAX_ALERT_CHARS]}"
     )
 
 
 def section_text(number: int, hit: Hit, clean: Callable[[str], str]) -> str:
-    """One runbook section as the model reads it, numbered for citation."""
+    """One runbook section as the model reads it, numbered for citation. Its
+    heading (the runbook's title and the headings above it) is redacted like
+    its content: the same editor wrote both."""
     return (
-        f"[R{number}] {hit.heading} (team {hit.team}, updated {hit.updated_at:%Y-%m-%d})\n"
+        f"[R{number}] {clean(hit.heading)} "
+        f"(team {hit.team}, updated {hit.updated_at:%Y-%m-%d})\n"
         f"{clean(hit.content)}"
     )
 

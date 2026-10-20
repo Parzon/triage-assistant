@@ -196,6 +196,13 @@ def test_credentials_never_reach_the_prompt() -> None:
     assert question["content"] == "is token=[redacted] still valid?"
 
 
+def test_an_alert_source_is_redacted() -> None:
+    planted = alert("db-1 down").model_copy(update={"source": "db-1 password: Winter2026!xq"})
+    system = build_messages("what broke?", [planted])[0]["content"]
+    assert "Winter2026" not in system
+    assert "db-1 password: [redacted]: db-1 down" in system
+
+
 def test_prompt_says_when_there_are_no_alerts() -> None:
     assert "(none)" in build_messages("anything?", [])[0]["content"]
 

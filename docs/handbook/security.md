@@ -61,7 +61,7 @@ the route.
 | Signing a victim in as the attacker (login CSRF) | `state` bound to a cookie set when *this browser* started signing in | `routes/auth.py` | `test_callback_from_another_browser_is_refused` |
 | A stolen authorization code | PKCE (S256): the code is useless without the verifier, which never left the api | `oidc.py` | `test_authorization_url_asks_for_a_code_with_pkce` |
 | A replayed code or callback | the sign-in row is deleted on first use | `finish_login` | `test_a_code_works_once` |
-| A replayed or injected ID token | `nonce`, `exp`, `aud`, `azp`, and a signature by the provider's published key | `oidc.verify` | 11 cases in `test_oidc.py` |
+| A replayed or injected ID token | `nonce`, `exp`, `aud`, `azp`, and a signature by the provider's published key | `oidc.verify` | 12 cases in `test_oidc.py` |
 | `alg: none`, or HMAC with a public key | algorithm allow-list (RS256, PS256, ES256), checked before any key is used | same | `test_unsigned_and_hmac_tokens_are_refused` |
 | Another provider's response (mix-up) | the discovery `issuer` and the callback's `iss` must equal `OIDC_ISSUER` | `oidc.metadata`, `callback` | `test_metadata_naming_another_issuer...`, `test_provider_errors_and_mix_ups...` |
 | Open redirect via `?next=` | only paths on this site (`//evil`, `/\evil`, `https://...` become `/`) | `safe_next` | `test_next_is_never_another_site` + unit |

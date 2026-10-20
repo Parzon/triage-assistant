@@ -120,6 +120,13 @@ def test_sections_are_numbered_for_citation_in_the_prompt() -> None:
     )
 
 
+def test_a_section_heading_is_redacted_in_the_prompt() -> None:
+    heading = "Break-glass > Log in with password: Winter2026!xq"
+    system = build_messages("how do I log in?", [], [hit(1, heading)])[0]["content"]
+    assert "Winter2026" not in system
+    assert "[R1] Break-glass > Log in with password: [redacted] (team payments" in system
+
+
 def test_citations_are_the_sections_cited_and_the_numbers_invented() -> None:
     sections = [hit(1, "A > One"), hit(2, "A > Two")]
     cited, invalid = citations("First [R2]. Then [R1], and [R2] again; see [R9].", sections)
