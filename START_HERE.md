@@ -140,4 +140,4 @@ audit trail records, and why it holds no text.
 | the decisions, and why | [docs/adr/](docs/adr/) |
 | what to do when an alert fires | [docs/runbooks/](docs/runbooks/) |
 | the personal data the service holds | [privacy](docs/privacy.md) |
-| how to contribute; instructions for AI coding tools | [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) |
+| how to contribute; instructions for AI coding tools | [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), [coding with agents](docs/coding-with-agents.md) |
