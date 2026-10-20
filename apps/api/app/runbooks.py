@@ -467,7 +467,9 @@ async def search_runbooks(
         if retrieval.embedding_error:
             span.set_attribute("app.retrieval.embedding_error", retrieval.embedding_error)
         if settings.trace_content:
-            span.set_attribute("app.retrieval.headings", [hit.heading for hit in retrieval.hits])
+            span.set_attribute(
+                "app.retrieval.headings", [redact(hit.heading)[0] for hit in retrieval.hits]
+            )
         return retrieval
 
 

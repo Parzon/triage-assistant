@@ -235,7 +235,10 @@ class OIDCClient:
         # As bytes: compare_digest raises TypeError on a str with non-ASCII
         # characters, and the token carries whatever nonce the sign-in's
         # authorization request did - the user can edit that URL.
-        if not hmac.compare_digest(str(claims.get("nonce", "")).encode(), nonce.encode()):
+        # surrogatepass: JSON can carry a lone surrogate, which strict UTF-8
+        # refuses to encode.
+        claimed = str(claims.get("nonce", "")).encode("utf-8", "surrogatepass")
+        if not hmac.compare_digest(claimed, nonce.encode()):
             raise InvalidToken("ID token nonce does not match this sign-in")
         groups = claims.get(self._settings.oidc_groups_claim) or []
         return Identity(
@@ -317,7 +320,7 @@ def _signing_keys(jwks: dict[str, Any]) -> dict[str, jwt.PyJWK]:
 def _json(response: httpx2.Response) -> dict[str, Any]:
     try:
         body = response.json()
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:  # RecursionError: nested past the limit
         raise ProviderUnavailable("the identity provider sent something other than JSON") from exc
     if not isinstance(body, dict):
         raise ProviderUnavailable("the identity provider sent unexpected JSON")
