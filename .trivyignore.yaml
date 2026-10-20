@@ -13,93 +13,26 @@
 #       statement: "Only reachable through X, which this image never runs. Accepted by @lead."
 #       expired_at: 2026-12-01
 vulnerabilities:
-  # The api image's Debian base (python:3.13-slim). Debian fixed all three
-  # in its security archive (openssl 3.5.7-1~deb13u3, pcre2
-  # 10.46-1~deb13u3); the official image still ships deb13u2, and this
-  # waits for its rebuild. QUIC (75804) and DTLS (84782) are not served by
-  # this image: Python's ssl module speaks TLS over TCP only. PCRE2 (103111)
-  # is linked only by grep and libselinux, which the app never runs:
-  # Python's re is its own engine.
-  # Short expiry: bump the base digest as soon as the image is rebuilt.
-  - id: CVE-2026-75804
-    statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; QUIC is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
-    expired_at: 2026-10-14
-  - id: CVE-2026-84782
-    statement: "Fixed in Debian openssl 3.5.7-1~deb13u3, not yet in python:3.13-slim; DTLS is not used by this image. Accepted by the code owner (@Parzon), 2026-09-30."
-    expired_at: 2026-10-14
-  - id: CVE-2026-103111
-    statement: "Fixed in Debian pcre2 10.46-1~deb13u3, not yet in python:3.13-slim; only grep and libselinux link PCRE2, and the app runs neither. Accepted by the code owner (@Parzon), 2026-10-01."
-    expired_at: 2026-10-14
-  # The TLS edge's Caddy binary (tools/edge). 2.11.4 is the newest release,
-  # built with Go 1.26.3 and older golang.org/x modules; the fixes exist
-  # upstream but in no Caddy release yet (caddyserver/caddy#8055 asks for
-  # 2.11.5). Mostly denial of service in TLS, HTTP/2, URL and certificate
-  # parsing: the edge is the one internet-facing service, so this expires
-  # early. The way out before then: build Caddy with xcaddy on a patched Go.
-  - id: CVE-2026-27145
+  # The TLS edge's Caddy binary (tools/edge), 2.11.7: still built against
+  # golang.org/x/net v0.59.0 and Go 1.26.8. Caddy's own master branch
+  # already requires x/net v0.60.0 (the fix), but no tagged release
+  # carries it yet. Denial of service only (excessive HTTP/2 SETTINGS
+  # frames, a crafted Range header, repeated ECH outer extensions); the
+  # edge is the one internet-facing service, so this expires early. The
+  # way out before then: build Caddy with xcaddy pinning
+  # golang.org/x/net/http2@v0.60.0 on a patched Go.
+  - id: CVE-2026-78667
     paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-33818
+    statement: "No fixed Caddy release yet: 2.11.7 still needs golang.org/x/net v0.60.0, which only Caddy's master branch has. Checked 2026-10-20. Accepted by the code owner (@Parzon)."
+    expired_at: 2026-12-27
+  - id: CVE-2026-78669
     paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-39821
+    statement: "No fixed Caddy release yet: 2.11.7 still needs golang.org/x/net v0.60.0, which only Caddy's master branch has. Checked 2026-10-20. Accepted by the code owner (@Parzon)."
+    expired_at: 2026-12-27
+  - id: CVE-2026-97031
     paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-39822
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-42504
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-46600
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56852
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56853
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56854
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56858
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56859
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56860
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-56862
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-84304
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: CVE-2026-84445
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
-  - id: GHSA-hrxh-6v49-42gf
-    paths: ["usr/bin/caddy"]
-    statement: "No fixed Caddy release yet (caddyserver/caddy#8055). Proposed with the scan's introduction; accepted by the code owners' approval."
-    expired_at: 2026-10-25
+    statement: "No fixed Caddy release yet: 2.11.7 still needs golang.org/x/net v0.60.0, which only Caddy's master branch has. Checked 2026-10-20. Accepted by the code owner (@Parzon)."
+    expired_at: 2026-12-27
 
   # prom/alertmanager:v0.34.1 (compose-images). Its own most recent bump
   # (grpc-go 1.83.1) predates this CVE's fix. Checked against Docker Hub's
