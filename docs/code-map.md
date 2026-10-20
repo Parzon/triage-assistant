@@ -103,6 +103,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `unit/test_redact.py` | credentials never reach the model; hostile input stays linear |
 | `unit/test_redaction_corpus.py` | the redactor may catch more, never less, and never touch ordinary text |
 | `unit/test_runbooks.py` | splitting runbooks, numbering sections, reading citations, the vector format |
+| `unit/test_sessions.py` | how often a session's activity is recorded; which `Origin` counts as this site |
 | `unit/test_tracing.py` | the sampler, the prompt versions' hashes, trace ids in logs |
 | `unit/test_triage.py` | the answer stream: events, heartbeats, errors mid-answer, a cut-off answer |
 | `integration/conftest.py` | the real stack: Postgres through PgBouncer, Valkey, signed-in clients (`sign_in_as`) |
