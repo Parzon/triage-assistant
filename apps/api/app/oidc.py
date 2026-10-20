@@ -45,6 +45,9 @@ METADATA_TTL_S = 3600
 # (the provider rotated its keys) - at most this often, so tokens with made-up
 # key ids cannot make us hammer the provider.
 JWKS_MIN_REFRESH_S = 60
+# The key set is fetched again once it is this old, so a key the provider
+# withdraws (a compromised one) is trusted at most this long after.
+JWKS_MAX_AGE_S = 600
 
 
 class OIDCError(Exception):
@@ -168,7 +171,7 @@ class OIDCClient:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
-        return f"{meta.authorization_endpoint}?{urlencode(params)}"
+        return _with_query(meta.authorization_endpoint, params)
 
     async def exchange_code(self, code: str, *, code_verifier: str) -> str:
         """The code for tokens, over the back channel; returns the raw ID token."""
@@ -265,12 +268,13 @@ class OIDCClient:
         }
         if id_token:
             params["id_token_hint"] = id_token
-        return f"{meta.end_session_endpoint}?{urlencode(params)}"
+        return _with_query(meta.end_session_endpoint, params)
 
     async def _signing_key(self, kid: object) -> jwt.PyJWK:
         if not isinstance(kid, str):
             raise InvalidToken("ID token has no key id")
-        if kid not in self._keys and time.monotonic() - self._keys_at > JWKS_MIN_REFRESH_S:
+        age = time.monotonic() - self._keys_at
+        if age > JWKS_MAX_AGE_S or (kid not in self._keys and age > JWKS_MIN_REFRESH_S):
             meta = await self.metadata()
             jwks = await self._get_json(meta.jwks_uri)
             self._keys = _signing_keys(jwks)
@@ -315,6 +319,13 @@ def _signing_keys(jwks: dict[str, Any]) -> dict[str, jwt.PyJWK]:
         except jwt.PyJWTError:
             log.warning("skipping an unusable provider key", extra={"kid": jwk.get("kid")})
     return keys
+
+
+def _with_query(endpoint: str, params: dict[str, str]) -> str:
+    """The endpoint with params added to any query it already has (some
+    providers put the tenant there)."""
+    base = endpoint.rstrip("?&")
+    return f"{base}{'&' if '?' in base else '?'}{urlencode(params)}"
 
 
 def _json(response: httpx2.Response) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import jwt
@@ -16,6 +17,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from app.config import Settings
 from app.oidc import (
+    JWKS_MAX_AGE_S,
     InvalidToken,
     OIDCClient,
     OIDCError,
@@ -187,6 +189,31 @@ async def test_the_first_sign_in_after_boot_fetches_the_keys(
     monkeypatch.setattr("app.oidc.time", SimpleNamespace(monotonic=lambda: 30.0))
     await client.verify(token(), nonce=NONCE)
     assert provider.hits["certs"] == 1
+
+
+async def test_a_key_the_provider_withdraws_stops_being_trusted(
+    client: OIDCClient, provider: FakeProvider
+) -> None:
+    await client.verify(token(), nonce=NONCE)
+    provider.keys = [jwk(OTHER_KEY, "sig-2")]  # sig-1 withdrawn, say compromised
+    client._keys_at -= JWKS_MAX_AGE_S + 1
+    with pytest.raises(InvalidToken, match="unknown key"):
+        await client.verify(token(), nonce=NONCE)
+    assert provider.hits["certs"] == 2
+
+
+async def test_endpoints_with_a_query_string_keep_it(
+    client: OIDCClient, provider: FakeProvider
+) -> None:
+    provider.metadata["authorization_endpoint"] = f"{ISSUER}/auth?tenant=acme"
+    provider.metadata["end_session_endpoint"] = f"{ISSUER}/logout?tenant=acme"
+    sign_in = await client.authorization_url(state="st", nonce="no", code_challenge="ch")
+    sign_out = await client.end_session_url(id_token="the-id-token")
+    assert sign_out is not None
+    for url, ours in ((sign_in, "state"), (sign_out, "id_token_hint")):
+        query = parse_qs(urlsplit(url).query)
+        assert query["tenant"] == ["acme"]
+        assert ours in query
 
 
 async def test_metadata_naming_another_issuer_is_not_trusted(
