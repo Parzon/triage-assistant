@@ -196,6 +196,21 @@ def test_credentials_never_reach_the_prompt() -> None:
     assert question["content"] == "is token=[redacted] still valid?"
 
 
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("db-1 password: Winter2026!xq", "db-1 down"),
+        # The name in the source, the value at the start of the message.
+        ("secret-scanner/DB_PASSWORD", "Winter2026!xq found in commit 3f2a91c"),
+    ],
+)
+def test_an_alert_source_is_redacted(source: str, message: str) -> None:
+    planted = alert(message).model_copy(update={"source": source})
+    system = build_messages("what broke?", [planted])[0]["content"]
+    assert "Winter2026" not in system
+    assert "[redacted]" in system
+
+
 def test_prompt_says_when_there_are_no_alerts() -> None:
     assert "(none)" in build_messages("anything?", [])[0]["content"]
 

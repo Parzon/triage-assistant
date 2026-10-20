@@ -130,6 +130,8 @@ BAD_TOKENS: dict[str, Callable[[], str]] = {
     "expired": lambda: token(exp=int(time.time()) - 3600),
     "no expiry": lambda: token(exp=None),
     "another nonce (replayed token)": lambda: token(nonce="other"),
+    "a non-ASCII nonce (an edited sign-in URL)": lambda: token(nonce="café"),
+    "a nonce with a lone surrogate": lambda: token(nonce="\ud800"),
     "no nonce": lambda: token(nonce=None),
     "signed by another key": lambda: token(key=OTHER_KEY),
     "issued to another client (azp)": lambda: token(azp="someone-else"),
@@ -264,6 +266,25 @@ async def test_check_reports_the_provider_and_refreshes_the_cache(
     provider.metadata["issuer"] = "https://evil.example"  # misconfigured = not usable
     assert await client.check() is False
     assert client.reachable is False
+
+
+async def test_check_counts_an_unexpected_error_as_down(
+    client: OIDCClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fails(*, refresh: bool = False) -> None:
+        raise RuntimeError("an error nobody expected")
+
+    monkeypatch.setattr(client, "metadata", fails)
+    assert await client.check() is False
+    assert client.reachable is False
+
+
+def test_json_nested_past_the_recursion_limit_is_provider_unavailable() -> None:
+    from app.oidc import _json
+
+    nested = httpx2.Response(200, content=b"[" * 100_000 + b"]" * 100_000)
+    with pytest.raises(ProviderUnavailable):
+        _json(nested)
 
 
 async def test_the_watcher_exports_the_verdict(client: OIDCClient, provider: FakeProvider) -> None:
