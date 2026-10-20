@@ -77,5 +77,6 @@ test('the page loads with no console errors (CSP included)', async ({ page }) =>
   page.on('pageerror', (err) => errors.push(err.message))
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'triage-assistant' })).toBeVisible()
+  await expect(page).toHaveTitle('triage-assistant')
   expect(errors).toEqual([])
 })
