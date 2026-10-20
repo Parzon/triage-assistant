@@ -1029,7 +1029,7 @@ oversight:
 | What is this, how do I run it? | `README.md` |
 | What is it, in one page, for a decision-maker? | `docs/overview.md` |
 | How do I contribute? | `CONTRIBUTING.md` |
-| How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others) |
+| How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others); which tool, when: [coding with agents](docs/coding-with-agents.md) |
 | How is it built and run, and why, in depth? | this file and `docs/handbook/` |
 | Why was X decided? | `docs/adr/` |
 | What do I do when Y happens? | `docs/runbooks/` |

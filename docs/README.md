@@ -38,3 +38,11 @@ by convention, not here — that's where Claude Code, Codex, and other
 tools look for them. `AGENTS.md` points back into this folder so an
 agent picking up a task knows these doc types exist and when to
 create one.
+
+- **[`coding-with-agents.md`](coding-with-agents.md)**: which tool to
+  use, when, how and why, from issue to merge; what keeps an agent inside
+  the architecture; and what carries over to GitHub Copilot, Codex and
+  Cursor.
+- **[`testing_coding_skills.md`](testing_coding_skills.md)**: the
+  evidence. Every skill, plugin, MCP server and tool we tried on this
+  repository, backend and frontend, how we tested it, and what it did.

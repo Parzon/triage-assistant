@@ -2,6 +2,9 @@
 
 Prompts an agent loads on demand: Claude Code reads them from here, and so
 do GitHub Copilot's agents. Plain Markdown, nothing installed, nothing run.
+When to use which, with the other tools: [Coding with
+agents](../../docs/coding-with-agents.md); what each did when we tried it:
+[testing_coding_skills.md](../../docs/testing_coding_skills.md).
 
 | Skill | Use it | Runs |
 |---|---|---|

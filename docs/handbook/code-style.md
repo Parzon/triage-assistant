@@ -209,7 +209,9 @@ A claim with no command behind it is a hope.
 
 1. **`AGENTS.md` is the contract.** It gives commands, conventions and
    prohibitions, and agents such as Claude Code and Codex read it. When
-   an agent gets something wrong twice, the fix belongs in `AGENTS.md`.
+   an agent gets something wrong twice, the fix belongs in `AGENTS.md`;
+   when a code pattern shows the mistake, in a Semgrep rule
+   (`tools/semgrep/rules.yml`), which fails the build instead.
 2. **An agent runs `make check` before saying it is done**, and reports
    what it ran, with the output.
 3. **Review agent code like a capable newcomer's code:**
@@ -230,6 +232,10 @@ A claim with no command behind it is a hope.
    is in `AGENTS.md` ("Reviewing a change"): a pass for each area the
    change's promises rest on, a few hundred lines each, then one over the
    whole diff. Every finding is fixed or answered in the PR.
+
+Which tool to use for what, from issue to merge: [Coding with
+agents](../coding-with-agents.md). Every tool we tried, and what it did:
+[testing_coding_skills.md](../testing_coding_skills.md).
 
 #### What we measured (October 2026)
 
@@ -256,7 +262,7 @@ Costs: an area pass took about 120,000 tokens and 7 minutes; a whole-PR
 pass took 250,000 tokens and 12 minutes.
 
 What it means for us:
-- **Rules that say "be careful" change nothing.** The agent already
+- **Rules that say "be careful" showed no gain.** The agent already
   traces the callers, proves a fix with a test that fails on the old code
   and reports what it did not run. `AGENTS.md` is for what it cannot
   know: this repository's commands, rules and traps (rule 1).
@@ -267,11 +273,20 @@ What it means for us:
   fewer.
 
 How far this goes:
-- Three runs per cell, on two bugs.
+- Three runs per cell, on two bugs, on one model.
+- One person chose the bugs, wrote the issue text knowing the cause, wrote
+  the prompts and the hidden tests, and graded the reviews.
 - Both bugs were already known to be findable, because a later review
   found them.
-- The block was written from the same history and still made no
-  difference.
+- The review areas were cut by someone who knew where the bugs were. Split
+  blind instead, by agents given only the rule's text, 11 of 12 splits kept
+  the bug inside one area.
+- The fixes were right 12 of 12 times with the block and without it. At
+  that ceiling the block could show a cost but not a gain, and the issue
+  text, written knowing the cause, may have helped both arms alike.
 - The agents also had the current `AGENTS.md`, which mentions neither bug.
 - Reviews were graded by hand. Fixes were graded by hand and by tests the
   agents never saw.
+
+The method in full, its audit (paperthin's `mandela` and `hate`), and every
+other tool we tried: [testing_coding_skills.md](../testing_coding_skills.md).
