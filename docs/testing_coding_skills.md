@@ -313,12 +313,12 @@ the ones they need.
 
 - **oxlint 1.85, tsc, Vitest with React Testing Library.**
   - **Results:** run on main: no lint finding, no type error, 62 tests passing, 99% of statements covered.
-  - **Node:** the containers run Node 24 (`apps/web/Dockerfile`); they also pass on Node 22.
+  - **Node:** the repository pins Node 24 (`apps/web/.nvmrc`); they also pass on Node 22.
 - **Playwright.**
   - **End-to-end suite:** needs the production-shaped stack (`make prod-up && make e2e`); CI runs it on every PR.
   - **Local smoke:** we drove the dev server with Playwright and the preinstalled Chromium. Point `executablePath` at `/opt/pw-browsers/chromium` when the Playwright version expects a newer browser.
     - **With the api down,** the page says "Loading…" and then, after its retries, "Could not reach the service: Bad Gateway".
-    - **The tab is titled "app"** (`apps/web/index.html`), a one-line fix.
+    - **The tab was titled "app"** (`apps/web/index.html`). Fixed; the e2e suite now checks the title.
 - **`/run` (built into Claude Code).** It starts the app to see a change working.
   - **On a laptop:** it works with `make up`.
   - **In a cloud session:** the images can't be built here, so use the Vite dev server and Playwright instead.
