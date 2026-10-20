@@ -153,6 +153,18 @@ paths (validation, not found, dependency down). Unit tests go in
 `apps/api/tests/integration`. Coverage below 85% fails CI. Don't report a
 task complete without a green `make check`.
 
+## Reviewing a change
+Measured on two bugs that merged unseen (docs/handbook/code-style.md,
+"What we measured"):
+- One area at a time, a few hundred lines each: every area a promise of
+  the change rests on (redaction, sign-in, access, migrations) gets its
+  own pass. On a large PR, read the whole diff once more for what crosses
+  areas.
+- Show each finding with a probe or a test you ran, not a reading. Probes
+  go in a scratch folder; leave the repository as you found it.
+- Most severe first: where, what goes wrong and when, how sure you are. A
+  short list of real problems beats a long one; say so if there are none.
+
 ## Contribution conventions
 Branch naming: `type/<issue-number>-<short-desc>`. PRs reference an
 issue (`Closes #N`). Squash merge only. See `CONTRIBUTING.md`.

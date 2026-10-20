@@ -13,6 +13,7 @@ Closes #
 
 - [ ] `make check` passes locally (lint, types, tests; CI adds the scans, image checks and e2e)
 - [ ] Tests cover the failure paths, not only the happy path (dependency down / hung, invalid input, forbidden)
+- [ ] Another agent reviewed it, one area at a time (`AGENTS.md`, "Reviewing a change"); every finding fixed or answered here
 - [ ] Browser- or nginx-visible change: `make prod-up && make e2e`
 - [ ] Database path, pools or timeouts touched: the database drills (`make drills d="db-freeze db-hang pgbouncer-freeze"`)
 - [ ] Migration: backward compatible (expand now, contract in a later release), `lock_timeout`, concurrent indexes

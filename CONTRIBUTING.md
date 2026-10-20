@@ -24,6 +24,8 @@ green CI. `main` is always deployable.
 ## Definition of Done
 
 - [ ] Code merged via a reviewed, green PR (`make check` locally first)
+- [ ] Reviewed by another agent, one area at a time, every finding fixed
+      or answered: `AGENTS.md`, "Reviewing a change"
 - [ ] Tests for new behavior, including its failure paths (dependency
       down, dependency hung, invalid input): `docs/handbook/testing.md`
 - [ ] If a browser or nginx sees it: `make prod-up && make e2e`
