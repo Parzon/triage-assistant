@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Before anything leaves your machine: the fast half of what CI checks
-# (lint, types, unit tests - about 10 seconds, all in containers, so it
+# (lint, types, unit tests - under 20 seconds, all in containers, so it
 # behaves the same on every OS). CI still runs everything.
 #   make hooks      install it (per clone)
 #   git push --no-verify   skip it, when you really mean to

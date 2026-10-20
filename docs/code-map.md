@@ -155,6 +155,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `tools/mock-llm/mock_llm.py` | a fake OpenAI-compatible model with speed and failure knobs (`make mock`) |
 | `tools/mock-llm/Dockerfile`, `pyproject.toml` | its image and dependencies |
 | `tools/edge/Caddyfile`, `Dockerfile` | the TLS edge: HTTPS, certificates, security headers, holds requests while nginx restarts |
+| `tools/semgrep/rules.yml`, `rules.py` | this repository's own rules (bugs that merged once, AGENTS.md rules a machine can check), and the cases each must and must not match (`make semgrep`) |
 | `scripts/deploy.sh` | `make deploy`: a rolling deploy on one host, and code-only rollbacks |
 | `scripts/backup.sh`, `restore.sh` | `make backup` and `make restore` |
 | `scripts/failure-drills.sh`, `drills/steady_reads.py` | `make drills`: one fault at a time, what users see |
@@ -200,4 +201,6 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `.trivyignore.yaml` | accepted vulnerabilities, each with a reason and an expiry |
 | `.gitleaks.toml`, `.gitleaksignore` | the secret scan's settings, and fake credentials shown to be fake |
 | `.vscode/launch.json`, `extensions.json` | attach VS Code's debugger to the api container; the recommended extensions |
+| `.claude/settings.json`, `hooks/session-start.sh` | Claude Code: in a cloud session, install the api's and web's dependencies so tests and linters run without Docker |
+| `.claude/skills/` | prompts an agent loads when asked (`/ponytail`, `/hate`, `/mandela`), with their sources and licences |
 | `.editorconfig`, `.gitattributes`, `.gitignore` | whitespace, line endings (LF), what git ignores |

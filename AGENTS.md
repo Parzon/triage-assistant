@@ -35,14 +35,20 @@ Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
 `make` lists the commands for the first weeks; `make help-all` lists every
 target, by section. The ones you need most:
 - Start / stop the dev stack: `make up` / `make down`
-- Lint + format check: `make lint`; auto-format: `make fmt`
+- Lint + format check: `make lint`; auto-format: `make fmt`. It includes
+  `make semgrep`, this repo's own rules (`tools/semgrep/rules.yml`): a bug
+  class that merged once, or a rule here that review keeps missing, gets a
+  rule there, with cases it must and must not match in `rules.py`
 - Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
 - After any dependency change: `make rebuild` — NOT `docker compose up
   --build`, which keeps the old `.venv`/`node_modules` anonymous volume
 - Production-shaped stack locally: `make prod-up` (HTTPS through the TLS
   edge on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`).
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
-  same command CI runs), `make test-fast` (unit only, seconds)
+  same command CI runs), `make test-fast` (unit only, seconds). In a
+  Claude Code cloud session, `.claude/hooks/session-start.sh` installs the
+  dependencies on the host: `uv run pytest tests/unit` (and `ruff`, `mypy`)
+  in `apps/api`, `npm test` (and `npm run lint`, `npx tsc -b`) in `apps/web`
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
 - Supply chain (ADR-0022, CI's `security` job): `make secrets-scan`
   (gitleaks, every commit), `make scan` (Trivy: the production images and

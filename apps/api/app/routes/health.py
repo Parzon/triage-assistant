@@ -27,11 +27,15 @@ from app.metrics import metrics_response
 router = APIRouter(tags=["health"])
 
 
+# Public: probes carry no session.
+# nosemgrep: route-without-current-user
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Public: probes carry no session.
+# nosemgrep: route-without-current-user
 @router.get("/ready")
 async def ready(request: Request) -> JSONResponse:
     state = request.app.state
@@ -89,6 +93,7 @@ def _forget(task: asyncio.Future[object]) -> None:
 
 
 # Scraped by Prometheus on the private network; nginx refuses /api/metrics.
+# nosemgrep: route-without-current-user
 @router.get("/metrics", include_in_schema=False)
 async def metrics() -> Response:
     return metrics_response()

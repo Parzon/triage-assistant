@@ -44,6 +44,9 @@ jobs:
       - name: Shell scripts (deploy, restore, drills)
         working-directory: .
         run: make shellcheck
+      - name: The repository's own rules (tools/semgrep)
+        working-directory: .
+        run: make semgrep
       - name: Every setting reaches the api from .env (scripts/check_settings.py)
         working-directory: .
         run: python3 scripts/check_settings.py
