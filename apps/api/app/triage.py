@@ -118,10 +118,11 @@ def alert_line(alert: AlertOut, clean: Callable[[str], str]) -> str:
     source can name a credential whose value starts the message - and then
     cut: a cut through a credential would leave a part no pattern
     recognises, and that part would reach the model."""
-    text = clean(f"{alert.source}: {alert.message}")
+    source = f"{alert.source}: "
+    text = clean(source + alert.message)
     return (
         f"- [{alert.severity}] {alert.created_at:%Y-%m-%d %H:%M}Z team={alert.team} "
-        f"{text[: len(alert.source) + 2 + MAX_ALERT_CHARS]}"
+        f"{text[: len(source) + MAX_ALERT_CHARS]}"
     )
 
 

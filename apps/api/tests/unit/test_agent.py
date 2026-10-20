@@ -19,6 +19,7 @@ from app.runbooks import Retrieval
 from app.schemas import AlertOut
 from app.triage import Item, ToolEvent
 from tests.unit.test_runbooks import hit
+from tests.unit.test_triage import alert
 
 
 class ScriptedLLM:
@@ -183,13 +184,8 @@ async def test_a_slow_tool_times_out_and_is_left_to_finish(
 
 def test_tool_results_are_redacted_like_the_prompt() -> None:
     ctx = tools.ToolContext(cast(Any, None), cast(Any, None), cast(Any, None), cast(Any, None))
-    planted = AlertOut(
-        id=7,
-        team="db",
-        severity="critical",
-        created_at=datetime(2026, 9, 22, 18, 5, tzinfo=UTC),
-        source="secret-scanner/DB_PASSWORD",
-        message="Winter2026!xq found in commit 3f2a91c",
+    planted = alert("Winter2026!xq found in commit 3f2a91c").model_copy(
+        update={"source": "secret-scanner/DB_PASSWORD"}
     )
     alerts = tools._alerts_result([planted], tools.ListAlertsArgs(), ctx)
     section = replace(hit(1, "Break-glass > Root password:"), content="Winter2026!xq")
