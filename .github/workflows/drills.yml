@@ -1,0 +1,42 @@
+name: Drills
+
+# The failure drills (scripts/failure-drills.sh) on a runner, on demand:
+# Actions > Drills > Run workflow, on the branch to test. Run them before
+# merging an upgrade of asyncpg, SQLAlchemy or PgBouncer (ADR-0010), and
+# compare the table, which lands in the run's summary, with the matrix in
+# docs/handbook/operations.md. The default is the database path's drills.
+on:
+  workflow_dispatch:
+    inputs:
+      drills:
+        description: Drills to run (empty for every drill, ~15 minutes)
+        required: false
+        default: db-stop db-hang db-freeze pgbouncer-stop pgbouncer-hang pgbouncer-freeze
+
+permissions:
+  contents: read
+
+jobs:
+  drills:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make .env
+      # Rate limits raised so the probes themselves are never throttled.
+      - run: make prod-up
+        env:
+          ALERTS_RATE_LIMIT: "1000000"
+          CHAT_RATE_LIMIT: "1000000"
+      # The input goes through the environment, never into the script's text.
+      - name: Drills
+        shell: bash
+        env:
+          DRILLS: ${{ inputs.drills }}
+        run: make drills d="$DRILLS" | tee drills.md
+      - name: Results in the run's summary
+        if: always()
+        run: cat drills.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Stack logs
+        if: failure()
+        run: docker compose -p triage-assistant-prod -f compose.yaml -f compose.prod.yaml logs --no-color --tail=200

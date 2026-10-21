@@ -47,6 +47,7 @@ for this task."*
 | The production image | `make image-check` | `build` |
 | The browser, through the real stack | `make prod-up && make e2e` | `e2e` |
 | A prompt, model or retrieval change | `make evals ...`, before and after | none: the numbers go in the PR |
+| An upgrade on the database path (asyncpg, SQLAlchemy, PgBouncer) | `make drills d="db-freeze pgbouncer-freeze ..."` | `Drills`, run by hand on the branch: compare its table with the matrix in `docs/handbook/operations.md` |
 
 `make check` (lint, types, tests) is green before anything is called done.
 In a cloud session without Docker: the host commands in `AGENTS.md`.
