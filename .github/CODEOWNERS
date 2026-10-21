@@ -21,6 +21,16 @@
 # Decisions are reviewed by whoever owns the architecture
 /docs/adr/             @Parzon
 
+# The agent kit: what every coding agent reads and loads, and how changes
+# are reviewed (docs/agent-playbook.md, "Govern it")
+/AGENTS.md                          @Parzon
+/CLAUDE.md                          @Parzon
+/.claude/                           @Parzon
+/.agents/                           @Parzon
+/docs/agent-playbook.md             @Parzon
+/scripts/agent_kit.py               @Parzon
+/.github/pull_request_template.md   @Parzon
+
 # Accepting a vulnerability or exempting a secret is a decision too
 /.trivyignore.yaml     @Parzon
 /.gitleaks.toml        @Parzon
