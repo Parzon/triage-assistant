@@ -196,6 +196,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 |---|---|
 | `.github/workflows/ci.yml` | every push: lint, tests, build, scans, e2e |
 | `.github/workflows/release.yml` | a `vX.Y.Z` tag: scan, build for amd64 and arm64, publish, smoke-test |
+| `.github/workflows/drills.yml` | on demand: the failure drills on a runner, on any branch (the database path's by default) |
 | `.github/workflows/scan.yml` | weekly: this repo's images (fails on a finding) and the compose images (reports), for new vulnerabilities |
 | `.github/dependabot.yml` | update PRs: packages, Actions and compose images monthly, base images weekly |
 | `.github/CODEOWNERS`, `pull_request_template.md`, `ISSUE_TEMPLATE/` | reviews, and the shape of PRs and issues |
