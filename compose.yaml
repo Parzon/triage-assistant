@@ -158,7 +158,7 @@ services:
   # use Apple's GPU) and point LLM_BASE_URL at
   # http://host.docker.internal:11434/v1.
   ollama:
-    image: ollama/ollama:0.34.4
+    image: ollama/ollama:0.35.0
     profiles: ["ollama"]
     environment:
       # Unload a model after 5 idle minutes: its GPU memory goes back.
@@ -253,7 +253,7 @@ services:
     logging: *logging
 
   pgbouncer:
-    image: edoburu/pgbouncer:v1.25.2-p0
+    image: edoburu/pgbouncer:v1.26.0-p0
     environment:
       DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}
       POOL_MODE: transaction
@@ -407,7 +407,7 @@ services:
     logging: *logging
 
   grafana:
-    image: grafana/grafana:13.2.2
+    image: grafana/grafana:13.2.3
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
@@ -454,7 +454,7 @@ services:
     logging: *logging
 
   redis-exporter:
-    image: oliver006/redis_exporter:v1.92.1
+    image: oliver006/redis_exporter:v1.93.0
     profiles: ["observability"]
     environment:
       REDIS_ADDR: redis://redis:6379
