@@ -20,16 +20,22 @@ any agent, on one page: [the agent playbook](agent-playbook.md).
 - **Every mistake that gets through becomes a check.** Write a test, and a
   Semgrep rule when a code pattern shows the mistake. A rule that review
   keeps missing becomes a line in `AGENTS.md`.
-- **Three skills, when asked:** `/ponytail` for a scoped fix, `/hate` before
-  committing to a plan, `/mandela` before trusting a number.
+- **Eight skills.** Five load by themselves at their moment: `debug`,
+  `write-tests`, `full-stack-change`, `prove-it`, `two-pass-review`. Three
+  wait to be asked: `/ponytail` for a scoped fix, `/hate` before committing
+  to a plan, `/mandela` before trusting a number.
+- **One kit, any team.** [The agent playbook](agent-playbook.md) is the
+  framework: rules, skills, gates, steps, and how it is adopted and
+  governed. `make agent-kit to=../other-repo` copies it.
 - **Nothing installed, nothing paid.** A skill is Markdown copied into the
   repository. No plugin installers, no hooks from outside, no MCP servers
   that call out.
 
 ## What to use, at a glance
 
-Everything here is free. The skills are MIT-licensed Markdown in
-`.claude/skills/`. The checks and scanners are open source, and the
+Everything here is free. The skills are Markdown in `.claude/skills/`:
+three MIT-licensed copies, and five written here from ideas in MIT and
+Apache-2.0 packs. The checks and scanners are open source, and the
 scanners run from Docker images pinned by digest: Semgrep and gitleaks with
 no network, Trivy fetching only its vulnerability database. The slash
 commands come with Claude Code. Details and the evidence for each are
@@ -45,6 +51,8 @@ further down.
 | `/ponytail` | `.claude/skills/ponytail/` (MIT) | free | a bug fix or a small change with a clear end |
 | `/hate` | `.claude/skills/hate/` (MIT) | free | before committing to a plan, an RFC, an ADR or a new rule |
 | `/mandela` | `.claude/skills/mandela/` (MIT) | free | before trusting an eval, a benchmark or a "we measured X" |
+| `debug`, `write-tests`, `full-stack-change`, `prove-it`, `two-pass-review` | `.claude/skills/`, written here | free | they load by themselves: a bug, tests, an endpoint, schema or UI, a "done", a review |
+| `make agent-kit` | `scripts/agent_kit.py`, standard library only | free | copying the kit into another repository; `make lint` checks every skill loads |
 | `/simplify` | built into Claude Code | comes with it | after a fix works, before review |
 | `/code-review` | built into Claude Code | comes with it | breadth on risky files: sign-in, redaction, access, migrations |
 | `/security-review` | built into Claude Code | comes with it | access, sign-in, redaction; read it next to `AGENTS.md`'s security rules |
@@ -55,6 +63,11 @@ further down.
 Tried and left out: Semgrep's generic rule packs (103 findings, none
 real), "be careful" rules in `AGENTS.md` (no gain), paperthin's other 26
 skills (untested, and about half run unasked), anything with an installer.
+Read and left out as packs, October 2026: superpowers (a hook that forces a
+skill before every reply), graphify (sends the code to an LLM provider),
+caveman (an installer and hooks), ui-ux-pro-max, taste-skill and hallmark
+(scripts, outside AI services, landing pages). Their best ideas are in the
+five skills written here.
 
 ## What keeps an agent inside the architecture
 
@@ -108,6 +121,7 @@ reviews took 19% longer. The agent already works that way.
 | `/security-review` | access, sign-in, redaction, anything an outsider can send | from a session on the branch, the change committed, `origin/HEAD` set (`git remote set-head origin --auto`) | by design it drops denial-of-service findings, which `AGENTS.md` requires (bounded scans). Read it next to `AGENTS.md`'s security rules |
 | `/hate` | before committing to a plan, an RFC, an ADR or a new rule | `/hate` on the document | it found the flaw in our own experiment (areas cut by someone who knew where the bug was). Its cheap test then held, 11 of 12 |
 | `/mandela` | before trusting an eval, a benchmark or a "we measured X" | `/mandela` on the method | it named six leaks in our own measurements. All six are now stated as limits |
+| `debug`, `write-tests`, `full-stack-change`, `prove-it`, `two-pass-review` | a bug; tests; an endpoint, a schema change or a UI; before "done"; a review | nothing: each loads by itself when the task matches its description | the moments where an agent most often cuts a corner. Not measured here yet: the playbook says how they will be |
 | Evals | any change to `SYSTEM_PROMPT`, the model, retrieval or embeddings | the commands in `AGENTS.md`, under "Evals" and "Runbook search" | tests check the code; evals check the answers |
 | This repository's MCP server | asking your editor about your team's alerts and runbooks | `claude mcp add ...`, as in [Agents](handbook/agents.md), "MCP" | read-only, acts with your rights, sends nothing out |
 | Playwright, `/run` | a change you need to see in the browser | `make prod-up && make e2e`; `/run` on a laptop | catches what jsdom can't show |
@@ -130,13 +144,14 @@ reviews took 19% longer. The agent already works that way.
 2. **Build.** Start the agent on the branch.
    - **A scoped fix:** `/ponytail`.
    - **A bigger change:** no skill. Ask for the docs `AGENTS.md` names: the code map, `TECH_STACK.md`, the handbook chapter, and an ADR for a decision.
+   - **By themselves:** `debug` on a bug, `write-tests` for tests, `full-stack-change` on an endpoint, a migration or a page.
 3. **Prove it.**
    - A test that fails on the old code.
    - `make check` green.
    - A prompt, model or retrieval change: the evals, before and after.
 4. **Polish.** `/simplify` on the diff. Keep what reads better; drop what
    widens the PR.
-5. **Review.**
+5. **Review.** `two-pass-review` loads by itself: what the issue asked, then `AGENTS.md`, reported apart.
    - **A small PR (a few hundred lines):** one review.
    - **A large PR:** one review per area, then the whole diff once.
    - **Access, sign-in or redaction:** add `/security-review`.
@@ -157,9 +172,11 @@ reviews took 19% longer. The agent already works that way.
   - The Docker images can't be built there, so `make check` runs in CI.
 - **Adding a skill:**
   - Read all of it.
-  - Copy its `SKILL.md` and its licence into `.claude/skills/<name>/`.
+  - Copy its `SKILL.md` and its licence into `.claude/skills/<name>/`, or write your own from its ideas.
   - Note the source and the commit in `.claude/skills/README.md`.
   - Add `disable-model-invocation: true` unless it should run without being asked.
+  - `make lint` (`scripts/agent_kit.py check`) fails if it wouldn't load.
+- **Another repository:** `make agent-kit to=../other-repo` copies the kit; the playbook's "Adopt it" has the rest.
 
 ## Other agent tools: GitHub Copilot, Codex, Cursor
 
@@ -170,7 +187,7 @@ checks fail the build whatever wrote the code.
 |---|---|---|---|
 | `AGENTS.md` | through `CLAUDE.md` | the coding agent reads it (root and nested), and also `CLAUDE.md` and `.github/copilot-instructions.md` | Codex reads it. Cursor reads it alongside its own `.cursor/rules` |
 | Tests, types, lint, Semgrep, CI | yes | yes | yes |
-| `.claude/skills/` | `/name` | the coding agent, Copilot CLI and VS Code's agent mode load skills from `.claude/skills/` or `.github/skills/` | Codex loads skills from `.agents/skills/`: copy them there. Elsewhere, paste the text into the prompt |
+| `.claude/skills/` | `/name` | the coding agent, Copilot CLI and VS Code's agent mode load skills from `.claude/skills/` or `.github/skills/` | Codex loads skills from `.agents/skills/`: `python3 scripts/agent_kit.py copy . --codex` makes the copies, and `make lint` keeps them equal. Elsewhere, paste the text into the prompt |
 | The area-review prompt | in `AGENTS.md` | the same, for the coding agent. Copilot code review reads `.github/copilot-instructions.md`; GitHub's docs disagree on whether it reads `AGENTS.md`. If you use it, copy the review section there | paste it |
 | The session-start hook | `.claude/hooks/session-start.sh` | `.github/workflows/copilot-setup-steps.yml`, one job named `copilot-setup-steps` running the same two installs | the tool's own setup |
 | This repository's MCP server | `claude mcp add` | the repository's Copilot coding agent settings, as JSON (`mcpServers`); secrets prefixed `COPILOT_MCP_`; tools only. It needs the stack and a session in the agent's environment, so for now: from VS Code, on a laptop | the tool's MCP settings |

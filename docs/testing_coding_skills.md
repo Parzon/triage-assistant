@@ -15,6 +15,8 @@ installer (`npx ...`), a hook, an MCP server that calls out, or a request
 to star a repository. What earned its place is now in the repository:
 three skills in `.claude/skills/`, the Semgrep rules in `tools/semgrep/`
 (run by `make lint` and CI), and a session-start hook in `.claude/`.
+Five more skills were later written from other packs' ideas (version 2 of
+[the agent playbook](agent-playbook.md)); they are not measured here yet.
 
 ## At a glance
 

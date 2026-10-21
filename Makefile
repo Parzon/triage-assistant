@@ -20,7 +20,7 @@ export DEV_GID := $(shell id -g)
 S    ?=
 
 .PHONY: help help-all setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck semgrep fmt typecheck test test-api test-web test-fast e2e check \
+        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck semgrep agent-kit fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
         backup restore drills image-check scan scan-images scan-unfixed scan-ref scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
@@ -154,8 +154,9 @@ evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: shellcheck semgrep ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, the repo's own rules, every setting reachable
+lint: shellcheck semgrep ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, the repo's own rules, every setting reachable, every agent skill loads
 	@python3 scripts/check_settings.py
+	@python3 scripts/agent_kit.py check
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
 	$(DEV) run --rm --no-deps web npm run lint
@@ -170,6 +171,10 @@ SEMGREP := docker run --rm --network none -v "$(CURDIR):/src:ro" -w /src \
 semgrep: ## The repo's own rules (tools/semgrep): bugs that merged once, AGENTS.md rules a machine can check
 	$(SEMGREP) --test tools/semgrep/rules.py
 	$(SEMGREP) --error --quiet apps/api
+
+agent-kit: ## Copy the agent kit (docs/agent-playbook.md, the skills) into another repository: make agent-kit to=../other-repo [codex=1]
+	@test -n "$(to)" || { echo 'usage: make agent-kit to=../other-repo [codex=1]' >&2; exit 2; }
+	python3 scripts/agent_kit.py copy "$(to)" $(if $(codex),--codex)
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .

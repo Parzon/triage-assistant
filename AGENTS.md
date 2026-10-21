@@ -163,8 +163,11 @@ task complete without a green `make check`.
 
 ## Reviewing a change
 The whole workflow, step by step, for any agent (skills, checks, security
-pass, review, PR): `docs/agent-playbook.md`. Measured on two bugs that merged unseen (docs/handbook/code-style.md,
-"What we measured"):
+pass, review, PR), and how the kit is shared and governed:
+`docs/agent-playbook.md`. A review is two passes reported apart, spec and
+standards (the `two-pass-review` skill). The kit's skills must load: `make
+lint` runs `scripts/agent_kit.py check`. Measured on two bugs that merged
+unseen (docs/handbook/code-style.md, "What we measured"):
 - One area at a time, a few hundred lines each: every area a promise of
   the change rests on (redaction, sign-in, access, migrations) gets its
   own pass. On a large PR, read the whole diff once more for what crosses

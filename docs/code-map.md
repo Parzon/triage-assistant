@@ -164,6 +164,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `scripts/new-project.sh` | a fresh copy of this template renamed as your project |
 | `scripts/check_settings.py` | every setting reaches the container through compose (`make lint`) |
 | `scripts/check_trivyignore.py` | every accepted vulnerability has a reason and an expiry (`make scan`) |
+| `scripts/agent_kit.py` | the agent kit: `check` that every skill loads and is listed (`make lint`), `copy` the kit into another repository (`make agent-kit`) |
 | `scripts/lib/session.sh` | signed-in requests for scripts; the sign-in flow without a browser |
 | `scripts/git-hooks/pre-push` | lint, types and unit tests before a push (`make hooks`) |
 | `scripts/sql/*.sql`, `seed-alerts.sql` | `make db-activity`, `db-locks`, `db-top-queries`, `bench-rag-filter`, `seed` |
@@ -204,5 +205,5 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `.gitleaks.toml`, `.gitleaksignore` | the secret scan's settings, and fake credentials shown to be fake |
 | `.vscode/launch.json`, `extensions.json` | attach VS Code's debugger to the api container; the recommended extensions |
 | `.claude/settings.json`, `hooks/session-start.sh` | Claude Code: in a cloud session, install the api's and web's dependencies so tests and linters run without Docker |
-| `.claude/skills/` | prompts an agent loads when asked (`/ponytail`, `/hate`, `/mandela`), with their sources and licences |
+| `.claude/skills/` | prompts an agent loads at their moment (`debug`, `write-tests`, `full-stack-change`, `prove-it`, `two-pass-review`) or when asked (`/ponytail`, `/hate`, `/mandela`), with their sources and licences; part of the agent kit (`docs/agent-playbook.md`) |
 | `.editorconfig`, `.gitattributes`, `.gitignore` | whitespace, line endings (LF), what git ignores |
