@@ -20,9 +20,9 @@ export DEV_GID := $(shell id -g)
 S    ?=
 
 .PHONY: help help-all setup up rebuild down nuke ps logs sh psql redis-cli config \
-        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck fmt typecheck test test-api test-web test-fast e2e check \
+        migrate migration mock obs-up obs-down obs-check dashboard lint shellcheck semgrep fmt typecheck test test-api test-web test-fast e2e check \
         debug-up debug-down trace gunicorn db-activity db-locks db-top-queries redis-slowlog \
-        backup restore drills image-check scan scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
+        backup restore drills image-check scan scan-images scan-unfixed scan-ref scan-compose secrets-scan session revoke assistant audit audit-prune retention user-export user-forget reembed seed load \
         deps-api deps-web hooks prod-build prod-up deploy prod-down prod-ps prod-logs fix-perms ollama-pull evals bench-rag-filter
 
 # What `make` shows, in this order: the daily loop first (START_HERE.md).
@@ -154,7 +154,7 @@ evals: ## Evals against LLM_*: make evals [a="--target api --judge --judge-model
 
 # --- Code quality ---------------------------------------------------------------
 
-lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, every setting reachable
+lint: shellcheck semgrep ## ruff (lint + format check) for the api, oxlint for the web, shellcheck for scripts/, the repo's own rules, every setting reachable
 	@python3 scripts/check_settings.py
 	$(DEV) run --rm --no-deps api ruff check .
 	$(DEV) run --rm --no-deps api ruff format --check .
@@ -162,6 +162,14 @@ lint: shellcheck ## ruff (lint + format check) for the api, oxlint for the web, 
 
 shellcheck: ## shellcheck every script in scripts/ (the deploy and restore paths run from these)
 	docker run --rm -v "$(CURDIR):/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/lib/*.sh scripts/git-hooks/*
+
+# Offline: no network, no metrics, no rules fetched from a registry.
+SEMGREP := docker run --rm --network none -v "$(CURDIR):/src:ro" -w /src \
+  semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b \
+  semgrep scan --metrics=off --disable-version-check --config tools/semgrep/rules.yml
+semgrep: ## The repo's own rules (tools/semgrep): bugs that merged once, AGENTS.md rules a machine can check
+	$(SEMGREP) --test tools/semgrep/rules.py
+	$(SEMGREP) --error --quiet apps/api
 
 fmt: ## Auto-format the api with ruff (files stay owned by you)
 	$(DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" api ruff format .
@@ -175,7 +183,7 @@ typecheck: ## mypy (strict) on the api, tsc on the web
 # The scanners run from images pinned by digest. In March 2026 Trivy's own
 # releases (0.69.4 to 0.69.6) and its GitHub Action's tags were replaced by
 # code that stole CI credentials: a scanner is supply chain too.
-TRIVY := docker run --rm -v "$(CURDIR):/src:ro" -v triage-assistant-trivy-cache:/root/.cache/trivy \
+TRIVY := docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD -v "$(CURDIR):/src:ro" -v triage-assistant-trivy-cache:/root/.cache/trivy \
   aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 GITLEAKS := docker run --rm $(AS_ME) -v "$(CURDIR):/repo:ro" \
   ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
@@ -186,17 +194,37 @@ SCAN := --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --
   --ignorefile /src/.trivyignore.yaml
 
 # Built here and saved to a file for Trivy: no Docker socket in the scanner.
-scan: ## Scan the production images and the web's dependencies; fail on fixable HIGH/CRITICAL (Trivy)
-	@python3 scripts/check_trivyignore.py
+scan-images:
 	docker build -q --target production -t triage-assistant-api:scan apps/api >/dev/null
 	docker build -q --target production -t triage-assistant-web:scan apps/web >/dev/null
 	docker build -q -t triage-assistant-edge:scan tools/edge >/dev/null
+
+scan: scan-images ## Scan the production images and the web's dependencies; fail on fixable HIGH/CRITICAL (Trivy)
+	@python3 scripts/check_trivyignore.py
 	@mkdir -p .scan; trap 'rm -rf .scan' EXIT; status=0; \
 	  for image in api web edge; do echo "== triage-assistant-$$image"; \
 	    docker save -o .scan/$$image.tar triage-assistant-$$image:scan \
 	    && $(TRIVY) image $(SCAN) --input /src/.scan/$$image.tar || status=1; done; \
 	  echo "== apps/web/package-lock.json (runtime dependencies)"; \
 	  $(TRIVY) fs $(SCAN) --scanners vuln /src/apps/web || status=1; exit $$status
+
+# `make scan` skips findings with no fixed version (nothing to move to); this
+# lists them, every HIGH/CRITICAL fixed or not, and never fails: the weekly
+# scan prints it, so a finding with no fix is seen, not hidden.
+scan-unfixed: scan-images ## Report every HIGH/CRITICAL finding in the production images, fixable or not (never fails)
+	@mkdir -p .scan; trap 'rm -rf .scan' EXIT; \
+	  for image in api web edge; do echo "== triage-assistant-$$image"; \
+	    docker save -o .scan/$$image.tar triage-assistant-$$image:scan \
+	    && $(TRIVY) image --severity HIGH,CRITICAL --exit-code 0 --no-progress --table-mode detailed \
+	         --ignorefile /src/.trivyignore.yaml --input /src/.scan/$$image.tar; done
+
+# A published image for one platform: what `make scan` cannot see, since it
+# builds amd64 here. The release runs it for every image and platform it
+# pushed. TRIVY_USERNAME/TRIVY_PASSWORD, when set, sign in to the registry.
+scan-ref: ## Scan a published image: make scan-ref ref=ghcr.io/<owner>/<name>:1.2.3 [platform=linux/arm64]
+	@test -n "$(ref)" || { echo 'usage: make scan-ref ref=<image> [platform=linux/arm64]'; exit 2; }
+	@python3 scripts/check_trivyignore.py
+	$(TRIVY) image $(SCAN) $(if $(platform),--platform $(platform)) $(ref)
 
 scan-compose: ## Scan the third-party images the compose files run (Postgres, PgBouncer, Valkey, Keycloak, monitoring)
 	@python3 scripts/check_trivyignore.py
@@ -219,7 +247,7 @@ test: test-api test-web ## Every test suite (api + web), as CI runs them
 test-api: ## api suite + coverage gate, in a throwaway stack (real Postgres/PgBouncer/Valkey/Keycloak/mock LLM)
 	@$(TEST) up -d keycloak \
 	  && $(TEST) build -q mock-llm \
-	  && $(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check' \
+	  && $(TEST) run --build --rm migrate sh -c 'alembic upgrade head && alembic check && python migrations/check_lock_timeout.py' \
 	  && $(TEST) run --build --rm $(AS_ME) api pytest --cov --cov-report=term --cov-report=xml:coverage.xml; \
 	  status=$$?; $(TEST) down --volumes --remove-orphans >/dev/null 2>&1; exit $$status
 

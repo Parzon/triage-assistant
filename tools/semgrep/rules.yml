@@ -1,0 +1,49 @@
+# Rules for this repository's own mistakes: each is a bug that merged, or an
+# AGENTS.md rule a reviewer would otherwise check by eye. `make semgrep`
+# tests them against rules.py, then scans apps/api. Code that is right on
+# purpose says why in a comment, then `# nosemgrep: <id>` on the line above.
+rules:
+  - id: redact-before-cut
+    message: "Cut after redacting, never before: a cut through a credential leaves a part no pattern recognises."
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: clean($X[:$N])
+      - pattern: redact($X[:$N])
+      - pattern: _clean($X[:$N])
+  - id: compare-digest-on-str
+    message: "Compare bytes: hmac.compare_digest raises TypeError on a str with non-ASCII characters."
+    languages: [python]
+    severity: ERROR
+    pattern-either:
+      - pattern: hmac.compare_digest(str(...), ...)
+      - pattern: hmac.compare_digest(..., str(...))
+  - id: audit-event-via-db-add
+    message: "Record audit events with `await record(...)` (app/audit.py): row-level security refuses an insert that reads its row back."
+    languages: [python]
+    severity: ERROR
+    pattern: $DB.add(AuditEvent(...))
+  - id: route-without-current-user
+    message: "A route without `principal: CurrentUser`. Data routes take it and filter by principal.team_ids() (AGENTS.md); a public one says why in its nosemgrep comment."
+    languages: [python]
+    severity: ERROR
+    paths:
+      include: ["**/routes/*.py"]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @router.$METHOD(...)
+              async def $F(...):
+                  ...
+          - pattern: |
+              @router.$METHOD(...)
+              def $F(...):
+                  ...
+      - pattern-not: |
+          @router.$METHOD(...)
+          async def $F(..., $P: CurrentUser, ...):
+              ...
+      - pattern-not: |
+          @router.$METHOD(...)
+          def $F(..., $P: CurrentUser, ...):
+              ...

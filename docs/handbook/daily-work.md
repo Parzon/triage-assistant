@@ -236,8 +236,9 @@ through a pull request.
    - how you verified it (commands, numbers)
    - one line per new dependency
    - anything the reviewer should look at first
-6. **CI must be green.** `lint`, `test-api`, `build`, `web-build` and
-   `e2e` are required checks: branch protection enforces them.
+6. **CI must be green.** `lint`, `test-api`, `build`, `security`,
+   `web-build` and `e2e` are required checks: branch protection enforces
+   them.
 7. **Review:** read the diff as the next person to debug it at 3 am.
    Check tests for the failure paths, error shapes and timeouts on
    anything that waits, and that labels are bounded.
@@ -280,6 +281,7 @@ until it did, 22 of them could not be set from `.env`.
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | 20 / 0 | per worker; overflow connections are discarded on return, which churned under bursty load |
 | `DB_POOL_TIMEOUT_S` | 5 | wait for a pooled connection, then 503 |
 | `DB_CONNECT_TIMEOUT_S` | 5 | new connection to PgBouncer. There is deliberately no query timeout on the client (ADR-0010) |
+| `DB_TCP_USER_TIMEOUT_S` | 10 | drop a connection whose sent data goes unacknowledged this long: a vanished address, not a slow database (ADR-0027) |
 | `REDIS_URL` | required | the rate-limit store (Valkey) |
 | `RATELIMIT_TIMEOUT_S` | 0.2 | budget per limiter call; past it the request is allowed (fail-open, ADR-0004) |
 | `REDIS_MAX_CONNECTIONS` | 256 | per worker; at least the concurrent requests per worker |

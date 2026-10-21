@@ -17,6 +17,7 @@ import hmac
 import secrets
 from datetime import timedelta
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import delete, func, select, update
@@ -36,6 +37,13 @@ LOGIN_TTL_S = 600
 # request would turn every read into a write.
 TOUCH_INTERVAL_S = 300
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def touch_interval_s(settings: Settings) -> int:
+    """How old last_seen_at may get before a request rewrites it: at most
+    TOUCH_INTERVAL_S, and a tenth of the idle timeout, so a session in use
+    is never ended for idleness more than a tenth early."""
+    return min(TOUCH_INTERVAL_S, settings.session_idle_timeout_s // 10)
 
 
 def new_token() -> str:
@@ -206,9 +214,9 @@ async def authenticate(db: AsyncSession, token: str, settings: Settings) -> Prin
                 User.email,
                 User.name,
                 User.is_org_admin,
-                (UserSession.last_seen_at < now - timedelta(seconds=TOUCH_INTERVAL_S)).label(
-                    "stale"
-                ),
+                (
+                    UserSession.last_seen_at < now - timedelta(seconds=touch_interval_s(settings))
+                ).label("stale"),
                 Team.id.label("team_id"),
                 Team.slug.label("team_slug"),
                 Team.name.label("team_name"),
@@ -247,7 +255,7 @@ async def authenticate(db: AsyncSession, token: str, settings: Settings) -> Prin
             .values(last_seen_at=now)
         )
         # Committed now: a request that only reads never commits, and the
-        # touch must persist. At most once per session per TOUCH_INTERVAL_S.
+        # touch must persist. At most once per session per touch_interval_s.
         await db.commit()
     return principal
 
@@ -283,9 +291,33 @@ def check_same_origin(request: Request, settings: Settings) -> None:
     service's own. A client without one (curl, a load test) must send it
     explicitly. SameSite=Lax on the cookie is the second layer.
     """
-    if request.headers.get("origin") != settings.public_url:
+    sent = request.headers.get("origin")
+    if sent is None or _origin(sent) != _origin(settings.public_url):
         auth_rejections.labels("cross_origin").inc()
         raise ApiError(403, "csrf_failed", "cross-site request refused")
+
+
+def _origin(url: str) -> str | None:
+    """scheme://host[:port] as browsers write Origin: lower case, no default
+    port. PUBLIC_URL may be written otherwise ("https://Triage.Example.com:443").
+    None for anything that is not an http(s) origin."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username is not None
+        or parts.path not in ("", "/")
+        or parts.query
+        or parts.fragment
+    ):
+        return None
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    default = 443 if parts.scheme == "https" else 80
+    return f"{parts.scheme}://{host}" + ("" if port in (None, default) else f":{port}")
 
 
 async def current_principal(request: Request, db: DbSession) -> Principal:

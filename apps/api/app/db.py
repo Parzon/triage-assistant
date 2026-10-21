@@ -9,9 +9,11 @@ temp tables) outliving a transaction, and migrations bypass PgBouncer
 """
 
 import asyncio
+import socket
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
+import asyncpg  # type: ignore[import-untyped]
 from fastapi import Depends, Request
 from sqlalchemy import Connection, Select, event, func, select
 from sqlalchemy.ext.asyncio import (
@@ -52,9 +54,37 @@ def create_engine(settings: Settings) -> AsyncEngine:
         connect_args={
             "timeout": settings.db_connect_timeout_s,
             "server_settings": {"application_name": "triage-api"},
+            "connection_class": connection_class(settings.db_tcp_user_timeout_s),
         },
     )
     return engine
+
+
+def set_tcp_user_timeout(sock: Any, timeout_s: float) -> None:
+    """Drop a TCP connection whose sent data goes unacknowledged this long.
+
+    Without it, a pooled connection whose address vanished (the container
+    left the network and came back on another address) hangs at its next
+    use for about 15 minutes, holding its pool slot: measured, a full pool
+    then jammed at 40 of 40 and every request answered 503 (ADR-0027). The
+    pre-ping now fails instead, and the pool replaces the connection. No-op
+    where the option does not exist, or for a Unix socket.
+    """
+    option = getattr(socket, "TCP_USER_TIMEOUT", None)
+    if sock is None or option is None or sock.family not in (socket.AF_INET, socket.AF_INET6):
+        return
+    sock.setsockopt(socket.IPPROTO_TCP, option, int(timeout_s * 1000))
+
+
+def connection_class(timeout_s: float) -> type[Any]:
+    """An asyncpg connection that sets TCP_USER_TIMEOUT on its socket."""
+
+    class TcpUserTimeoutConnection(asyncpg.Connection):  # type: ignore[misc]
+        def __init__(self, protocol: Any, transport: Any, *args: Any, **kwargs: Any) -> None:
+            super().__init__(protocol, transport, *args, **kwargs)
+            set_tcp_user_timeout(transport.get_extra_info("socket"), timeout_s)
+
+    return TcpUserTimeoutConnection
 
 
 async def watch_db_pool(engine: AsyncEngine, capacity: int, interval_s: float = 1.0) -> None:

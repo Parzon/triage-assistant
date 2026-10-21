@@ -44,6 +44,7 @@ Query, streaming with `fetch`, nginx.
 | an MCP server | other AI clients should use the service's tools |
 | agent mode | the steps are not known before the model runs |
 | Playwright | the UI has a flow a unit test can't prove |
+| Semgrep, with your own rules | a bug class has merged once, or a rule in AGENTS.md is missed in review |
 | k6 | a capacity question has a number in it |
 | cloud-init, ufw, unattended-upgrades | you run a VM yourself |
 
@@ -328,6 +329,20 @@ in CI: a shared runner's timing varies too much to gate on.
 
 **shellcheck**, **promtool** ○ · with scripts, with alert rules<br>
 Check the shell scripts, and unit-test the alert rules.
+
+**Semgrep** ○ · when a bug class has merged once, or a rule in AGENTS.md is missed in review<br>
+This repository's own rules, as code patterns (`tools/semgrep/rules.yml`,
+`make semgrep`, part of `make lint` and CI): redact before cutting, compare
+bytes in `hmac.compare_digest`, audit events through `record()`, and a route
+without `CurrentUser` says why it is public. Each rule has cases that must
+and must not match (`rules.py`), tested before every scan. On earlier
+versions of the code, the first two found the bugs they are named after: a
+cut that sent part of a token to the model, and a sign-in that crashed on a
+non-ASCII nonce. Offline: an image pinned by digest, no network, no
+metrics. Instead: Semgrep's generic rule packs gave 103 findings here, none
+real; a ruff plugin needs Python code per rule. Watch: a rule that fires on
+correct code teaches people to add `nosemgrep` without reading, so keep
+each one narrow.
 
 ### Monitoring (optional)
 

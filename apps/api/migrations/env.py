@@ -6,7 +6,9 @@
   app's role (which may read and write rows but not change the schema).
 - Sets lock_timeout: a migration waiting for a lock queues every later
   query on that table behind it, turning "slow migration" into "outage".
-  Failing after a few seconds and retrying later is the safe outcome.
+  Failing after a few seconds and retrying later is the safe outcome. It
+  holds for the whole run, CREATE INDEX CONCURRENTLY included: one that
+  gives up leaves an INVALID index, to drop before retrying.
 - Runs one at a time: on ECS every api task migrates in an init container,
   and two tasks that start together on a database that is behind would
   run the same DDL. One of them failed (measured: 3 runs of 3). An
@@ -45,7 +47,11 @@ def run_migrations(**configure: Any) -> None:
         # any statement run first auto-begins a transaction on the
         # connection, Alembic's own becomes a no-op, and the whole migration
         # is rolled back on close - while the log still says it ran.
-        context.execute("SET LOCAL lock_timeout = '5s'")
+        # SET, not SET LOCAL: an autocommit block (CREATE INDEX CONCURRENTLY)
+        # commits this transaction, and a SET LOCAL ended with it - every
+        # later statement in the run had no timeout (measured: 5s, then 0).
+        # The connection is this run's alone, so the session is the scope.
+        context.execute("SET lock_timeout = '5s'")
         context.run_migrations()
 
 

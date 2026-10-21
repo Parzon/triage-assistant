@@ -114,20 +114,25 @@ Source = Callable[[Emit], Awaitable[None]]
 
 def alert_line(alert: AlertOut, clean: Callable[[str], str]) -> str:
     """One alert as the model reads it: as the API shows it, cut short.
-    Redacted first, then cut: a cut through a credential would leave a part
-    no pattern recognises, and that part would reach the model."""
+    Source and message are redacted as the one text the model reads - the
+    source can name a credential whose value starts the message - and then
+    cut: a cut through a credential would leave a part no pattern
+    recognises, and that part would reach the model."""
+    source = f"{alert.source}: "
+    text = clean(source + alert.message)
     return (
         f"- [{alert.severity}] {alert.created_at:%Y-%m-%d %H:%M}Z team={alert.team} "
-        f"{alert.source}: {clean(alert.message)[:MAX_ALERT_CHARS]}"
+        f"{text[: len(source) + MAX_ALERT_CHARS]}"
     )
 
 
 def section_text(number: int, hit: Hit, clean: Callable[[str], str]) -> str:
-    """One runbook section as the model reads it, numbered for citation."""
-    return (
-        f"[R{number}] {hit.heading} (team {hit.team}, updated {hit.updated_at:%Y-%m-%d})\n"
-        f"{clean(hit.content)}"
-    )
+    """One runbook section as the model reads it, numbered for citation. Its
+    heading (the runbook's title and the headings above it) and content are
+    redacted as one text, as for embedding: a heading can end with a
+    credential's name and the content start with its value."""
+    heading, _, content = clean(f"{hit.heading}\n{hit.content}").partition("\n")
+    return f"[R{number}] {heading} (team {hit.team}, updated {hit.updated_at:%Y-%m-%d})\n{content}"
 
 
 def build_messages(

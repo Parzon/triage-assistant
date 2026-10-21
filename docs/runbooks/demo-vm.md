@@ -181,7 +181,8 @@ GCP HTTPS LB): the load balancer terminates TLS. Remove `edge` from
 `HTTP_PORT=80`, with the security group allowing only the load balancer.
 Set the load balancer's idle timeout above 15 s (the SSE heartbeat); ALB's
 default 60 s works. nginx takes the client address from the load
-balancer's `X-Forwarded-For` (trusted from private ranges only).
+balancer's `X-Forwarded-For`: set `REAL_IP_FROM` to the load balancer's subnets,
+or nginx keeps believing only this host's Docker network.
 
 **No inbound ports at all** (a VM inside a corporate network): a
 Cloudflare Tunnel or Tailscale Funnel reaches out from the VM. 📘 Not

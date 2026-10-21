@@ -182,12 +182,14 @@ Common causes met here:
 - `test-api` (the throwaway stack plus the coverage gate, with the
   coverage figure in the job summary)
 - `build` (`make image-check`)
+- `security` (`make secrets-scan`: gitleaks over every commit; `make
+  scan`: Trivy on the images and the web's dependencies)
 - `web-build` (lint, tests, build, and the production nginx config test)
 - `e2e` (`make prod-up`, which waits until every service is healthy,
   Keycloak included, then Playwright; the report is uploaded when it
   fails)
 
-All five are required checks on `main`. If CI and your laptop disagree,
+All six are required checks on `main`. If CI and your laptop disagree,
 suspect state your laptop has and CI doesn't: stale images, an old
 `.venv` volume (`make rebuild`), your UID. CI runs as UID 1001, which
 has no account in the node image. That exposed a `HOME=/` problem the

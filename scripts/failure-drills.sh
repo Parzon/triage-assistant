@@ -132,8 +132,8 @@ drill() {  # drill <name> <inject> <restore>
 }
 
 inflight() {  # inflight <name> <inject> [restore]
-  local name=$1 dir i code rc ev
-  dir=$(mktemp -d)
+  local name=$1 dir i code rc ev since
+  dir=$(mktemp -d); since=$(date -u +%FT%TZ)
   echo ">> $(date -u +%T) $name" >&2
   mock config '{"tokens_per_s": 5}'   # ~50-token replies: streams of ~10s
   for i in $(seq 1 "${STREAMS:-6}"); do
@@ -165,6 +165,11 @@ inflight() {  # inflight <name> <inject> [restore]
       printf "%.1fs (%d of %d probes: %s)", l-f+0.25, n, NR, s}' "$dir/probe")
   slowest=$(awk '$2=="200" && $3>m {m=$3} END {printf "%.2fs", m}' "$dir/probe")
   printf '| %s | streams in flight: %s · new requests failing for: %s · slowest success %s | %s |\n' "$name" "$streams" "$outage" "$slowest" "$rec"
+  # Kept, because the next drill may replace both containers and their logs with them: an
+  # unexplained HTTP 500 during worker-kill once could not be traced for that reason.
+  mkdir -p .drills
+  { echo "== api"; docker logs --since "$since" "$(api)" 2>&1; echo "== web"; docker logs --since "$since" "$(C web)" 2>&1; } \
+    > ".drills/$name-$(date -u +%Y%m%dT%H%M%S).log"
   rm -rf "$dir"
 }
 
@@ -181,6 +186,27 @@ freeze() {  # freeze <name> <service>: steady reads; <service> frozen from +8s t
   wait
   sleep 3  # the pool gauge is sampled each second
   printf '| %s | reads: %s · pool connections held afterwards: %s | %s |\n' "$name" "$seen" "$(pool_in_use)" "$(recovered)"
+}
+
+ip_of() { docker inspect -f "{{(index .NetworkSettings.Networks \"${PROJECT}_default\").IPAddress}}" "$1"; }
+
+address_change() {  # address-change <name>: a full pool, then the api back on another address
+  local name=$1 net="${PROJECT}_default" old new
+  echo ">> $(date -u +%T) $name" >&2
+  # Every pool slot open: 60 readers for 5 s, so each worker holds its DB_POOL_SIZE connections,
+  # all bound to the api's current address.
+  docker run --rm -i --network "$net" -e SESSION_COOKIE="$SESSION" -e THREADS=60 python:3.13-slim \
+    python - 5 < scripts/drills/steady_reads.py >/dev/null
+  old=$(ip_of "$API")
+  # Off the network, and a placeholder joins while the api is away: it takes the freed address,
+  # so the api comes back on another one, as it does when other containers moved meanwhile.
+  docker network disconnect "$net" "$API"
+  docker run -d --rm --name drill-placeholder --network "$net" alpine sleep 60 >/dev/null
+  docker network connect --alias api "$net" "$API"
+  docker rm -f drill-placeholder >/dev/null
+  new=$(ip_of "$API")
+  printf '| %s | address %s → %s · pool connections held afterwards: %s | %s |\n' \
+    "$name" "$old" "$new" "$(sleep 20; pool_in_use)" "$(recovered)"
 }
 
 oom() {  # oom <name>: cap the api's memory below what its processes already use
@@ -242,6 +268,7 @@ run_drill() {
     llm-drop)        drill llm-drop "mock config '{\"fail_mode\":\"drop_mid_stream\"}'" "mock reset '{}'" ;;
     network-cut)     drill network-cut "docker network disconnect ${PROJECT}_default $API" \
                        "docker network connect --alias api ${PROJECT}_default $API" ;;
+    address-change)  address_change address-change ;;
     nginx-stop)      drill nginx-stop "docker stop $(C web)" "docker start $(C web)" ;;
     edge-stop)       drill edge-stop "docker stop $(C edge)" "docker start $(C edge)" ;;
     idp-stop)        drill idp-stop "docker stop $(C keycloak)" "docker start $(C keycloak)" ;;
@@ -254,7 +281,7 @@ run_drill() {
   esac
 }
 
-ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut nginx-stop edge-stop idp-stop worker-kill api-crash deploy rollout oom"
+ALL="baseline redis-stop redis-hang pgbouncer-stop pgbouncer-hang db-stop db-hang db-freeze pgbouncer-freeze llm-down llm-429 llm-500 llm-hang llm-drop network-cut address-change nginx-stop edge-stop idp-stop worker-kill api-crash deploy rollout oom"
 echo "| drill | what a user sees while the fault is active | ready again after restore |"
 echo "|---|---|---|"
 for d in ${1:-$ALL}; do

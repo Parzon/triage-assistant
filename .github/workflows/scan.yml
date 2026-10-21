@@ -36,3 +36,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: This repo's production images, rebuilt from main
         run: make scan
+      # Findings with no fix yet: `make scan` cannot fail on them, so they are listed here,
+      # never failing, to be read with the weekly run and revisited when a fix appears.
+      - name: Every HIGH/CRITICAL finding, fixable or not (report only)
+        if: always()
+        run: make scan-unfixed

@@ -42,7 +42,15 @@ jobs:
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
+    outputs:
+      ecr: ${{ steps.ecr.outputs.ecr }}
     steps:
+      # Whether to copy the release into ECR (the `ecr` job): a job's `if` cannot read
+      # secrets, so this step does.
+      - id: ecr
+        env:
+          CONFIGURED: ${{ secrets.AWS_ECR_ROLE_ARN != '' }}
+        run: echo "ecr=$CONFIGURED" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -178,12 +186,41 @@ jobs:
       - name: Show what the tag now points at
         run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
 
+  # What was published, per platform. The verify job scans an amd64 build made for it; the arm64
+  # images are built on their own runners, from the same commit, and were never scanned before.
+  scan-published:
+    needs: merge
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, web, edge]
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Scan the published image for this platform
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ matrix.image }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triage-assistant-$IMAGE_NAME:${GITHUB_REF_NAME#v}"
+          make scan-ref ref="$ref" platform="$PLATFORM"
+
   # Copies the published release into ECR, for the AWS deployment. AWS trusts
   # this workflow's OIDC token (role triage-gha-ecr-push, tags v* only), so no
-  # AWS key is stored in GitHub. Off until the repository variable is set.
+  # AWS key is stored in GitHub. Off until the repository secret AWS_ECR_ROLE_ARN is set: a
+  # secret, because the ARN names the AWS account and only secrets are masked in public logs.
   ecr:
-    needs: merge
-    if: github.event_name == 'push' && vars.AWS_ECR_ROLE_ARN != ''
+    # After the smoke test and the scan of what was published: ECR tags are immutable, so an image
+    # that failed either must never land there.
+    needs: [verify, merge, smoke, scan-published]
+    if: github.event_name == 'push' && needs.verify.outputs.ecr == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -194,8 +231,10 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ECR_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
           aws-region: ap-south-1
+          # The registry's address is the account id: masked in the lines that print it.
+          mask-aws-account-id: true
       - id: ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -237,7 +276,31 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: GitHub release with notes generated from the merged PRs
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: GitHub release with notes generated from the merged PRs, and upgrade notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+        run: |
+          # What an upgrade needs, which PR titles do not say: the settings added to or
+          # removed from .env.example since the previous release. A new one can be a setting
+          # the api refuses to start without (the production checks, ADR-0023).
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)
+          keys() { git show "$1:.env.example" 2>/dev/null | sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u; }
+          list() { local k out=""; while read -r k; do out+="${out:+, }\`$k\`"; done; printf '%s' "$out"; }
+          added=$(comm -13 <(keys "$prev") <(keys "$GITHUB_SHA") | list)
+          removed=$(comm -23 <(keys "$prev") <(keys "$GITHUB_SHA") | list)
+          notes="## Upgrade notes"$'\n\n'
+          if [ -z "$prev" ]; then
+            notes+="The first release."
+          elif [ -z "$added$removed" ]; then
+            notes+="No settings added to or removed from \`.env.example\` since $prev."
+          else
+            notes+="Settings in \`.env.example\` since $prev: compare your \`.env\` before you deploy."
+            if [ -n "$added" ]; then notes+=$'\n'"- added: $added"; fi
+            if [ -n "$removed" ]; then notes+=$'\n'"- removed: $removed"; fi
+          fi
+          # --notes is prepended to the generated notes.
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag \
+            --notes "$notes"

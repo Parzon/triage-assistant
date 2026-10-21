@@ -32,7 +32,15 @@ make assistant off="Bad advice under investigation; use the runbooks directly" E
 make assistant ENV=prod           # the state, and since when
 ```
 
-No single quotes in the reason. With an API client and an org admin's
+No single quotes in the reason. On the ECS stack (`infra/aws`), the same
+command runs in an api task through ECS Exec, and any reason works:
+
+```
+./ops.sh cli assistant --off --reason "Bad advice under investigation; use the runbooks directly"
+./ops.sh cli assistant            # the state, and since when
+```
+
+With an API client and an org admin's
 session: `PUT /api/assistant {"enabled": false, "reason": "..."}`.
 
 ## Check
@@ -57,5 +65,5 @@ session: `PUT /api/assistant {"enabled": false, "reason": "..."}`.
 
 After the cause is fixed and the evals pass on the fix
 (docs/handbook/ai-engineering.md): "Switch on" in the app, or `make
-assistant on=1 ENV=prod`. Both flips are in the audit trail: `make audit
+assistant on=1 ENV=prod` (on ECS: `./ops.sh cli assistant --on`). Both flips are in the audit trail: `make audit
 a="--action assistant.disabled"`.

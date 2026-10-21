@@ -45,6 +45,9 @@ METADATA_TTL_S = 3600
 # (the provider rotated its keys) - at most this often, so tokens with made-up
 # key ids cannot make us hammer the provider.
 JWKS_MIN_REFRESH_S = 60
+# The key set is fetched again once it is this old, so a key the provider
+# withdraws (a compromised one) is trusted at most this long after.
+JWKS_MAX_AGE_S = 600
 
 
 class OIDCError(Exception):
@@ -113,10 +116,15 @@ class OIDCClient:
 
     async def check(self) -> bool:
         """Does the provider answer, with metadata we can trust? Fetches it
-        afresh, which also keeps the cached copy current."""
+        afresh, which also keeps the cached copy current. Never raises: an
+        error escaping here would end the watcher, and the gauge and /ready
+        would keep their last verdict for good."""
         try:
             await self.metadata(refresh=True)
         except ProviderUnavailable:
+            self.reachable = False
+        except Exception as exc:
+            log.error("identity provider check failed", exc_info=exc)
             self.reachable = False
         else:
             self.reachable = True
@@ -163,7 +171,7 @@ class OIDCClient:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
-        return f"{meta.authorization_endpoint}?{urlencode(params)}"
+        return _with_query(meta.authorization_endpoint, params)
 
     async def exchange_code(self, code: str, *, code_verifier: str) -> str:
         """The code for tokens, over the back channel; returns the raw ID token."""
@@ -227,7 +235,13 @@ class OIDCClient:
             len(audiences) > 1 and "azp" not in claims
         ):
             raise InvalidToken("ID token was issued to another client")
-        if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
+        # As bytes: compare_digest raises TypeError on a str with non-ASCII
+        # characters, and the token carries whatever nonce the sign-in's
+        # authorization request did - the user can edit that URL.
+        # surrogatepass: JSON can carry a lone surrogate, which strict UTF-8
+        # refuses to encode.
+        claimed = str(claims.get("nonce", "")).encode("utf-8", "surrogatepass")
+        if not hmac.compare_digest(claimed, nonce.encode()):
             raise InvalidToken("ID token nonce does not match this sign-in")
         groups = claims.get(self._settings.oidc_groups_claim) or []
         return Identity(
@@ -254,12 +268,13 @@ class OIDCClient:
         }
         if id_token:
             params["id_token_hint"] = id_token
-        return f"{meta.end_session_endpoint}?{urlencode(params)}"
+        return _with_query(meta.end_session_endpoint, params)
 
     async def _signing_key(self, kid: object) -> jwt.PyJWK:
         if not isinstance(kid, str):
             raise InvalidToken("ID token has no key id")
-        if kid not in self._keys and time.monotonic() - self._keys_at > JWKS_MIN_REFRESH_S:
+        age = time.monotonic() - self._keys_at
+        if age > JWKS_MAX_AGE_S or (kid not in self._keys and age > JWKS_MIN_REFRESH_S):
             meta = await self.metadata()
             jwks = await self._get_json(meta.jwks_uri)
             self._keys = _signing_keys(jwks)
@@ -306,10 +321,17 @@ def _signing_keys(jwks: dict[str, Any]) -> dict[str, jwt.PyJWK]:
     return keys
 
 
+def _with_query(endpoint: str, params: dict[str, str]) -> str:
+    """The endpoint with params added to any query it already has (some
+    providers put the tenant there)."""
+    base = endpoint.rstrip("?&")
+    return f"{base}{'&' if '?' in base else '?'}{urlencode(params)}"
+
+
 def _json(response: httpx2.Response) -> dict[str, Any]:
     try:
         body = response.json()
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:  # RecursionError: nested past the limit
         raise ProviderUnavailable("the identity provider sent something other than JSON") from exc
     if not isinstance(body, dict):
         raise ProviderUnavailable("the identity provider sent unexpected JSON")

@@ -12,12 +12,14 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, StatusCode
 
+from app.config import Settings
 from app.errors import install_error_handlers
+from app.main import NO_NATIVE_TELEMETRY, create_app
 from app.middleware import RequestContextMiddleware
 
 
 def build_app() -> FastAPI:
-    app = FastAPI()
+    app = FastAPI(telemetry=NO_NATIVE_TELEMETRY)
     install_error_handlers(app)
     app.add_middleware(RequestContextMiddleware)
 
@@ -149,3 +151,27 @@ async def test_an_unmatched_path_keeps_the_method_as_its_name(
     assert span.name == "GET"
     assert span.attributes is not None
     assert "http.route" not in span.attributes
+
+
+async def test_the_app_makes_one_span_per_request_and_records_no_query(
+    spans: InMemorySpanExporter,
+) -> None:
+    # FastAPI can trace requests itself, with the query string: on the
+    # sign-in callback, that is the authorization code.
+    settings = Settings(
+        database_url="postgresql://tests@unused/tests",  # type: ignore[arg-type]
+        redis_url="redis://unused",  # type: ignore[arg-type]
+        llm_base_url="http://unused/v1",
+        llm_api_key="unused",  # type: ignore[arg-type]
+        llm_model="unused",
+        public_url="https://unused",
+        oidc_issuer="https://unused/realms/tests",
+        oidc_client_id="unused",
+        oidc_client_secret="unused",  # type: ignore[arg-type]
+    )
+    transport = httpx.ASGITransport(app=create_app(settings))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.get("/health?code=planted-authorization-code&state=s")
+    assert server_span(spans).name == "GET /health"
+    for span in spans.get_finished_spans():
+        assert "planted-authorization-code" not in str(dict(span.attributes or {}))

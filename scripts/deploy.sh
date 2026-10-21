@@ -13,8 +13,9 @@
 #   3. wait for nginx to resolve it (resolver valid=10s in default.conf)
 #   4. stop the old api: it finishes its in-flight requests (streams
 #      included, up to graceful_timeout) while nginx sends new ones to the new
-#   5. replace nginx itself - the one step with a gap: one container owns the
-#      published port (measured below; zero only behind a load balancer)
+#   5. replace nginx: behind the TLS edge no request fails (the edge retries);
+#      where nginx publishes the port itself, ~0.3 s of refused connections;
+#      then the edge, only if its image changed (~2 s of refused connections)
 # Rollback = deploy the previous tag. The database stays as it is (the
 # code rolls back, the schema does not), so the previous tag must be able to
 # run on it: the expand/contract rule.

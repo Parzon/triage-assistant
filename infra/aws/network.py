@@ -11,6 +11,10 @@ from aws_cdk import Stack
 from aws_cdk import aws_ec2 as ec2
 from constructs import Construct
 
+# A constant, not read from the VPC: the app stack trusts proxies in this range
+# (FORWARDED_ALLOW_IPS), and a token would make it import from this stack.
+VPC_CIDR = "10.20.0.0/16"
+
 
 class NetworkStack(Stack):
     def __init__(self, scope: Construct, cid: str, **kw) -> None:
@@ -18,7 +22,7 @@ class NetworkStack(Stack):
         self.vpc = ec2.Vpc(
             self,
             "Vpc",
-            ip_addresses=ec2.IpAddresses.cidr("10.20.0.0/16"),
+            ip_addresses=ec2.IpAddresses.cidr(VPC_CIDR),
             # Named, not looked up: synth works without credentials.
             availability_zones=["ap-south-1a", "ap-south-1b"],
             nat_gateways=0,

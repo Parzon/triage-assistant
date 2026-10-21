@@ -5,6 +5,7 @@ tests/integration/test_agent.py."""
 import asyncio
 import copy
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,8 +15,11 @@ from prometheus_client import REGISTRY
 
 from app import agent, tools
 from app.llm import Finish, Message, PromptRef, ToolCall, Usage
+from app.runbooks import Retrieval
 from app.schemas import AlertOut
 from app.triage import Item, ToolEvent
+from tests.unit.test_runbooks import hit
+from tests.unit.test_triage import alert
 
 
 class ScriptedLLM:
@@ -176,3 +180,15 @@ async def test_a_slow_tool_times_out_and_is_left_to_finish(
     # Not cancelled: a database call cancelled mid-query can hang for good
     # and leak its connection (app/db.py). It ends on its own.
     await asyncio.wait_for(finished.wait(), timeout=1)
+
+
+def test_tool_results_are_redacted_like_the_prompt() -> None:
+    ctx = tools.ToolContext(cast(Any, None), cast(Any, None), cast(Any, None), cast(Any, None))
+    planted = alert("Winter2026!xq found in commit 3f2a91c").model_copy(
+        update={"source": "secret-scanner/DB_PASSWORD"}
+    )
+    alerts = tools._alerts_result([planted], tools.ListAlertsArgs(), ctx)
+    section = replace(hit(1, "Break-glass > Root password:"), content="Winter2026!xq")
+    sections = tools._sections_result(Retrieval([section], "hybrid"), ctx)
+    assert "Winter2026" not in alerts.text
+    assert "Winter2026" not in sections.text

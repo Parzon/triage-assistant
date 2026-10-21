@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(0, ge=0)
     db_pool_timeout_s: float = Field(5.0, gt=0)
     db_connect_timeout_s: float = Field(5.0, gt=0)
+    # How long data sent to PgBouncer may stay unacknowledged before the
+    # kernel drops the connection (TCP_USER_TIMEOUT, ADR-0027). Ends a
+    # connection whose peer or own address is gone, which otherwise hangs
+    # about 15 minutes; a frozen process's kernel still acknowledges, so it
+    # never fires for a slow or frozen database.
+    db_tcp_user_timeout_s: float = Field(10.0, gt=0)
 
     redis_url: SecretStr
     # Budget for one rate-limit round trip; past it the limiter fails open.

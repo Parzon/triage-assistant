@@ -5,9 +5,10 @@ name: Deploy (AWS demo)
 #   copied the images to ECR;
 # - by hand, for any released version. A rollback is this: run it with the last good tag.
 # AWS trusts this job's OIDC token only inside the GitHub environment "aws-demo" (role
-# triage-gha-deploy), so that environment's protection rules (required reviewers, a wait
-# timer, allowed branches) gate every deploy. Off until the repository variable
-# AWS_DEPLOY_ROLE_ARN is set.
+# triage-gha-deploy), so that environment's protection rules gate every deploy: here a
+# required reviewer, and deployments from protected branches only. Off until the repository
+# secret AWS_DEPLOY_ROLE_ARN is set: a secret, not a variable, because the ARN names the AWS
+# account and GitHub masks only secrets in these public logs.
 
 on:
   workflow_run:
@@ -28,10 +29,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # A job's `if` cannot read secrets: this one reads the secret and answers yes or no.
+  enabled:
     if: >-
-      vars.AWS_DEPLOY_ROLE_ARN != '' && (github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    outputs:
+      deploy: ${{ steps.check.outputs.deploy }}
+    steps:
+      - id: check
+        env:
+          CONFIGURED: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}
+        run: echo "deploy=$CONFIGURED" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: enabled
+    if: needs.enabled.outputs.deploy == 'true'
     runs-on: ubuntu-24.04
     environment:
       name: aws-demo
@@ -57,8 +71,10 @@ jobs:
           node-version: 22
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ap-south-1
+          # The account id also appears in what follows (CDK's output, resource ARNs).
+          mask-aws-account-id: true
       # Rolling deploy; CloudFormation waits until ECS is stable. A release whose tasks keep
       # failing is rolled back by the ECS deployment circuit breaker, and this step fails.
       - name: cdk deploy triage-app

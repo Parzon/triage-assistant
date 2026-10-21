@@ -27,10 +27,11 @@ RUN npm run build
 # without the optional modules (njs, xslt, image filter, geoip) and curl,
 # which this config never loads - and which brought every known
 # vulnerability the full variant had (make scan).
-FROM nginxinc/nginx-unprivileged:1.31-alpine-slim@sha256:c81a27f28bc2d9c2da8998444e653c7b85b9bbbaa92e44ef18d8920784e06507 AS production
+FROM nginxinc/nginx-unprivileged:1.31-alpine-slim@sha256:a8cb0f33d51fa107c96fd2bd3a71aaf564ec131e9d2bdf8700944f0ed8b170d7 AS production
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/snippets/ /etc/nginx/snippets/
+COPY --chmod=755 nginx/entrypoint/25-runtime-conf.sh /docker-entrypoint.d/
 EXPOSE 8080
 # 127.0.0.1, not localhost: busybox wget may try ::1 first, and nginx
 # listens on IPv4 only, which would mark a healthy container unhealthy.

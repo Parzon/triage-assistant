@@ -3,7 +3,8 @@
 - triage-gha-ecr-push: the Release workflow's `ecr` job, on a version tag, copies the images to ECR.
 - triage-gha-deploy: the Deploy workflow, only inside the GitHub environment "aws-demo", runs
   `cdk deploy`. It may only assume the roles `cdk bootstrap` created; CloudFormation does the
-  rest with its own execution role. The environment is where approvals and waits are enforced.
+  rest with its own execution role. The environment is where approvals are enforced: it has a
+  required reviewer, and accepts deployments from protected branches only.
 """
 
 from aws_cdk import CfnOutput, Duration, Stack
@@ -13,6 +14,8 @@ from constructs import Construct
 # This repo issues GitHub's "immutable subject" claim, which embeds the numeric owner and repo IDs
 # (survives renames, blocks a re-created repo of the same name). Read it with:
 #   gh api repos/Parzon/triage-assistant/actions/oidc/customization/sub
+# A copy of this template has other ids: put its own prefix here (the same command, on its repo),
+# or no role can be assumed. scripts/new-project.sh renames the repo, not these numbers.
 SUB_PREFIX = "repo:Parzon@124113141/triage-assistant@1381921470"
 ISSUER = "token.actions.githubusercontent.com"
 
@@ -33,7 +36,10 @@ class CicdStack(Stack):
                 provider.open_id_connect_provider_arn,
                 conditions={
                     "StringEquals": {f"{ISSUER}:aud": "sts.amazonaws.com"},
-                    # Only a release tag of this repo: not a PR, not a branch, not a fork.
+                    # Only a release tag of this repo: not a PR, not a branch, not a fork. A tag
+                    # pushed on any branch runs that branch's release.yml, which could drop its
+                    # "tag is on main" check: the repository's tag ruleset, which lets only admins
+                    # create v* tags, is what makes this a release (using-this-template.md).
                     "StringLike": {f"{ISSUER}:sub": f"{SUB_PREFIX}:ref:refs/tags/v*"},
                 },
             ),
