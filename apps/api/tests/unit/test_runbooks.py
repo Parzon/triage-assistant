@@ -4,6 +4,7 @@ answer, and the vector wire format (app/runbooks.py, app/triage.py,
 app/vector.py)."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from app.runbooks import Hit, _embed, document_text, split_sections
@@ -118,6 +119,21 @@ def test_sections_are_numbered_for_citation_in_the_prompt() -> None:
     assert none.endswith(
         "Runbook sections of the asker's teams, most relevant first:\n(no runbook sections)"
     )
+
+
+def test_a_section_heading_is_redacted_in_the_prompt() -> None:
+    heading = "Break-glass > Log in with password: Winter2026!xq"
+    system = build_messages("how do I log in?", [], [hit(1, heading)])[0]["content"]
+    assert "Winter2026" not in system
+    assert "[R1] Break-glass > Log in with password: [redacted] (team payments" in system
+
+
+def test_a_credential_named_in_a_heading_is_redacted_in_its_content() -> None:
+    section = replace(hit(1, "Break-glass > Root password:"), content="Winter2026!xq\nthen rotate")
+    system = build_messages("how do I log in?", [], [section])[0]["content"]
+    assert "Winter2026" not in system
+    assert "[R1] Break-glass > Root password: (team payments, updated 2026-09-20)\n" in system
+    assert "[redacted]\nthen rotate" in system
 
 
 def test_citations_are_the_sections_cited_and_the_numbers_invented() -> None:

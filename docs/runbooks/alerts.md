@@ -208,9 +208,12 @@ sessions are this service's own, and last up to 12 hours.
 `"identity_provider": "degraded"`; the api log says why ("identity provider
 unavailable", with the URL). Bundled Keycloak: `make logs ENV=prod S=keycloak`.
 Also: `"metadata names another issuer"` means OIDC_ISSUER does not match the
-provider's - a configuration change, not an outage.
+provider's - a configuration change, not an outage. `"identity provider
+check failed"` with a traceback is an error the check did not expect: the
+provider may be up, and the traceback says what broke.
 **Fix:** the provider (or the network path to it: DNS, egress firewall,
-proxy). Nothing to restart here; the check recovers within 30s.
+proxy). Nothing to restart here; the check recovers within 30s. After
+"identity provider check failed": what its traceback names.
 
 ## SignInsFailing
 

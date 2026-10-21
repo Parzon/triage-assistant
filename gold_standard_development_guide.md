@@ -777,6 +777,11 @@ Measured building the traces; the evidence is in
   provider's stream, open until garbage collection.
 - **The ASGI instrumentation package adds a span per response chunk**
   unless `exclude_spans=["send", "receive"]`: hundreds per streamed answer.
+- **FastAPI 0.142 traces requests itself, on by default:** a second
+  server span per request, with the query string (the sign-in callback's
+  is the authorization code), and exporters added from `OTEL_*` variables.
+  `create_app` turns it off (`NO_NATIVE_TELEMETRY`); a test fails if a
+  request makes two server spans or records its query.
 - **`SQLAlchemyInstrumentor` is a process-wide singleton:** a second
   `instrument()` is ignored. Instrument in startup, uninstrument in
   shutdown.
@@ -1029,7 +1034,7 @@ oversight:
 | What is this, how do I run it? | `README.md` |
 | What is it, in one page, for a decision-maker? | `docs/overview.md` |
 | How do I contribute? | `CONTRIBUTING.md` |
-| How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others) |
+| How should an AI coding agent work here? | `AGENTS.md` (read by Claude Code, Codex, others); which tool, when: [coding with agents](docs/coding-with-agents.md) |
 | How is it built and run, and why, in depth? | this file and `docs/handbook/` |
 | Why was X decided? | `docs/adr/` |
 | What do I do when Y happens? | `docs/runbooks/` |

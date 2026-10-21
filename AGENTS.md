@@ -35,14 +35,20 @@ Python 3.13 + uv for `apps/api`, Node 24 for `apps/web`.
 `make` lists the commands for the first weeks; `make help-all` lists every
 target, by section. The ones you need most:
 - Start / stop the dev stack: `make up` / `make down`
-- Lint + format check: `make lint`; auto-format: `make fmt`
+- Lint + format check: `make lint`; auto-format: `make fmt`. It includes
+  `make semgrep`, this repo's own rules (`tools/semgrep/rules.yml`): a bug
+  class that merged once, or a rule here that review keeps missing, gets a
+  rule there, with cases it must and must not match in `rules.py`
 - Add a dependency: `make deps-api p=<pkg>` / `make deps-web p=<pkg>`
 - After any dependency change: `make rebuild` — NOT `docker compose up
   --build`, which keeps the old `.venv`/`node_modules` anonymous volume
 - Production-shaped stack locally: `make prod-up` (HTTPS through the TLS
   edge on `EDGE_HTTPS_PORT`; nginx on loopback `HTTP_PORT`).
 - Tests: `make test` (full suite + coverage gate in a throwaway stack, the
-  same command CI runs), `make test-fast` (unit only, seconds)
+  same command CI runs), `make test-fast` (unit only, seconds). In a
+  Claude Code cloud session, `.claude/hooks/session-start.sh` installs the
+  dependencies on the host: `uv run pytest tests/unit` (and `ruff`, `mypy`)
+  in `apps/api`, `npm test` (and `npm run lint`, `npx tsc -b`) in `apps/web`
 - Types: `make typecheck` (mypy strict + tsc). Before pushing: `make check`
 - Supply chain (ADR-0022, CI's `security` job): `make secrets-scan`
   (gitleaks, every commit), `make scan` (Trivy: the production images and
@@ -101,7 +107,9 @@ target, by section. The ones you need most:
 - Failure drills: `make drills` injects each fault into the production stack
   (rate limits raised, as for load tests) and records what users see;
   `make drills d="db-freeze deploy"` runs a selection. Run the database
-  drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010).
+  drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010); on a
+  runner: Actions > Drills > Run workflow, on the branch (the table is the
+  run's summary; compare it with the matrix in docs/handbook/operations.md).
 - Evals (the model's answers, not the code; `apps/api/evals`, docs/handbook/ai-engineering.md):
   `make evals` runs them in the dev api against `LLM_*` (quality mode). Before
   merging any change to `SYSTEM_PROMPT` or the model: `make evals a="--judge
@@ -152,6 +160,19 @@ paths (validation, not found, dependency down). Unit tests go in
 `apps/api/tests/unit` (no services), anything touching Postgres/Redis in
 `apps/api/tests/integration`. Coverage below 85% fails CI. Don't report a
 task complete without a green `make check`.
+
+## Reviewing a change
+The whole workflow, step by step, for any agent (skills, checks, security
+pass, review, PR): `docs/agent-playbook.md`. Measured on two bugs that merged unseen (docs/handbook/code-style.md,
+"What we measured"):
+- One area at a time, a few hundred lines each: every area a promise of
+  the change rests on (redaction, sign-in, access, migrations) gets its
+  own pass. On a large PR, read the whole diff once more for what crosses
+  areas.
+- Show each finding with a probe or a test you ran, not a reading. Probes
+  go in a scratch folder; leave the repository as you found it.
+- Most severe first: where, what goes wrong and when, how sure you are. A
+  short list of real problems beats a long one; say so if there are none.
 
 ## Contribution conventions
 Branch naming: `type/<issue-number>-<short-desc>`. PRs reference an

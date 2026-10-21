@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import jwt
@@ -16,6 +17,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from app.config import Settings
 from app.oidc import (
+    JWKS_MAX_AGE_S,
     InvalidToken,
     OIDCClient,
     OIDCError,
@@ -130,6 +132,8 @@ BAD_TOKENS: dict[str, Callable[[], str]] = {
     "expired": lambda: token(exp=int(time.time()) - 3600),
     "no expiry": lambda: token(exp=None),
     "another nonce (replayed token)": lambda: token(nonce="other"),
+    "a non-ASCII nonce (an edited sign-in URL)": lambda: token(nonce="café"),
+    "a nonce with a lone surrogate": lambda: token(nonce="\ud800"),
     "no nonce": lambda: token(nonce=None),
     "signed by another key": lambda: token(key=OTHER_KEY),
     "issued to another client (azp)": lambda: token(azp="someone-else"),
@@ -185,6 +189,31 @@ async def test_the_first_sign_in_after_boot_fetches_the_keys(
     monkeypatch.setattr("app.oidc.time", SimpleNamespace(monotonic=lambda: 30.0))
     await client.verify(token(), nonce=NONCE)
     assert provider.hits["certs"] == 1
+
+
+async def test_a_key_the_provider_withdraws_stops_being_trusted(
+    client: OIDCClient, provider: FakeProvider
+) -> None:
+    await client.verify(token(), nonce=NONCE)
+    provider.keys = [jwk(OTHER_KEY, "sig-2")]  # sig-1 withdrawn, say compromised
+    client._keys_at -= JWKS_MAX_AGE_S + 1
+    with pytest.raises(InvalidToken, match="unknown key"):
+        await client.verify(token(), nonce=NONCE)
+    assert provider.hits["certs"] == 2
+
+
+async def test_endpoints_with_a_query_string_keep_it(
+    client: OIDCClient, provider: FakeProvider
+) -> None:
+    provider.metadata["authorization_endpoint"] = f"{ISSUER}/auth?tenant=acme"
+    provider.metadata["end_session_endpoint"] = f"{ISSUER}/logout?tenant=acme"
+    sign_in = await client.authorization_url(state="st", nonce="no", code_challenge="ch")
+    sign_out = await client.end_session_url(id_token="the-id-token")
+    assert sign_out is not None
+    for url, ours in ((sign_in, "state"), (sign_out, "id_token_hint")):
+        query = parse_qs(urlsplit(url).query)
+        assert query["tenant"] == ["acme"]
+        assert ours in query
 
 
 async def test_metadata_naming_another_issuer_is_not_trusted(
@@ -264,6 +293,25 @@ async def test_check_reports_the_provider_and_refreshes_the_cache(
     provider.metadata["issuer"] = "https://evil.example"  # misconfigured = not usable
     assert await client.check() is False
     assert client.reachable is False
+
+
+async def test_check_counts_an_unexpected_error_as_down(
+    client: OIDCClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fails(*, refresh: bool = False) -> None:
+        raise RuntimeError("an error nobody expected")
+
+    monkeypatch.setattr(client, "metadata", fails)
+    assert await client.check() is False
+    assert client.reachable is False
+
+
+def test_json_nested_past_the_recursion_limit_is_provider_unavailable() -> None:
+    from app.oidc import _json
+
+    nested = httpx2.Response(200, content=b"[" * 100_000 + b"]" * 100_000)
+    with pytest.raises(ProviderUnavailable):
+        _json(nested)
 
 
 async def test_the_watcher_exports_the_verdict(client: OIDCClient, provider: FakeProvider) -> None:

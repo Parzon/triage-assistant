@@ -96,13 +96,14 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `unit/test_evals.py` | the eval harness itself: what counts as a pass |
 | `unit/test_gunicorn_conf.py` | the worker count follows the container's CPU limit |
 | `unit/test_logs.py` | one JSON object per line, with the request id |
-| `unit/test_middleware.py` | the request id, the access log and headers, against a tiny app |
+| `unit/test_middleware.py` | the request id, the access log and headers, against a tiny app; the real app makes one request span, with no query string |
 | `unit/test_oidc.py` | every ID token check, failed one at a time, against a fake provider |
 | `unit/test_probe.py` | the readiness probe answers within its deadline |
 | `unit/test_ratelimit.py` | the limiter: limits, windows, failing open, failing closed |
 | `unit/test_redact.py` | credentials never reach the model; hostile input stays linear |
 | `unit/test_redaction_corpus.py` | the redactor may catch more, never less, and never touch ordinary text |
 | `unit/test_runbooks.py` | splitting runbooks, numbering sections, reading citations, the vector format |
+| `unit/test_sessions.py` | how often a session's activity is recorded; which `Origin` counts as this site |
 | `unit/test_tracing.py` | the sampler, the prompt versions' hashes, trace ids in logs |
 | `unit/test_triage.py` | the answer stream: events, heartbeats, errors mid-answer, a cut-off answer |
 | `integration/conftest.py` | the real stack: Postgres through PgBouncer, Valkey, signed-in clients (`sign_in_as`) |
@@ -155,6 +156,7 @@ order it happens. Lockfiles, eval case data and images are left out.
 | `tools/mock-llm/mock_llm.py` | a fake OpenAI-compatible model with speed and failure knobs (`make mock`) |
 | `tools/mock-llm/Dockerfile`, `pyproject.toml` | its image and dependencies |
 | `tools/edge/Caddyfile`, `Dockerfile` | the TLS edge: HTTPS, certificates, security headers, holds requests while nginx restarts |
+| `tools/semgrep/rules.yml`, `rules.py` | this repository's own rules (bugs that merged once, AGENTS.md rules a machine can check), and the cases each must and must not match (`make semgrep`) |
 | `scripts/deploy.sh` | `make deploy`: a rolling deploy on one host, and code-only rollbacks |
 | `scripts/backup.sh`, `restore.sh` | `make backup` and `make restore` |
 | `scripts/failure-drills.sh`, `drills/steady_reads.py` | `make drills`: one fault at a time, what users see |
@@ -194,10 +196,13 @@ order it happens. Lockfiles, eval case data and images are left out.
 |---|---|
 | `.github/workflows/ci.yml` | every push: lint, tests, build, scans, e2e |
 | `.github/workflows/release.yml` | a `vX.Y.Z` tag: scan, build for amd64 and arm64, publish, smoke-test |
+| `.github/workflows/drills.yml` | on demand: the failure drills on a runner, on any branch (the database path's by default) |
 | `.github/workflows/scan.yml` | weekly: this repo's images (fails on a finding) and the compose images (reports), for new vulnerabilities |
 | `.github/dependabot.yml` | update PRs: packages, Actions and compose images monthly, base images weekly |
 | `.github/CODEOWNERS`, `pull_request_template.md`, `ISSUE_TEMPLATE/` | reviews, and the shape of PRs and issues |
 | `.trivyignore.yaml` | accepted vulnerabilities, each with a reason and an expiry |
 | `.gitleaks.toml`, `.gitleaksignore` | the secret scan's settings, and fake credentials shown to be fake |
 | `.vscode/launch.json`, `extensions.json` | attach VS Code's debugger to the api container; the recommended extensions |
+| `.claude/settings.json`, `hooks/session-start.sh` | Claude Code: in a cloud session, install the api's and web's dependencies so tests and linters run without Docker |
+| `.claude/skills/` | prompts an agent loads when asked (`/ponytail`, `/hate`, `/mandela`), with their sources and licences |
 | `.editorconfig`, `.gitattributes`, `.gitignore` | whitespace, line endings (LF), what git ignores |

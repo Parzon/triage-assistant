@@ -74,6 +74,8 @@ def failed(settings: Settings, code: str) -> RedirectResponse:
     return response
 
 
+# Public: signing in starts without a session.
+# nosemgrep: route-without-current-user
 @router.get("/auth/login", dependencies=[Depends(rate_limit_by_ip("auth", "auth_rate_limit"))])
 async def login(request: Request, db: DbSession, next: str = "/") -> RedirectResponse:
     settings: Settings = request.app.state.settings
@@ -98,6 +100,8 @@ async def login(request: Request, db: DbSession, next: str = "/") -> RedirectRes
     return response
 
 
+# Public: the provider sends the browser back here to start a session.
+# nosemgrep: route-without-current-user
 @router.get("/auth/callback", dependencies=[Depends(rate_limit_by_ip("auth", "auth_rate_limit"))])
 async def callback(
     request: Request,
@@ -147,6 +151,8 @@ async def callback(
     return response
 
 
+# Public: ends the session it is sent with, if there is one.
+# nosemgrep: route-without-current-user
 @router.post("/auth/logout", response_model=LogoutOut)
 async def logout(request: Request, response: Response, db: DbSession) -> LogoutOut:
     """Ends this session, and returns the provider's sign-out URL for the
