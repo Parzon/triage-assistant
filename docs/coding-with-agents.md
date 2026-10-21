@@ -3,7 +3,8 @@
 How to get clean code from an AI coding agent on this repository, and keep
 it inside the architecture: which tools to use, when, how, and why. Each
 "why" was measured here. The runs, the numbers and their limits are in
-[testing_coding_skills.md](testing_coding_skills.md).
+[testing_coding_skills.md](testing_coding_skills.md). Just the steps, for
+any agent, on one page: [the agent playbook](agent-playbook.md).
 
 ## In one minute
 

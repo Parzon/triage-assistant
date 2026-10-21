@@ -39,6 +39,9 @@ tools look for them. `AGENTS.md` points back into this folder so an
 agent picking up a task knows these doc types exist and when to
 create one.
 
+- **[`agent-playbook.md`](agent-playbook.md)**: the steps every change
+  follows with any coding agent (Claude Code, Copilot, Codex), the checks
+  CI enforces, and how to share the kit across teams. One page.
 - **[`coding-with-agents.md`](coding-with-agents.md)**: which tool to
   use, when, how and why, from issue to merge; what keeps an agent inside
   the architecture; and what carries over to GitHub Copilot, Codex and

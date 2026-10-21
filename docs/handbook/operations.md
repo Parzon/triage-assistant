@@ -580,8 +580,10 @@ when the fault was sent.
 **Adding a drill:** a `case` line in `scripts/failure-drills.sh` with an
 inject command, a restore command, and which drill kind measures it.
 `make drills` runs them all (~15 minutes); `make drills d="db-freeze
-deploy"` a selection. The output is one Markdown table row per drill:
-compare it with the matrix below. A row that differs is either a
+deploy"` a selection. Without a laptop: Actions > Drills > Run workflow,
+on the branch (`.github/workflows/drills.yml`; the database path's drills
+by default). The output is one Markdown table row per drill, in the
+run's summary on GitHub: compare it with the matrix below. A row that differs is either a
 regression or a finding: write it down, fix it, keep the drill.
 
 ### The matrix

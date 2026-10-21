@@ -107,7 +107,9 @@ target, by section. The ones you need most:
 - Failure drills: `make drills` injects each fault into the production stack
   (rate limits raised, as for load tests) and records what users see;
   `make drills d="db-freeze deploy"` runs a selection. Run the database
-  drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010).
+  drills after upgrading asyncpg, SQLAlchemy or PgBouncer (ADR-0010); on a
+  runner: Actions > Drills > Run workflow, on the branch (the table is the
+  run's summary; compare it with the matrix in docs/handbook/operations.md).
 - Evals (the model's answers, not the code; `apps/api/evals`, docs/handbook/ai-engineering.md):
   `make evals` runs them in the dev api against `LLM_*` (quality mode). Before
   merging any change to `SYSTEM_PROMPT` or the model: `make evals a="--judge
@@ -160,7 +162,8 @@ paths (validation, not found, dependency down). Unit tests go in
 task complete without a green `make check`.
 
 ## Reviewing a change
-Measured on two bugs that merged unseen (docs/handbook/code-style.md,
+The whole workflow, step by step, for any agent (skills, checks, security
+pass, review, PR): `docs/agent-playbook.md`. Measured on two bugs that merged unseen (docs/handbook/code-style.md,
 "What we measured"):
 - One area at a time, a few hundred lines each: every area a promise of
   the change rests on (redaction, sign-in, access, migrations) gets its
