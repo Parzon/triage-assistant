@@ -158,7 +158,7 @@ services:
   # use Apple's GPU) and point LLM_BASE_URL at
   # http://host.docker.internal:11434/v1.
   ollama:
-    image: ollama/ollama:0.35.0
+    image: ollama/ollama:0.40.12
     profiles: ["ollama"]
     environment:
       # Unload a model after 5 idle minutes: its GPU memory goes back.
@@ -192,7 +192,7 @@ services:
   # container, the realm imported from the file whenever the container is
   # created: fine for development, CI and demos - never the production IdP.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.0
+    image: quay.io/keycloak/keycloak:26.8.1-2
     profiles: ["idp"]
     # Refuses to start - rather than create demo users with an empty
     # password - when .env lacks the passwords. (A compose-level ${VAR:?}
@@ -253,7 +253,7 @@ services:
     logging: *logging
 
   pgbouncer:
-    image: edoburu/pgbouncer:v1.26.0-p0
+    image: edoburu/pgbouncer:v1.26.1-p0
     environment:
       DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}
       POOL_MODE: transaction
@@ -339,7 +339,7 @@ services:
     # Valkey: the Linux Foundation fork of Redis 7.2, BSD-licensed (Redis
     # 7.4+ is RSALv2/SSPLv1; 8.x adds AGPLv3). Same protocol, same clients,
     # so the service keeps the protocol's name. See docs/adr/0002.
-    image: valkey/valkey:8.1.10-alpine
+    image: valkey/valkey:8.1.11-alpine
     # Rate-limit counters are disposable: no persistence, bounded memory, and
     # evict old keys instead of refusing writes when full.
     command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
@@ -357,7 +357,7 @@ services:
   # from .env (the mock would drop out); list them all instead.
 
   prometheus:
-    image: prom/prometheus:v3.15.0
+    image: prom/prometheus:v3.15.1
     profiles: ["observability"]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -393,7 +393,7 @@ services:
   # Traces (ADR-0018). The api sends OTLP/HTTP to :4318 when
   # OTEL_EXPORTER_OTLP_ENDPOINT is set; the UI is :16686.
   jaeger:
-    image: jaegertracing/jaeger:2.21.0
+    image: jaegertracing/jaeger:2.22.0
     profiles: ["observability"]
     command: ["--config", "/etc/jaeger/config.yaml"]
     volumes:
@@ -407,7 +407,7 @@ services:
     logging: *logging
 
   grafana:
-    image: grafana/grafana:13.2.3
+    image: grafana/grafana:13.3.0
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
@@ -454,7 +454,7 @@ services:
     logging: *logging
 
   redis-exporter:
-    image: oliver006/redis_exporter:v1.93.0
+    image: oliver006/redis_exporter:v1.96.0
     profiles: ["observability"]
     environment:
       REDIS_ADDR: redis://redis:6379
