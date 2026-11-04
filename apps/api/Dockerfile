@@ -5,7 +5,7 @@
 # uv comes from its official image at a pinned version. `pip install uv`
 # installed whatever was newest at build time (builds not reproducible)
 # and left pip + uv (80MB) inside the runtime image.
-FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # ---- deps: virtualenv with runtime dependencies only ----------------------
 FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS deps
