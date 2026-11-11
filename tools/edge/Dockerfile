@@ -15,10 +15,10 @@
 # (CVE-2026-111943, crypto/x509, fixed in Go 1.26.10). Keep both tags on the
 # same Caddy version. Both images are pinned by digest as well as tag
 # (Dependabot moves both).
-FROM caddy:2.11.7-builder-alpine@sha256:d718a1d1431403c4a46698f33ad1c0f9dd5dd7fe2bae654d1027d275b6fb5fd7 AS build
+FROM caddy:2.11.8-builder-alpine@sha256:e42a64b3bc70aa3a1387bde85b930e507a378fecae5852d5bfde9dcd37d0b999 AS build
 RUN XCADDY_SETCAP=0 xcaddy build v2.11.7 --output /usr/bin/caddy
 
-FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+FROM caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
 RUN addgroup -S -g 10001 edge \
  && adduser -S -D -H -u 10001 -G edge edge \
